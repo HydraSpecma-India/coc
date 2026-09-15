@@ -6,40 +6,84 @@ import { z } from "zod";
  * require every integration variable to be present; individual integrations
  * validate their own subset when first used.
  */
+const cleanString = (val: unknown): string | undefined => {
+  if (typeof val !== "string") return undefined;
+  const trimmed = val.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+};
+
+const cleanCommentedValue = (val: unknown): string | undefined => {
+  const cleaned = cleanString(val);
+  if (!cleaned) return undefined;
+  const stripped = cleaned.split("#")[0].trim();
+  return stripped.length === 0 ? undefined : stripped;
+};
+
+const modeSchema = (defaultMode: "mock" | "live" = "mock") =>
+  z.preprocess((val) => {
+    const cleaned = cleanCommentedValue(val)?.toLowerCase();
+    if (cleaned === "mock" || cleaned === "live") return cleaned;
+    return defaultMode;
+  }, z.enum(["mock", "live"]).default(defaultMode));
+
+const logLevelSchema = z.preprocess((val) => {
+  const cleaned = cleanCommentedValue(val)?.toLowerCase();
+  if (cleaned === "debug" || cleaned === "info" || cleaned === "warn" || cleaned === "error") {
+    return cleaned;
+  }
+  return "info";
+}, z.enum(["debug", "info", "warn", "error"]).default("info"));
+
+const optionalString = z.preprocess((val) => cleanString(val), z.string().optional());
+
+const stringOrDefault = (defaultValue: string, stripComment = false) =>
+  z.preprocess((val) => {
+    const cleaned = stripComment ? cleanCommentedValue(val) : cleanString(val);
+    return cleaned ?? defaultValue;
+  }, z.string().default(defaultValue));
+
 const schema = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  APP_NAME: z.string().default("COC Platform"),
-  APP_URL: z.string().default("http://localhost:3000"),
+  NODE_ENV: z.preprocess((val) => {
+    const cleaned = cleanCommentedValue(val)?.toLowerCase();
+    if (cleaned === "development" || cleaned === "test" || cleaned === "production") return cleaned;
+    return "development";
+  }, z.enum(["development", "test", "production"]).default("development")),
 
-  AUTH_SECRET: z.string().optional(),
-  AUTH_MICROSOFT_ENTRA_ID_ID: z.string().optional(),
-  AUTH_MICROSOFT_ENTRA_ID_SECRET: z.string().optional(),
-  AUTH_MICROSOFT_ENTRA_ID_ISSUER: z.string().optional(),
-  ADMIN_EMAILS: z.string().default(""),
-  AUTH_DEV_BYPASS: z.string().default("false"),
+  APP_NAME: stringOrDefault("COC Platform"),
+  APP_URL: stringOrDefault("http://localhost:3000", true),
 
-  SUPABASE_URL: z.string().optional(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  AUTH_SECRET: optionalString,
+  AUTH_MICROSOFT_ENTRA_ID_ID: optionalString,
+  AUTH_MICROSOFT_ENTRA_ID_SECRET: optionalString,
+  AUTH_MICROSOFT_ENTRA_ID_ISSUER: optionalString,
+  ADMIN_EMAILS: stringOrDefault(""),
+  AUTH_DEV_BYPASS: z.preprocess(
+    (val) => cleanCommentedValue(val)?.toLowerCase() ?? "false",
+    z.string().default("false")
+  ),
 
-  D365_MODE: z.enum(["mock", "live"]).default("mock"),
-  D365_BASE_URL: z.string().optional(),
-  D365_TENANT_ID: z.string().optional(),
-  D365_CLIENT_ID: z.string().optional(),
-  D365_CLIENT_SECRET: z.string().optional(),
-  D365_COMPANY: z.string().default("hsin"),
-  D365_PRODUCTION_ENTITY: z.string().default("COCProductionDatas"),
-  D365_COC_ENTITY: z.string().default("COCDocuments"),
+  SUPABASE_URL: optionalString,
+  SUPABASE_SERVICE_ROLE_KEY: optionalString,
 
-  STORAGE_MODE: z.enum(["mock", "live"]).default("mock"),
-  AZURE_TENANT_ID: z.string().optional(),
-  AZURE_CLIENT_ID: z.string().optional(),
-  AZURE_CLIENT_SECRET: z.string().optional(),
-  SHAREPOINT_SITE_ID: z.string().optional(),
-  SHAREPOINT_DRIVE_ID: z.string().optional(),
-  SHAREPOINT_ROOT_FOLDER: z.string().default("COC"),
+  D365_MODE: modeSchema("mock"),
+  D365_BASE_URL: optionalString,
+  D365_TENANT_ID: optionalString,
+  D365_CLIENT_ID: optionalString,
+  D365_CLIENT_SECRET: optionalString,
+  D365_COMPANY: stringOrDefault("hsin"),
+  D365_PRODUCTION_ENTITY: stringOrDefault("COCProductionDatas"),
+  D365_COC_ENTITY: stringOrDefault("COCDocuments"),
 
-  AUTOMATION_API_KEY: z.string().optional(),
-  LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  STORAGE_MODE: modeSchema("mock"),
+  AZURE_TENANT_ID: optionalString,
+  AZURE_CLIENT_ID: optionalString,
+  AZURE_CLIENT_SECRET: optionalString,
+  SHAREPOINT_SITE_ID: optionalString,
+  SHAREPOINT_DRIVE_ID: optionalString,
+  SHAREPOINT_ROOT_FOLDER: stringOrDefault("COC"),
+
+  AUTOMATION_API_KEY: optionalString,
+  LOG_LEVEL: logLevelSchema,
 });
 
 export type Env = z.infer<typeof schema>;
