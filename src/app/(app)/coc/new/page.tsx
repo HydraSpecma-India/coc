@@ -1,14 +1,42 @@
-import { requireSession } from "@/lib/auth/guards";
-import { PageHeader, EmptyState } from "@/components/ui";
+import { requireCapability, requireSession } from "@/lib/auth/guards";
+import { listTemplates } from "@/lib/db/repositories/templates";
+import { CocWizard } from "./coc-wizard";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "New COC" };
 
-export default async function Page() {
-  await requireSession();
+export default async function NewCocPage() {
+  const session = await requireSession();
+  await requireCapability("createCoc");
+
+  const rawTemplates = await listTemplates();
+  const templateSummaries = rawTemplates.map((t) => {
+    const activeVer = t.versions.find((v) => v.id === t.active_version_id);
+    return {
+      id: t.id,
+      name: t.name,
+      template_type: t.template_type,
+      active_version_id: t.active_version_id,
+      active_version_number: activeVer?.version_number || 1,
+    };
+  });
+
+  // If no template in database yet, provide fallback default
+  const templates = templateSummaries.length > 0 ? templateSummaries : [
+    {
+      id: "00000000-0000-0000-0000-000000000001",
+      name: "Standard HydraSpecma A4 Certificate",
+      template_type: "COC",
+      active_version_id: "00000000-0000-0000-0000-000000000002",
+      active_version_number: 1,
+    },
+  ];
+
   return (
-    <div className="mx-auto max-w-5xl">
-      <PageHeader title="New COC" />
-      <EmptyState title="Arrives in Phase 3" description="The COC creation workflow is built in Phase 3 (D365FO retrieval, manual fields, preview) and Phase 4/5 (PDF, SharePoint, D365FO update, history)." />
-    </div>
+    <CocWizard
+      templates={templates}
+      userName={session.user.name || ""}
+      userEmail={session.user.email || ""}
+    />
   );
 }

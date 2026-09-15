@@ -1,14 +1,12 @@
 import { requireSession } from "@/lib/auth/guards";
-import { PageHeader, EmptyState } from "@/components/ui";
+import { listCocDocuments } from "@/lib/db/repositories/coc";
+import { HistoryClient } from "./history-client";
 
+export const dynamic = "force-dynamic";
 export const metadata = { title: "COC History" };
 
-export default async function Page() {
+export default async function CocHistoryPage() {
   await requireSession();
-  return (
-    <div className="mx-auto max-w-5xl">
-      <PageHeader title="COC History" />
-      <EmptyState title="Arrives in Phase 5" description="The COC creation workflow is built in Phase 3 (D365FO retrieval, manual fields, preview) and Phase 4/5 (PDF, SharePoint, D365FO update, history)." />
-    </div>
-  );
+  const docs = await listCocDocuments({ limit: 50 });
+  return <HistoryClient initialDocs={docs} />;
 }

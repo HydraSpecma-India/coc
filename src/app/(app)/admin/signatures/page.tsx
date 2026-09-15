@@ -1,14 +1,16 @@
 import { requireSession } from "@/lib/auth/guards";
-import { PageHeader, EmptyState } from "@/components/ui";
+import { supabaseAdmin } from "@/lib/db/supabase-admin";
+import { SignaturesClient } from "./signatures-client";
 
-export const metadata = { title: "Signatures" };
+export const dynamic = "force-dynamic";
+export const metadata = { title: "Stored Signatures" };
 
-export default async function Page() {
+export default async function SignaturesPage() {
   await requireSession();
-  return (
-    <div className="mx-auto max-w-5xl">
-      <PageHeader title="Signatures" />
-      <EmptyState title="Arrives in Phase 4" description="This section is part of a later development phase. The database schema and API contracts for it are already defined in docs/." />
-    </div>
-  );
+  const { data } = await supabaseAdmin()
+    .from("coc_signatures")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  return <SignaturesClient initialSignatures={data || []} />;
 }

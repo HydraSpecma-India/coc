@@ -1,64 +1,597 @@
 "use client";
 
 import { useState } from "react";
-import { PageHeader, Card, CardHeader, CardBody, Badge, Button, Input } from "@/components/ui";
+import {
+  PageHeader,
+  Card,
+  CardHeader,
+  CardBody,
+  Badge,
+  Button,
+  Input,
+  Field,
+  Label,
+  Alert,
+} from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
-import type { SettingRow } from "@/lib/db/repositories/settings";
+import { KeyRound, Database, Share2, Cog, RefreshCw, CheckCircle2, AlertCircle } from "lucide-react";
 
-interface Integrations {
-  entra: boolean; supabase: boolean; automation: boolean;
-  d365: { mode: string; configured: boolean };
-  sharepoint: { mode: string; configured: boolean };
+interface ConfigState {
+  entra: {
+    clientId: string;
+    clientSecret: string;
+    hasSecret: boolean;
+    tenantId: string;
+    issuer: string;
+    adminEmails: string;
+    devBypass: boolean;
+  };
+  d365: {
+    mode: "mock" | "live";
+    baseUrl: string;
+    tenantId: string;
+    clientId: string;
+    clientSecret: string;
+    hasSecret: boolean;
+    company: string;
+    productionEntity: string;
+    cocEntity: string;
+  };
+  sharepoint: {
+    mode: "mock" | "live";
+    tenantId: string;
+    clientId: string;
+    clientSecret: string;
+    hasSecret: boolean;
+    siteId: string;
+    driveId: string;
+    rootFolder: string;
+  };
+  app: {
+    name: string;
+    url: string;
+    automationApiKey: string;
+    hasApiKey: boolean;
+    logLevel: "debug" | "info" | "warn" | "error";
+    numberFormat: string;
+    numberAuthority: "app" | "d365";
+    enforceRemainingQty: boolean;
+    signatureRequired: boolean;
+  };
 }
 
-const Status = ({ ok, label }: { ok: boolean; label: string }) => <Badge tone={ok ? "success" : "warning"}>{label}: {ok ? "configured" : "not configured"}</Badge>;
+export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }) {
+  const [config, setConfig] = useState<ConfigState>(initialConfig);
+  const [activeTab, setActiveTab] = useState<"entra" | "d365" | "sharepoint" | "app">("d365");
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
-export function SettingsClient({ settings, integrations }: { settings: SettingRow[]; integrations: Integrations }) {
-  const [values, setValues] = useState<Record<string, string>>(Object.fromEntries(settings.map((s) => [s.key, JSON.stringify(s.value)])));
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const save = async (key: string) => {
-    setBusy(key);
+  const saveConfig = async (section: "entra" | "d365" | "sharepoint" | "app") => {
+    setSaving(true);
+    setTestResult(null);
     try {
-      const value = JSON.parse(values[key]);
-      await api("/api/settings", { method: "PUT", json: { key, value } });
-      toast.success(`${key} saved`);
+      const payload: Record<string, unknown> = {};
+      payload[section] = config[section];
+
+      const res = await api<{ ok: boolean; count: number }>("/api/admin/config", {
+        method: "PUT",
+        json: payload,
+      });
+
+      if (res.ok) {
+        toast.success("Settings saved successfully to Supabase!");
+      }
     } catch (e) {
-      toast.error("Could not save", (e as Error).message.includes("JSON") ? "Value must be valid JSON (strings in quotes)." : (e as Error).message);
+      toast.error("Failed to save settings", (e as Error).message);
     } finally {
-      setBusy(null);
+      setSaving(false);
+    }
+  };
+
+  const testConnection = async (target: "d365" | "sharepoint") => {
+    setTesting(target);
+    setTestResult(null);
+    try {
+      const res = await api<{ ok: boolean; message?: string; error?: string }>("/api/admin/config/test", {
+        method: "POST",
+        json: { target },
+      });
+      if (res.ok) {
+        setTestResult({ ok: true, message: res.message || "Connection succeeded!" });
+        toast.success("Connection test passed!");
+      } else {
+        setTestResult({ ok: false, message: res.error || "Connection test failed." });
+        toast.error("Connection test failed", res.error);
+      }
+    } catch (e) {
+      const msg = (e as Error).message;
+      setTestResult({ ok: false, message: msg });
+      toast.error("Connection test failed", msg);
+    } finally {
+      setTesting(null);
     }
   };
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <PageHeader title="System Settings" description="Application-level configuration. Secrets are never stored here – they live in Vercel environment variables." />
-      <Card className="mb-6">
-        <CardHeader title="Integrations (from environment)" />
-        <CardBody className="flex flex-wrap gap-2">
-          <Status ok={integrations.entra} label="Entra ID sign-in" />
-          <Status ok={integrations.supabase} label="Supabase" />
-          <Badge tone={integrations.d365.mode === "live" ? (integrations.d365.configured ? "success" : "danger") : "warning"}>D365FO: {integrations.d365.mode}{integrations.d365.mode === "live" && !integrations.d365.configured ? " (missing variables)" : ""}</Badge>
-          <Badge tone={integrations.sharepoint.mode === "live" ? (integrations.sharepoint.configured ? "success" : "danger") : "warning"}>SharePoint: {integrations.sharepoint.mode}{integrations.sharepoint.mode === "live" && !integrations.sharepoint.configured ? " (missing variables)" : ""}</Badge>
-          <Status ok={integrations.automation} label="Automation API key" />
-        </CardBody>
-      </Card>
-      <Card>
-        <CardHeader title="Application settings" description="Values are JSON: strings need quotes, booleans are true/false." />
-        <CardBody className="grid gap-4">
-          {settings.map((s) => (
-            <div key={s.key} className="grid gap-1 md:grid-cols-[260px_1fr_auto] md:items-center">
-              <div>
-                <div className="font-mono text-xs font-semibold text-ink-800">{s.key}</div>
-                <div className="text-[11px] text-ink-500">{s.description}</div>
-              </div>
-              <Input value={values[s.key] ?? ""} onChange={(e) => setValues({ ...values, [s.key]: e.target.value })} className="font-mono text-xs" />
-              <Button variant="outline" size="sm" loading={busy === s.key} onClick={() => save(s.key)}>Save</Button>
+    <div className="mx-auto max-w-5xl pb-16">
+      <PageHeader
+        title="System Settings & Integrations"
+        description="Configure Dynamics 365, Microsoft Entra SSO, SharePoint, and application rules. Settings are saved to Supabase and take effect immediately."
+      />
+
+      {/* Tabs */}
+      <div className="mb-6 flex border-b border-ink-200">
+        <button
+          onClick={() => { setActiveTab("d365"); setTestResult(null); }}
+          className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            activeTab === "d365"
+              ? "border-brand-500 text-brand-700"
+              : "border-transparent text-ink-600 hover:text-ink-900"
+          }`}
+        >
+          <Database className="h-4 w-4" />
+          Dynamics 365 F&O
+        </button>
+
+        <button
+          onClick={() => { setActiveTab("entra"); setTestResult(null); }}
+          className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            activeTab === "entra"
+              ? "border-brand-500 text-brand-700"
+              : "border-transparent text-ink-600 hover:text-ink-900"
+          }`}
+        >
+          <KeyRound className="h-4 w-4" />
+          Microsoft Entra ID (SSO)
+        </button>
+
+        <button
+          onClick={() => { setActiveTab("sharepoint"); setTestResult(null); }}
+          className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            activeTab === "sharepoint"
+              ? "border-brand-500 text-brand-700"
+              : "border-transparent text-ink-600 hover:text-ink-900"
+          }`}
+        >
+          <Share2 className="h-4 w-4" />
+          SharePoint & Storage
+        </button>
+
+        <button
+          onClick={() => { setActiveTab("app"); setTestResult(null); }}
+          className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            activeTab === "app"
+              ? "border-brand-500 text-brand-700"
+              : "border-transparent text-ink-600 hover:text-ink-900"
+          }`}
+        >
+          <Cog className="h-4 w-4" />
+          App & Document Rules
+        </button>
+      </div>
+
+      {testResult && (
+        <div className="mb-6">
+          <Alert tone={testResult.ok ? "success" : "danger"} title={testResult.ok ? "Connection Successful" : "Connection Error"}>
+            <div className="flex items-center gap-2">
+              {testResult.ok ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <AlertCircle className="h-4 w-4 text-red-600" />}
+              <span>{testResult.message}</span>
             </div>
-          ))}
-        </CardBody>
-      </Card>
+          </Alert>
+        </div>
+      )}
+
+      {/* D365FO Tab */}
+      {activeTab === "d365" && (
+        <Card>
+          <CardHeader
+            title="Dynamics 365 Finance & Operations Integration"
+            description="Manage OData connection details for retrieving production orders and registering completed COCs."
+            actions={
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  loading={testing === "d365"}
+                  onClick={() => testConnection("d365")}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Test Connection
+                </Button>
+                <Button size="sm" loading={saving} onClick={() => saveConfig("d365")}>
+                  Save D365 Settings
+                </Button>
+              </div>
+            }
+          />
+          <CardBody className="space-y-4">
+            <div className="rounded-lg border border-ink-200 bg-ink-50 p-4">
+              <Label>Integration Mode</Label>
+              <div className="mt-2 flex gap-4">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="d365Mode"
+                    value="mock"
+                    checked={config.d365.mode === "mock"}
+                    onChange={() => setConfig({ ...config, d365: { ...config.d365, mode: "mock" } })}
+                    className="accent-brand-600"
+                  />
+                  <span className="font-medium">MOCK / DEMO Mode</span>
+                  <Badge tone="warning">Built-in HydraSpecma sample POs</Badge>
+                </label>
+
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="d365Mode"
+                    value="live"
+                    checked={config.d365.mode === "live"}
+                    onChange={() => setConfig({ ...config, d365: { ...config.d365, mode: "live" } })}
+                    className="accent-brand-600"
+                  />
+                  <span className="font-medium">LIVE D365FO OData</span>
+                  <Badge tone="success">Connects to your D365 tenant</Badge>
+                </label>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="D365 Base URL" hint="e.g. https://<env>.operations.dynamics.com">
+                <Input
+                  value={config.d365.baseUrl}
+                  placeholder="https://hydraspecma.operations.dynamics.com"
+                  onChange={(e) => setConfig({ ...config, d365: { ...config.d365, baseUrl: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Legal Entity / Company" hint="Default: hsin">
+                <Input
+                  value={config.d365.company}
+                  placeholder="hsin"
+                  onChange={(e) => setConfig({ ...config, d365: { ...config.d365, company: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Azure Tenant ID" hint="Directory (tenant) ID">
+                <Input
+                  value={config.d365.tenantId}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  onChange={(e) => setConfig({ ...config, d365: { ...config.d365, tenantId: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Client ID" hint="Application (client) ID for D365 API">
+                <Input
+                  value={config.d365.clientId}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  onChange={(e) => setConfig({ ...config, d365: { ...config.d365, clientId: e.target.value } })}
+                />
+              </Field>
+
+              <div className="md:col-span-2">
+                <Field
+                  label="Client Secret"
+                  hint={config.d365.hasSecret ? "(Secret currently saved. Enter new value to change.)" : "(No secret set)"}
+                >
+                  <Input
+                    type="password"
+                    value={config.d365.clientSecret}
+                    placeholder={config.d365.hasSecret ? "••••••••••••" : "Enter D365 client secret"}
+                    onChange={(e) => setConfig({ ...config, d365: { ...config.d365, clientSecret: e.target.value } })}
+                  />
+                </Field>
+              </div>
+
+              <Field label="Production Data Entity" hint="Default: COCProductionDatas">
+                <Input
+                  value={config.d365.productionEntity}
+                  onChange={(e) => setConfig({ ...config, d365: { ...config.d365, productionEntity: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="COC Document Entity" hint="Default: COCDocuments">
+                <Input
+                  value={config.d365.cocEntity}
+                  onChange={(e) => setConfig({ ...config, d365: { ...config.d365, cocEntity: e.target.value } })}
+                />
+              </Field>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
+      {/* Entra ID Tab */}
+      {activeTab === "entra" && (
+        <Card>
+          <CardHeader
+            title="Microsoft Entra ID (Azure AD SSO)"
+            description="Configure single sign-on authentication for HydraSpecma users."
+            actions={
+              <Button size="sm" loading={saving} onClick={() => saveConfig("entra")}>
+                Save Entra Settings
+              </Button>
+            }
+          />
+          <CardBody className="space-y-4">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-amber-900">Development Sign-in Bypass</div>
+                  <div className="text-xs text-amber-700">
+                    Enables a one-click local login with role selection on preview and production without needing Entra ID setup.
+                  </div>
+                </div>
+                <label className="relative inline-flex cursor-pointer items-center">
+                  <input
+                    type="checkbox"
+                    checked={config.entra.devBypass}
+                    onChange={(e) => setConfig({ ...config, entra: { ...config.entra, devBypass: e.target.checked } })}
+                    className="h-5 w-5 rounded border-ink-300 accent-amber-600 cursor-pointer"
+                  />
+                  <span className="ml-2 text-sm font-medium text-amber-900">
+                    {config.entra.devBypass ? "Enabled" : "Disabled"}
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Application (Client) ID">
+                <Input
+                  value={config.entra.clientId}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  onChange={(e) => setConfig({ ...config, entra: { ...config.entra, clientId: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Directory (Tenant) ID">
+                <Input
+                  value={config.entra.tenantId}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  onChange={(e) => setConfig({ ...config, entra: { ...config.entra, tenantId: e.target.value } })}
+                />
+              </Field>
+
+              <div className="md:col-span-2">
+                <Field
+                  label="Client Secret"
+                  hint={config.entra.hasSecret ? "(Secret currently saved. Enter new value to change.)" : "(No secret set)"}
+                >
+                  <Input
+                    type="password"
+                    value={config.entra.clientSecret}
+                    placeholder={config.entra.hasSecret ? "••••••••••••" : "Enter Entra ID client secret"}
+                    onChange={(e) => setConfig({ ...config, entra: { ...config.entra, clientSecret: e.target.value } })}
+                  />
+                </Field>
+              </div>
+
+              <Field label="Custom Issuer URL" hint="Leave blank to auto-generate from Tenant ID">
+                <Input
+                  value={config.entra.issuer}
+                  placeholder="https://login.microsoftonline.com/<tenant-id>/v2.0"
+                  onChange={(e) => setConfig({ ...config, entra: { ...config.entra, issuer: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Bootstrap Admin Emails" hint="Comma-separated emails granting Admin role">
+                <Input
+                  value={config.entra.adminEmails}
+                  placeholder="manigandan.parthasarathi@hydraspecma.com"
+                  onChange={(e) => setConfig({ ...config, entra: { ...config.entra, adminEmails: e.target.value } })}
+                />
+              </Field>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
+      {/* SharePoint Tab */}
+      {activeTab === "sharepoint" && (
+        <Card>
+          <CardHeader
+            title="SharePoint & Document Storage"
+            description="Manage Microsoft Graph API settings for storing finalized COC PDF certificates in SharePoint."
+            actions={
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  loading={testing === "sharepoint"}
+                  onClick={() => testConnection("sharepoint")}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Test Connection
+                </Button>
+                <Button size="sm" loading={saving} onClick={() => saveConfig("sharepoint")}>
+                  Save SharePoint Settings
+                </Button>
+              </div>
+            }
+          />
+          <CardBody className="space-y-4">
+            <div className="rounded-lg border border-ink-200 bg-ink-50 p-4">
+              <Label>Storage Mode</Label>
+              <div className="mt-2 flex gap-4">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="spMode"
+                    value="mock"
+                    checked={config.sharepoint.mode === "mock"}
+                    onChange={() => setConfig({ ...config, sharepoint: { ...config.sharepoint, mode: "mock" } })}
+                    className="accent-brand-600"
+                  />
+                  <span className="font-medium">MOCK / Supabase Storage</span>
+                  <Badge tone="info">Saves PDFs in Supabase coc-generated bucket</Badge>
+                </label>
+
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="spMode"
+                    value="live"
+                    checked={config.sharepoint.mode === "live"}
+                    onChange={() => setConfig({ ...config, sharepoint: { ...config.sharepoint, mode: "live" } })}
+                    className="accent-brand-600"
+                  />
+                  <span className="font-medium">LIVE SharePoint via Graph API</span>
+                  <Badge tone="success">Direct upload to company document library</Badge>
+                </label>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Azure Tenant ID">
+                <Input
+                  value={config.sharepoint.tenantId}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  onChange={(e) => setConfig({ ...config, sharepoint: { ...config.sharepoint, tenantId: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Application (Client) ID">
+                <Input
+                  value={config.sharepoint.clientId}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  onChange={(e) => setConfig({ ...config, sharepoint: { ...config.sharepoint, clientId: e.target.value } })}
+                />
+              </Field>
+
+              <div className="md:col-span-2">
+                <Field
+                  label="Client Secret"
+                  hint={config.sharepoint.hasSecret ? "(Secret currently saved. Enter new value to change.)" : "(No secret set)"}
+                >
+                  <Input
+                    type="password"
+                    value={config.sharepoint.clientSecret}
+                    placeholder={config.sharepoint.hasSecret ? "••••••••••••" : "Enter Graph client secret"}
+                    onChange={(e) => setConfig({ ...config, sharepoint: { ...config.sharepoint, clientSecret: e.target.value } })}
+                  />
+                </Field>
+              </div>
+
+              <Field label="SharePoint Site ID" hint="hostname,siteCollectionId,siteId">
+                <Input
+                  value={config.sharepoint.siteId}
+                  placeholder="hydraspecma.sharepoint.com,uuid,uuid"
+                  onChange={(e) => setConfig({ ...config, sharepoint: { ...config.sharepoint, siteId: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Document Library / Drive ID">
+                <Input
+                  value={config.sharepoint.driveId}
+                  placeholder="b!..."
+                  onChange={(e) => setConfig({ ...config, sharepoint: { ...config.sharepoint, driveId: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Root Folder" hint="Default: COC">
+                <Input
+                  value={config.sharepoint.rootFolder}
+                  placeholder="COC"
+                  onChange={(e) => setConfig({ ...config, sharepoint: { ...config.sharepoint, rootFolder: e.target.value } })}
+                />
+              </Field>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
+      {/* App & Document Rules Tab */}
+      {activeTab === "app" && (
+        <Card>
+          <CardHeader
+            title="Application & Document Rules"
+            description="Numbering formats, quantity policies, and branding."
+            actions={
+              <Button size="sm" loading={saving} onClick={() => saveConfig("app")}>
+                Save Rules
+              </Button>
+            }
+          />
+          <CardBody className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Application Name">
+                <Input
+                  value={config.app.name}
+                  onChange={(e) => setConfig({ ...config, app: { ...config.app, name: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Public Application URL">
+                <Input
+                  value={config.app.url}
+                  placeholder="https://coc.hydraspecma.com"
+                  onChange={(e) => setConfig({ ...config, app: { ...config.app, url: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="COC Number Format Pattern" hint="Tokens: {yyyy}, {seq:4}">
+                <Input
+                  value={config.app.numberFormat}
+                  placeholder="COC-{yyyy}-{seq:4}"
+                  onChange={(e) => setConfig({ ...config, app: { ...config.app, numberFormat: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Number Authority" hint="Who issues official COC number">
+                <select
+                  value={config.app.numberAuthority}
+                  onChange={(e) => setConfig({ ...config, app: { ...config.app, numberAuthority: e.target.value as "app" | "d365" } })}
+                  className="w-full rounded-md border border-ink-300 bg-white px-2.5 h-9 text-sm text-ink-900"
+                >
+                  <option value="app">App (Automatic sequential number)</option>
+                  <option value="d365">Dynamics 365 (Assigned by D365)</option>
+                </select>
+              </Field>
+
+              <div className="md:col-span-2 space-y-3 pt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.app.enforceRemainingQty}
+                    onChange={(e) => setConfig({ ...config, app: { ...config.app, enforceRemainingQty: e.target.checked } })}
+                    className="h-4 w-4 rounded border-ink-300 accent-ink-900"
+                  />
+                  <span className="text-sm text-ink-800 font-medium">Enforce Remaining Quantity Validation</span>
+                  <span className="text-xs text-ink-500">(Blocks issuing COCs exceeding the remaining sales order quantity)</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.app.signatureRequired}
+                    onChange={(e) => setConfig({ ...config, app: { ...config.app, signatureRequired: e.target.checked } })}
+                    className="h-4 w-4 rounded border-ink-300 accent-ink-900"
+                  />
+                  <span className="text-sm text-ink-800 font-medium">Require Digital Signature for Completion</span>
+                  <span className="text-xs text-ink-500">(Operator or quality inspector must sign on canvas before finalizing)</span>
+                </label>
+              </div>
+
+              <div className="md:col-span-2 pt-2">
+                <Field
+                  label="Automation API Key (Power Automate)"
+                  hint={config.app.hasApiKey ? "(API key set. Enter new value to rotate)" : "(Optional)"}
+                >
+                  <Input
+                    type="password"
+                    value={config.app.automationApiKey}
+                    placeholder={config.app.hasApiKey ? "••••••••••••" : "Enter API key for automated headless requests"}
+                    onChange={(e) => setConfig({ ...config, app: { ...config.app, automationApiKey: e.target.value } })}
+                  />
+                </Field>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      )}
     </div>
   );
 }

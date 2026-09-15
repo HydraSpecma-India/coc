@@ -1,0 +1,140 @@
+import { NextResponse } from "next/server";
+import { requireRole, requireSession } from "@/lib/auth/guards";
+import { getActiveConfig, invalidateConfigCache } from "@/lib/config";
+import { supabaseAdmin } from "@/lib/db/supabase-admin";
+import { logger } from "@/lib/logging/logger";
+
+function maskSecret(val: string): string {
+  if (!val || val.length === 0) return "";
+  if (val.length <= 6) return "••••••";
+  return "••••••••" + val.slice(-4);
+}
+
+export async function GET() {
+  const session = await requireSession();
+  requireRole(session, ["Admin"]);
+
+  const config = await getActiveConfig();
+
+  return NextResponse.json({
+    ok: true,
+    config: {
+      entra: {
+        clientId: config.entra.clientId,
+        clientSecret: maskSecret(config.entra.clientSecret),
+        hasSecret: Boolean(config.entra.clientSecret),
+        tenantId: config.entra.tenantId,
+        issuer: config.entra.issuer,
+        adminEmails: config.entra.adminEmails,
+        devBypass: config.entra.devBypass,
+      },
+      d365: {
+        mode: config.d365.mode,
+        baseUrl: config.d365.baseUrl,
+        tenantId: config.d365.tenantId,
+        clientId: config.d365.clientId,
+        clientSecret: maskSecret(config.d365.clientSecret),
+        hasSecret: Boolean(config.d365.clientSecret),
+        company: config.d365.company,
+        productionEntity: config.d365.productionEntity,
+        cocEntity: config.d365.cocEntity,
+      },
+      sharepoint: {
+        mode: config.sharepoint.mode,
+        tenantId: config.sharepoint.tenantId,
+        clientId: config.sharepoint.clientId,
+        clientSecret: maskSecret(config.sharepoint.clientSecret),
+        hasSecret: Boolean(config.sharepoint.clientSecret),
+        siteId: config.sharepoint.siteId,
+        driveId: config.sharepoint.driveId,
+        rootFolder: config.sharepoint.rootFolder,
+      },
+      app: {
+        name: config.app.name,
+        url: config.app.url,
+        automationApiKey: maskSecret(config.app.automationApiKey),
+        hasApiKey: Boolean(config.app.automationApiKey),
+        logLevel: config.app.logLevel,
+        numberFormat: config.app.numberFormat,
+        numberAuthority: config.app.numberAuthority,
+        enforceRemainingQty: config.app.enforceRemainingQty,
+        signatureRequired: config.app.signatureRequired,
+      },
+    },
+  });
+}
+
+export async function PUT(req: Request) {
+  const session = await requireSession();
+  requireRole(session, ["Admin"]);
+
+  const body = await req.json();
+  const { entra, d365, sharepoint, app } = body;
+
+  const updates: Array<{ key: string; value: unknown; description?: string }> = [];
+
+  // Helper: only update secret if provided and not masked
+  const shouldUpdateSecret = (secretVal: unknown) => {
+    return typeof secretVal === "string" && secretVal.trim().length > 0 && !secretVal.startsWith("••••");
+  };
+
+  if (entra) {
+    if (entra.clientId !== undefined) updates.push({ key: "auth.entra.clientId", value: entra.clientId.trim() });
+    if (shouldUpdateSecret(entra.clientSecret)) updates.push({ key: "auth.entra.clientSecret", value: entra.clientSecret.trim() });
+    if (entra.tenantId !== undefined) updates.push({ key: "auth.entra.tenantId", value: entra.tenantId.trim() });
+    if (entra.issuer !== undefined) updates.push({ key: "auth.entra.issuer", value: entra.issuer.trim() });
+    if (entra.adminEmails !== undefined) updates.push({ key: "auth.adminEmails", value: entra.adminEmails.trim() });
+    if (entra.devBypass !== undefined) updates.push({ key: "auth.devBypass", value: Boolean(entra.devBypass) });
+  }
+
+  if (d365) {
+    if (d365.mode !== undefined) updates.push({ key: "d365.mode", value: d365.mode === "live" ? "live" : "mock" });
+    if (d365.baseUrl !== undefined) updates.push({ key: "d365.baseUrl", value: d365.baseUrl.trim() });
+    if (d365.tenantId !== undefined) updates.push({ key: "d365.tenantId", value: d365.tenantId.trim() });
+    if (d365.clientId !== undefined) updates.push({ key: "d365.clientId", value: d365.clientId.trim() });
+    if (shouldUpdateSecret(d365.clientSecret)) updates.push({ key: "d365.clientSecret", value: d365.clientSecret.trim() });
+    if (d365.company !== undefined) updates.push({ key: "d365.company", value: d365.company.trim() });
+    if (d365.productionEntity !== undefined) updates.push({ key: "d365.productionEntity", value: d365.productionEntity.trim() });
+    if (d365.cocEntity !== undefined) updates.push({ key: "d365.cocEntity", value: d365.cocEntity.trim() });
+  }
+
+  if (sharepoint) {
+    if (sharepoint.mode !== undefined) updates.push({ key: "sharepoint.mode", value: sharepoint.mode === "live" ? "live" : "mock" });
+    if (sharepoint.tenantId !== undefined) updates.push({ key: "sharepoint.tenantId", value: sharepoint.tenantId.trim() });
+    if (sharepoint.clientId !== undefined) updates.push({ key: "sharepoint.clientId", value: sharepoint.clientId.trim() });
+    if (shouldUpdateSecret(sharepoint.clientSecret)) updates.push({ key: "sharepoint.clientSecret", value: sharepoint.clientSecret.trim() });
+    if (sharepoint.siteId !== undefined) updates.push({ key: "sharepoint.siteId", value: sharepoint.siteId.trim() });
+    if (sharepoint.driveId !== undefined) updates.push({ key: "sharepoint.driveId", value: sharepoint.driveId.trim() });
+    if (sharepoint.rootFolder !== undefined) updates.push({ key: "sharepoint.rootFolder", value: sharepoint.rootFolder.trim() });
+  }
+
+  if (app) {
+    if (app.name !== undefined) updates.push({ key: "app.name", value: app.name.trim() });
+    if (app.url !== undefined) updates.push({ key: "app.url", value: app.url.trim() });
+    if (shouldUpdateSecret(app.automationApiKey)) updates.push({ key: "app.automationApiKey", value: app.automationApiKey.trim() });
+    if (app.logLevel !== undefined) updates.push({ key: "app.logLevel", value: app.logLevel });
+    if (app.numberFormat !== undefined) updates.push({ key: "coc.numberFormat", value: app.numberFormat.trim() });
+    if (app.numberAuthority !== undefined) updates.push({ key: "coc.numberAuthority", value: app.numberAuthority });
+    if (app.enforceRemainingQty !== undefined) updates.push({ key: "coc.enforceRemainingQty", value: Boolean(app.enforceRemainingQty) });
+    if (app.signatureRequired !== undefined) updates.push({ key: "signature.required", value: Boolean(app.signatureRequired) });
+  }
+
+  const sb = supabaseAdmin();
+  for (const item of updates) {
+    const { error } = await sb.from("coc_app_settings").upsert({
+      key: item.key,
+      value: item.value,
+      updated_at: new Date().toISOString(),
+      updated_by: session.user.id && /^[0-9a-f-]{36}$/i.test(session.user.id) ? session.user.id : null,
+    });
+    if (error) {
+      logger.error("Failed to upsert setting", { key: item.key, error: error.message });
+      return NextResponse.json({ ok: false, error: `Failed to save ${item.key}: ${error.message}` }, { status: 500 });
+    }
+  }
+
+  invalidateConfigCache();
+  logger.info("Admin updated system settings", { updatedCount: updates.length, user: session.user.email });
+
+  return NextResponse.json({ ok: true, count: updates.length });
+}

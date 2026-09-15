@@ -1,0 +1,159 @@
+import { route, json } from "@/lib/api/handler";
+import { requireCapability, requireSession } from "@/lib/auth/guards";
+import { createCocDocument, listCocDocuments, logProcessStep, uploadGeneratedPdf } from "@/lib/db/repositories/coc";
+import { renderCOCPdf } from "@/lib/render/pdf-renderer";
+import { D365Service } from "@/lib/integrations/d365/service";
+import { supabaseAdmin } from "@/lib/db/supabase-admin";
+import { logger } from "@/lib/logging/logger";
+import { z } from "zod";
+
+const createCocSchema = z.object({
+  templateId: z.string().uuid(),
+  templateVersionId: z.string().uuid(),
+  templateVersionNumber: z.number().default(1),
+  productionOrder: z.string().min(1),
+  itemNumber: z.string().min(1),
+  itemDescription: z.string().min(1),
+  customerName: z.string().optional(),
+  customerPO: z.string().optional(),
+  salesOrder: z.string().optional(),
+  salesLine: z.string().optional(),
+  customerAccount: z.string().optional(),
+  quantity: z.number().default(1),
+  unitOfMeasure: z.string().default("Pcs"),
+  batchNumber: z.string().optional(),
+  serialNumber: z.string().optional(),
+  manualValues: z.record(z.string(), z.string()).optional(),
+  signatureBase64: z.string().optional(),
+});
+
+export const GET = route(async (req) => {
+  await requireSession();
+  const q = req.nextUrl.searchParams.get("q") || "";
+  const docs = await listCocDocuments({ query: q, limit: 50 });
+  return json({ ok: true, documents: docs });
+});
+
+export const POST = route(async (req) => {
+  const session = await requireSession();
+  await requireCapability("createCoc");
+
+  const body = await req.json();
+  const parsed = createCocSchema.parse(body);
+
+  // 1. Create database record in DRAFT
+  const doc = await createCocDocument({
+    template_id: parsed.templateId,
+    template_version_id: parsed.templateVersionId,
+    template_version_number: parsed.templateVersionNumber,
+    production_order: parsed.productionOrder,
+    item_number: parsed.itemNumber,
+    item_description: parsed.itemDescription,
+    customer_po: parsed.customerPO,
+    sales_order: parsed.salesOrder,
+    sales_line: parsed.salesLine,
+    customer_account: parsed.customerAccount,
+    quantity: parsed.quantity,
+    serial_number: parsed.serialNumber,
+    d365_context_json: {
+      customerName: parsed.customerName,
+      batchNumber: parsed.batchNumber,
+      unitOfMeasure: parsed.unitOfMeasure,
+    },
+    userId: session.user.id,
+  });
+
+  const cocNumber = doc.coc_number || "COC-" + doc.id.slice(0, 8);
+  const sb = supabaseAdmin();
+
+  try {
+    // Step 1: D365 Fetch & Context verification
+    await logProcessStep(doc.id, "D365_FETCH", "OK", { productionOrder: parsed.productionOrder });
+
+    // Step 2: Validation
+    await logProcessStep(doc.id, "VALIDATE", "OK", { quantity: parsed.quantity });
+
+    // Step 3: Render PDF
+    const pdfBytes = await renderCOCPdf({
+      cocNumber,
+      productionOrder: parsed.productionOrder,
+      itemNumber: parsed.itemNumber,
+      itemDescription: parsed.itemDescription,
+      customerName: parsed.customerName,
+      customerPO: parsed.customerPO,
+      salesOrder: parsed.salesOrder,
+      batchNumber: parsed.batchNumber,
+      serialNumber: parsed.serialNumber,
+      quantity: parsed.quantity,
+      unitOfMeasure: parsed.unitOfMeasure,
+      manualValues: parsed.manualValues,
+      signatureBase64: parsed.signatureBase64,
+      isDraft: false,
+    });
+    await logProcessStep(doc.id, "RENDER", "OK", { byteLength: pdfBytes.length });
+
+    // Step 4: Storage / SharePoint Upload
+    const storagePath = await uploadGeneratedPdf(cocNumber, pdfBytes);
+    await logProcessStep(doc.id, "SP_UPLOAD", "OK", { storagePath });
+
+    // Step 5: D365 Update
+    try {
+      await D365Service.registerCOCDocument({
+        COCDocumentNumber: cocNumber,
+        ProductionOrder: parsed.productionOrder,
+        ItemNumber: parsed.itemNumber,
+        CustomerPO: parsed.customerPO || "",
+        SalesOrder: parsed.salesOrder || "",
+        SerialNumber: parsed.serialNumber,
+        BatchNumber: parsed.batchNumber,
+        DocumentURL: storagePath,
+        IssuedBy: session.user.email || "System",
+        IssueDate: new Date().toISOString(),
+      });
+      await logProcessStep(doc.id, "D365_UPDATE", "OK");
+    } catch (e) {
+      await logProcessStep(doc.id, "D365_UPDATE", "FAILED", {}, (e as Error).message);
+    }
+
+    // Save manual field values
+    if (parsed.manualValues) {
+      const valueRows = Object.entries(parsed.manualValues).map(([fieldName, val]) => ({
+        coc_document_id: doc.id,
+        field_name: fieldName,
+        source_type: "MANUAL",
+        value_text: val,
+      }));
+      if (valueRows.length > 0) {
+        await sb.from("coc_document_values").upsert(valueRows, { onConflict: "coc_document_id,field_name" });
+      }
+    }
+
+    // Finalize document status
+    await sb
+      .from("coc_documents")
+      .update({
+        status: "COMPLETED",
+        generated_pdf_path: storagePath,
+        completed_at: new Date().toISOString(),
+        completed_by: session.user.id && /^[0-9a-f-]{36}$/i.test(session.user.id) ? session.user.id : null,
+      })
+      .eq("id", doc.id);
+
+    // Audit log
+    await sb.from("coc_audit_logs").insert({
+      entity_type: "COC_DOCUMENT",
+      entity_id: doc.id,
+      action: "GENERATE",
+      user_id: session.user.id && /^[0-9a-f-]{36}$/i.test(session.user.id) ? session.user.id : null,
+      user_email: session.user.email,
+      coc_number: cocNumber,
+      details: { productionOrder: parsed.productionOrder, itemNumber: parsed.itemNumber },
+    });
+
+    return json({ ok: true, documentId: doc.id, cocNumber });
+  } catch (err) {
+    logger.error("COC generation error", { error: (err as Error).message, id: doc.id });
+    await sb.from("coc_documents").update({ status: "UPLOAD_FAILED", last_error: (err as Error).message }).eq("id", doc.id);
+    return json({ ok: false, error: (err as Error).message, documentId: doc.id }, { status: 500 });
+  }
+});

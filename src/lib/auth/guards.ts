@@ -19,3 +19,12 @@ export async function requireCapability(capability: Capability): Promise<AppSess
   if (!can(session.user.role, capability)) throw Errors.forbidden(capability.replace(/([A-Z])/g, " $1").toLowerCase());
   return session;
 }
+
+/** Throws 403 unless the session has one of the required roles. */
+export function requireRole(session: Session, roles: readonly string[]): void {
+  const role = (session?.user as { role?: string })?.role;
+  if (!role || !roles.includes(role)) {
+    throw Errors.forbidden(`Requires role: ${roles.join(" or ")}`);
+  }
+}
+

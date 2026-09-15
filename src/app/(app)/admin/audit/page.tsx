@@ -1,14 +1,17 @@
-import { requireSession } from "@/lib/auth/guards";
-import { PageHeader, EmptyState } from "@/components/ui";
+import { requireCapability } from "@/lib/auth/guards";
+import { supabaseAdmin } from "@/lib/db/supabase-admin";
+import { AuditClient } from "./audit-client";
 
-export const metadata = { title: "Audit Logs" };
+export const dynamic = "force-dynamic";
+export const metadata = { title: "Audit Trail" };
 
-export default async function Page() {
-  await requireSession();
-  return (
-    <div className="mx-auto max-w-5xl">
-      <PageHeader title="Audit Logs" />
-      <EmptyState title="Arrives in Phase 5" description="This section is part of a later development phase. The database schema and API contracts for it are already defined in docs/." />
-    </div>
-  );
+export default async function AuditPage() {
+  await requireCapability("viewAudit");
+  const { data } = await supabaseAdmin()
+    .from("coc_audit_logs")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  return <AuditClient initialLogs={data || []} />;
 }
