@@ -255,6 +255,7 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
 }
 
 function ElementNode({ el, selected, draggable, onClick, onDragEnd }: { el: TemplateElement; selected: boolean; draggable: boolean; onClick: (e: KonvaEventObject<MouseEvent>) => void; onDragEnd: (e: KonvaEventObject<DragEvent>) => void }) {
+  const fields = useDesigner((s) => s.fields);
   if (el.hidden) return null;
   const size = el.type === "table" ? tableSize(el) : { width: el.width, height: el.height };
   return (
@@ -272,6 +273,8 @@ function ElementNode({ el, selected, draggable, onClick, onDragEnd }: { el: Temp
       onTap={onClick as never}
       onDragEnd={onDragEnd}
     >
+      {/* hit area so the whole element is clickable/draggable even though inner shapes don't listen */}
+      <Rect width={size.width} height={Math.max(size.height, 6)} y={size.height < 6 ? -3 : 0} fill="transparent" />
       <ElementBody el={el} fields={fields} selected={selected} designMode />
       {el.locked && selected && <Rect width={size.width} height={size.height} stroke="#ef4444" strokeWidth={1} dash={[2, 2]} listening={false} />}
     </Group>

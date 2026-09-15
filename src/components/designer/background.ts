@@ -8,7 +8,7 @@
 const cache = new Map<string, Promise<HTMLImageElement>>();
 
 async function loadPdfjs() {
-  const pdfjs = await import("pdfjs-dist");
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
   return pdfjs;
 }
