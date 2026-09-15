@@ -8,8 +8,8 @@ import { logger } from "@/lib/logging/logger";
 import { z } from "zod";
 
 const createCocSchema = z.object({
-  templateId: z.string().uuid(),
-  templateVersionId: z.string().uuid(),
+  templateId: z.string().optional(),
+  templateVersionId: z.string().optional(),
   templateVersionNumber: z.number().default(1),
   productionOrder: z.string().min(1),
   itemNumber: z.string().min(1),
@@ -41,11 +41,44 @@ export const POST = route(async (req) => {
   const body = await req.json();
   const parsed = createCocSchema.parse(body);
 
+  const sb = supabaseAdmin();
+  let tplId = parsed.templateId;
+  let tplVerId = parsed.templateVersionId;
+  let tplVerNum = parsed.templateVersionNumber;
+
+  const isUuid = (val?: string) => Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
+  if (!isUuid(tplId) || !isUuid(tplVerId) || tplId === "00000000-0000-0000-0000-000000000001") {
+    const { data: dbTpl } = await sb
+      .from("coc_templates")
+      .select("id, active_version_id, name")
+      .limit(1)
+      .maybeSingle();
+
+    if (dbTpl) {
+      tplId = dbTpl.id;
+      tplVerId = dbTpl.active_version_id;
+      if (!tplVerId) {
+        const { data: dbVer } = await sb
+          .from("coc_template_versions")
+          .select("id, version_number")
+          .eq("template_id", dbTpl.id)
+          .order("version_number", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (dbVer) {
+          tplVerId = dbVer.id;
+          tplVerNum = dbVer.version_number;
+        }
+      }
+    }
+  }
+
   // 1. Create database record in DRAFT
   const doc = await createCocDocument({
-    template_id: parsed.templateId,
-    template_version_id: parsed.templateVersionId,
-    template_version_number: parsed.templateVersionNumber,
+    template_id: tplId!,
+    template_version_id: tplVerId!,
+    template_version_number: tplVerNum,
     production_order: parsed.productionOrder,
     item_number: parsed.itemNumber,
     item_description: parsed.itemDescription,
@@ -64,7 +97,6 @@ export const POST = route(async (req) => {
   });
 
   const cocNumber = doc.coc_number || "COC-" + doc.id.slice(0, 8);
-  const sb = supabaseAdmin();
 
   try {
     // Step 1: D365 Fetch & Context verification

@@ -36,11 +36,12 @@ export function errorResponse(err: unknown, requestId: string, log: Logger = log
   }
   if (err instanceof ZodError) {
     log.warn("validation failed", { issues: err.issues.length });
+    const issueSummary = err.issues.map((i) => `${i.path.join(".") || "field"}: ${i.message}`).join(", ");
     return NextResponse.json(
       {
         error: {
           code: "VALIDATION",
-          message: "The request contains invalid data.",
+          message: `The request contains invalid data: ${issueSummary}`,
           issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
           requestId,
         },

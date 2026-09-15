@@ -2,6 +2,25 @@ import type { D365ProductionOrder } from "./types";
 
 export const MOCK_PRODUCTION_ORDERS: D365ProductionOrder[] = [
   {
+    ProductionOrder: "PO-2026-10710747",
+    ItemNumber: "1071.0747",
+    ItemDescription: "High Pressure Flexible Hose Assembly DN16 - 1071.0747",
+    CustomerAccount: "CUST-HSIN",
+    CustomerName: "HydraSpecma India Pvt Ltd",
+    CustomerPO: "PO-HSIN-74721",
+    SalesOrder: "SO-74721",
+    SalesLine: "1.0",
+    BatchNumber: "HS-B24-0747",
+    SerialNumber: "SN-1071-0747-01",
+    DrawingNumber: "DWG-1071-0747",
+    Revision: "Rev 01",
+    Quantity: 100,
+    UnitOfMeasure: "Pcs",
+    RemainingQuantity: 100,
+    Specification: "ISO 9001:2015 / EN 853 2SN, Max WP 350 bar",
+    DeliveryDate: "2026-09-28",
+  },
+  {
     ProductionOrder: "PO-2026-00101",
     ItemNumber: "HS-HOSE-050-2SN",
     ItemDescription: 'Hydraulic Hose Assembly 1/2" 2SN BSP Female 1200mm',

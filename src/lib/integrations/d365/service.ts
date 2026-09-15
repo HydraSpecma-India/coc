@@ -4,6 +4,12 @@ import { logger } from "@/lib/logging/logger";
 import { MOCK_PRODUCTION_ORDERS } from "./mock";
 import type { D365ProductionOrder, D365COCDocumentRecord } from "./types";
 
+export interface D365SearchResult {
+  mode: "mock" | "live";
+  orders: D365ProductionOrder[];
+  error?: string;
+}
+
 export class D365Service {
   private static async getAccessToken(config: Awaited<ReturnType<typeof getActiveConfig>>["d365"]): Promise<string> {
     const tokenUrl = `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`;
@@ -27,29 +33,41 @@ export class D365Service {
     return data.access_token;
   }
 
-  static async searchProductionOrders(query = ""): Promise<D365ProductionOrder[]> {
+  static async searchProductionOrders(query = ""): Promise<D365SearchResult> {
     const config = (await getActiveConfig()).d365;
 
     if (config.mode === "mock") {
       const q = query.trim().toLowerCase();
-      if (!q) return MOCK_PRODUCTION_ORDERS;
-      return MOCK_PRODUCTION_ORDERS.filter(
+      if (!q) return { mode: "mock", orders: MOCK_PRODUCTION_ORDERS };
+      const filtered = MOCK_PRODUCTION_ORDERS.filter(
         (po) =>
           po.ProductionOrder.toLowerCase().includes(q) ||
           po.ItemNumber.toLowerCase().includes(q) ||
           po.CustomerName.toLowerCase().includes(q) ||
           po.CustomerPO.toLowerCase().includes(q) ||
-          po.BatchNumber.toLowerCase().includes(q)
+          po.BatchNumber.toLowerCase().includes(q) ||
+          po.DrawingNumber?.toLowerCase().includes(q)
       );
+      return { mode: "mock", orders: filtered };
     }
 
     // Live D365FO OData
+    if (!config.baseUrl || !config.clientId || !config.clientSecret || !config.tenantId) {
+      return {
+        mode: "live",
+        orders: [],
+        error: "Dynamics 365 credentials are not configured. Please go to Admin -> System Settings to configure Base URL, Tenant ID, Client ID, and Secret.",
+      };
+    }
+
     try {
       const token = await this.getAccessToken(config);
-      const filterClause = query
-        ? `&$filter=contains(ProductionOrder,'${encodeURIComponent(query)}') or contains(ItemNumber,'${encodeURIComponent(query)}')`
+      const cleanQ = query.trim().replace(/'/g, "''");
+      const filterClause = cleanQ
+        ? `&$filter=ProductionOrder eq '${cleanQ}' or ItemNumber eq '${cleanQ}' or startswith(ProductionOrder,'${cleanQ}') or startswith(ItemNumber,'${cleanQ}') or CustomerPO eq '${cleanQ}'`
         : "";
-      const url = `${config.baseUrl.replace(/\/+$/, "")}/data/${config.productionEntity}?cross-company=true&$top=25${filterClause}`;
+      const entity = config.productionEntity || "COCProductionDatas";
+      const url = `${config.baseUrl.replace(/\/+$/, "")}/data/${entity}?cross-company=true&$top=50${filterClause}`;
 
       const res = await fetch(url, {
         headers: {
@@ -61,14 +79,40 @@ export class D365Service {
       });
 
       if (!res.ok) {
-        throw new Error(`D365 OData request failed (${res.status}): ${await res.text()}`);
+        const errText = await res.text();
+        throw new Error(`D365 OData HTTP ${res.status}: ${errText}`);
       }
 
       const json = await res.json();
-      return json.value as D365ProductionOrder[];
+      const rawList = Array.isArray(json.value) ? json.value : [];
+      const normalized: D365ProductionOrder[] = rawList.map((item: Record<string, unknown>) => ({
+        ProductionOrder: String(item.ProductionOrder || item.ProdId || item.Id || ""),
+        ItemNumber: String(item.ItemNumber || item.ItemId || item.ProductNumber || ""),
+        ItemDescription: String(item.ItemDescription || item.ItemName || item.ProductName || item.Description || ""),
+        CustomerAccount: String(item.CustomerAccount || item.CustAccount || ""),
+        CustomerName: String(item.CustomerName || item.CustName || item.Name || ""),
+        CustomerPO: String(item.CustomerPO || item.PurchOrderFormNum || item.CustomerRef || ""),
+        SalesOrder: String(item.SalesOrder || item.SalesId || ""),
+        SalesLine: String(item.SalesLine || item.SalesLineNumber || item.LineNum || "1.0"),
+        BatchNumber: String(item.BatchNumber || item.InventBatchId || ""),
+        SerialNumber: String(item.SerialNumber || item.InventSerialId || item.TopLevelSerialNumber || ""),
+        DrawingNumber: String(item.DrawingNumber || ""),
+        Revision: String(item.Revision || ""),
+        Quantity: Number(item.ProductionQuantity || item.Quantity || item.QtySched || 1),
+        UnitOfMeasure: String(item.UnitOfMeasure || item.UnitId || "Pcs"),
+        RemainingQuantity: Number(item.RemainingQuantity || item.SalesQuantity || item.Quantity || 0),
+        Specification: String(item.Specification || ""),
+        DeliveryDate: String(item.DeliveryDate || item.CustomerRequestedDate || ""),
+      }));
+
+      return { mode: "live", orders: normalized };
     } catch (err) {
-      logger.error("D365 live query failed, falling back to mock", { error: (err as Error).message });
-      return MOCK_PRODUCTION_ORDERS;
+      logger.error("D365 live query failed", { error: (err as Error).message });
+      return {
+        mode: "live",
+        orders: [],
+        error: (err as Error).message,
+      };
     }
   }
 

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   PageHeader,
   Card,
@@ -27,6 +28,11 @@ import {
   ArrowLeft,
   RotateCcw,
   Sparkles,
+  Plus,
+  ExternalLink,
+  AlertCircle,
+  Info,
+  Edit3,
 } from "lucide-react";
 
 interface TemplateSummary {
@@ -60,6 +66,52 @@ export function CocWizard({
   const [searchResults, setSearchResults] = useState<D365ProductionOrder[]>([]);
   const [selectedPO, setSelectedPO] = useState<D365ProductionOrder | null>(null);
   const [searching, setSearching] = useState(false);
+  const [d365Mode, setD365Mode] = useState<"mock" | "live">("mock");
+  const [d365Error, setD365Error] = useState<string | null>(null);
+
+  // Manual / Custom Order Entry
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [manualOrder, setManualOrder] = useState<D365ProductionOrder>({
+    ProductionOrder: "",
+    ItemNumber: "",
+    ItemDescription: "",
+    CustomerAccount: "CUST-HSIN",
+    CustomerName: "HydraSpecma India Pvt Ltd",
+    CustomerPO: "",
+    SalesOrder: "",
+    SalesLine: "1.0",
+    BatchNumber: "",
+    SerialNumber: "",
+    DrawingNumber: "",
+    Revision: "Rev 01",
+    Quantity: 100,
+    UnitOfMeasure: "Pcs",
+    RemainingQuantity: 100,
+    Specification: "ISO 9001:2015 / HydraSpecma Technical Standard",
+  });
+
+  const openManualOrder = (defaultQuery = "") => {
+    const q = defaultQuery.trim();
+    setManualOrder({
+      ProductionOrder: q || "PO-" + new Date().getFullYear() + "-001",
+      ItemNumber: q || "1071.0747",
+      ItemDescription: q ? `HydraSpecma Assembly (${q})` : "Hydraulic Hose Assembly DN16",
+      CustomerAccount: "CUST-HSIN",
+      CustomerName: "HydraSpecma India Pvt Ltd",
+      CustomerPO: "PO-HSIN-74721",
+      SalesOrder: "SO-74721",
+      SalesLine: "1.0",
+      BatchNumber: "HS-B24-0747",
+      SerialNumber: "SN-0747-01",
+      DrawingNumber: q ? `DWG-${q}` : "DWG-1071-0747",
+      Revision: "Rev 01",
+      Quantity: 100,
+      UnitOfMeasure: "Pcs",
+      RemainingQuantity: 100,
+      Specification: "ISO 9001:2015 / EN 853 2SN, Max WP 350 bar",
+    });
+    setShowManualModal(true);
+  };
 
   // Quality & Manual Form Fields
   const [manualFields, setManualFields] = useState({
@@ -90,16 +142,25 @@ export function CocWizard({
 
   const searchOrders = async (q: string) => {
     setSearching(true);
+    setD365Error(null);
     try {
-      const res = await api<{ ok: boolean; orders: D365ProductionOrder[] }>(
+      const res = await api<{ ok: boolean; mode?: "mock" | "live"; orders: D365ProductionOrder[]; error?: string }>(
         `/api/d365/production-orders?q=${encodeURIComponent(q)}`
       );
-      setSearchResults(res.orders || []);
-      if (!selectedPO && res.orders?.length > 0) {
-        setSelectedPO(res.orders[0]);
+      if (res.mode) setD365Mode(res.mode);
+      if (res.error) setD365Error(res.error);
+
+      const orders = res.orders || [];
+      setSearchResults(orders);
+      if (orders.length > 0) {
+        if (!selectedPO || !orders.some((o) => o.ProductionOrder === selectedPO.ProductionOrder)) {
+          setSelectedPO(orders[0]);
+        }
       }
     } catch (e) {
-      toast.error("Failed to load production orders", (e as Error).message);
+      const msg = (e as Error).message;
+      setD365Error(msg);
+      toast.error("Failed to load production orders", msg);
     } finally {
       setSearching(false);
     }
@@ -326,8 +387,59 @@ export function CocWizard({
             <CardHeader
               title="2. Lookup Dynamics 365 Production Order"
               description="Search by Production Order Number, Item Number, Customer PO, or Batch."
+              actions={
+                <div className="flex items-center gap-2">
+                  <Badge tone={d365Mode === "live" ? "success" : "warning"}>
+                    {d365Mode === "live" ? "D365 Live ERP" : "Demo / Mock Mode"}
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openManualOrder(poQuery)}
+                    className="gap-1.5 text-xs"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Enter Manually
+                  </Button>
+                </div>
+              }
             />
             <CardBody className="space-y-4">
+              {/* Integration Status Notice */}
+              {d365Mode === "mock" && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3.5 text-xs text-amber-900">
+                  <div className="flex items-start gap-2">
+                    <Info className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="font-semibold">Demo / Simulated Mode Active</p>
+                      <p className="mt-0.5 text-amber-800">
+                        Orders shown are built-in sample HydraSpecma assemblies. To retrieve live orders directly from your Microsoft Dynamics 365 F&O tenant, enter your credentials in{" "}
+                        <Link href="/admin/settings" className="font-bold underline hover:text-amber-950">
+                          Admin Settings &rarr;
+                        </Link>
+                        . You can also click <strong>&quot;Enter Manually&quot;</strong> to use any custom production order number.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {d365Error && (
+                <Alert tone="danger" title="Dynamics 365 ERP Notice">
+                  <div className="text-xs space-y-1">
+                    <p>{d365Error}</p>
+                    <p>
+                      Please verify your D365 URL, tenant, and client secret in{" "}
+                      <Link href="/admin/settings" className="font-bold underline">
+                        System Settings
+                      </Link>
+                      , or enter your order details manually below.
+                    </p>
+                  </div>
+                </Alert>
+              )}
+
+              {/* Search Bar */}
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-ink-400" />
@@ -335,53 +447,227 @@ export function CocWizard({
                     value={poQuery}
                     onChange={(e) => setPoQuery(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && searchOrders(poQuery)}
-                    placeholder="Search production order (e.g. PO-2026-00101, Hose, JCB)..."
+                    placeholder="Search production order or item number (e.g. 1071.0747, PO-2026-10710747, Hose)..."
                     className="pl-9"
                   />
                 </div>
                 <Button loading={searching} onClick={() => searchOrders(poQuery)}>
                   Search D365
                 </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => openManualOrder(poQuery)}
+                  className="gap-1.5"
+                >
+                  <Plus className="h-4 w-4" />
+                  Custom Order
+                </Button>
               </div>
 
-              {/* Order Cards */}
-              <div className="grid gap-3 sm:grid-cols-2">
-                {searchResults.map((order) => {
-                  const isSelected = selectedPO?.ProductionOrder === order.ProductionOrder;
-                  return (
-                    <div
-                      key={order.ProductionOrder}
-                      onClick={() => setSelectedPO(order)}
-                      className={`cursor-pointer rounded-lg border p-4 transition-all ${
-                        isSelected
-                          ? "border-brand-500 bg-brand-50/30 ring-2 ring-brand-400"
-                          : "border-ink-200 hover:border-ink-300 bg-white"
-                      }`}
+              {/* Manual Order Entry Form */}
+              {showManualModal && (
+                <div className="rounded-xl border-2 border-brand-400 bg-brand-50/50 p-5 space-y-4 animate-in fade-in">
+                  <div className="flex items-center justify-between border-b border-brand-200 pb-3">
+                    <div>
+                      <h4 className="font-semibold text-ink-900 flex items-center gap-2">
+                        <Edit3 className="h-4 w-4 text-brand-600" />
+                        Custom / Manual Production Order
+                      </h4>
+                      <p className="text-xs text-ink-600">
+                        Specify details for this production order to proceed with COC generation.
+                      </p>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => setShowManualModal(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+                    <Field label="Production Order Number *">
+                      <Input
+                        value={manualOrder.ProductionOrder}
+                        onChange={(e) => setManualOrder({ ...manualOrder, ProductionOrder: e.target.value })}
+                        placeholder="e.g. 1071.0747"
+                        required
+                      />
+                    </Field>
+                    <Field label="Item / Part Number *">
+                      <Input
+                        value={manualOrder.ItemNumber}
+                        onChange={(e) => setManualOrder({ ...manualOrder, ItemNumber: e.target.value })}
+                        placeholder="e.g. 1071.0747"
+                        required
+                      />
+                    </Field>
+                    <Field label="Item Description *">
+                      <Input
+                        value={manualOrder.ItemDescription}
+                        onChange={(e) => setManualOrder({ ...manualOrder, ItemDescription: e.target.value })}
+                        placeholder="e.g. High Pressure Flexible Hose Assembly"
+                        required
+                      />
+                    </Field>
+                    <Field label="Customer Name">
+                      <Input
+                        value={manualOrder.CustomerName}
+                        onChange={(e) => setManualOrder({ ...manualOrder, CustomerName: e.target.value })}
+                        placeholder="e.g. HydraSpecma India Pvt Ltd"
+                      />
+                    </Field>
+                    <Field label="Customer PO">
+                      <Input
+                        value={manualOrder.CustomerPO}
+                        onChange={(e) => setManualOrder({ ...manualOrder, CustomerPO: e.target.value })}
+                        placeholder="e.g. PO-HSIN-74721"
+                      />
+                    </Field>
+                    <Field label="Batch Number">
+                      <Input
+                        value={manualOrder.BatchNumber}
+                        onChange={(e) => setManualOrder({ ...manualOrder, BatchNumber: e.target.value })}
+                        placeholder="e.g. HS-B24-0747"
+                      />
+                    </Field>
+                    <Field label="Quantity">
+                      <Input
+                        type="number"
+                        value={manualOrder.Quantity}
+                        onChange={(e) => setManualOrder({ ...manualOrder, Quantity: Number(e.target.value) || 1 })}
+                      />
+                    </Field>
+                    <Field label="Unit of Measure">
+                      <Input
+                        value={manualOrder.UnitOfMeasure}
+                        onChange={(e) => setManualOrder({ ...manualOrder, UnitOfMeasure: e.target.value })}
+                        placeholder="Pcs"
+                      />
+                    </Field>
+                    <Field label="Sales Order Number">
+                      <Input
+                        value={manualOrder.SalesOrder}
+                        onChange={(e) => setManualOrder({ ...manualOrder, SalesOrder: e.target.value })}
+                        placeholder="e.g. SO-74721"
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-brand-200">
+                    <Button variant="outline" size="sm" onClick={() => setShowManualModal(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        if (!manualOrder.ProductionOrder.trim() || !manualOrder.ItemNumber.trim() || !manualOrder.ItemDescription.trim()) {
+                          toast.error("Please fill required fields: Production Order, Item Number, and Description");
+                          return;
+                        }
+                        setSelectedPO({ ...manualOrder });
+                        setShowManualModal(false);
+                        toast.success(`Applied order: ${manualOrder.ProductionOrder}`);
+                      }}
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-xs font-bold text-brand-700">
-                          {order.ProductionOrder}
-                        </span>
-                        <Badge tone="info">{order.CustomerName}</Badge>
+                      Apply This Production Order
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Order Cards / Empty State */}
+              {searchResults.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-ink-300 p-8 text-center bg-ink-50/50">
+                  <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-ink-100 text-ink-500">
+                    <Search className="h-5 w-5" />
+                  </div>
+                  <h4 className="mt-3 text-sm font-semibold text-ink-900">
+                    {poQuery ? `No orders found matching "${poQuery}"` : "No production orders available"}
+                  </h4>
+                  <p className="mt-1 text-xs text-ink-500 max-w-md mx-auto">
+                    {d365Mode === "mock"
+                      ? "The mock dataset did not find this item. You can click below to use this number directly, or switch to Live ERP in Admin Settings."
+                      : "Dynamics 365 did not return any records for this query. You can enter details manually to continue."}
+                  </p>
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                    <Button
+                      size="sm"
+                      onClick={() => openManualOrder(poQuery)}
+                      className="gap-1.5"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Use &quot;{poQuery || "1071.0747"}&quot; as Production Order
+                    </Button>
+                    <Link
+                      href="/admin/settings"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:text-brand-800 underline"
+                    >
+                      D365 Settings <ExternalLink className="h-3 w-3" />
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {searchResults.map((order) => {
+                    const isSelected = selectedPO?.ProductionOrder === order.ProductionOrder;
+                    return (
+                      <div
+                        key={order.ProductionOrder}
+                        onClick={() => setSelectedPO(order)}
+                        className={`cursor-pointer rounded-lg border p-4 transition-all ${
+                          isSelected
+                            ? "border-brand-500 bg-brand-50/30 ring-2 ring-brand-400 shadow-sm"
+                            : "border-ink-200 hover:border-ink-300 bg-white"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-xs font-bold text-brand-700">
+                            {order.ProductionOrder}
+                          </span>
+                          <Badge tone="info">{order.CustomerName}</Badge>
+                        </div>
+                        <div className="mt-1 font-semibold text-sm text-ink-900 line-clamp-1">
+                          {order.ItemDescription}
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-ink-600">
+                          <div>Part: <span className="font-mono font-medium text-ink-900">{order.ItemNumber}</span></div>
+                          <div>PO: <span className="font-medium">{order.CustomerPO || "—"}</span></div>
+                          <div>Batch: <span className="font-mono">{order.BatchNumber || "—"}</span></div>
+                          <div>Qty: <span className="font-semibold text-ink-900">{order.Quantity} {order.UnitOfMeasure}</span></div>
+                        </div>
                       </div>
-                      <div className="mt-1 font-semibold text-sm text-ink-900 line-clamp-1">
-                        {order.ItemDescription}
-                      </div>
-                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-ink-600">
-                        <div>Part: <span className="font-mono font-medium">{order.ItemNumber}</span></div>
-                        <div>PO: <span className="font-medium">{order.CustomerPO}</span></div>
-                        <div>Batch: <span className="font-mono">{order.BatchNumber}</span></div>
-                        <div>Qty: <span className="font-semibold text-ink-900">{order.Quantity} {order.UnitOfMeasure}</span></div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Selected Order Summary */}
+              {selectedPO && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+                      <div>
+                        <div className="text-sm font-semibold text-emerald-950">
+                          Selected Order: <span className="font-mono font-bold text-brand-700">{selectedPO.ProductionOrder}</span> &bull; {selectedPO.ItemDescription}
+                        </div>
+                        <div className="text-xs text-emerald-800 mt-0.5">
+                          Part: <span className="font-mono font-medium">{selectedPO.ItemNumber}</span> &bull; Customer: <strong>{selectedPO.CustomerName}</strong> &bull; Qty: <strong>{selectedPO.Quantity} {selectedPO.UnitOfMeasure}</strong>
+                        </div>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-
-              {selectedPO && (
-                <Alert tone="success" title={`Selected: ${selectedPO.ProductionOrder} – ${selectedPO.ItemDescription}`}>
-                  Ready to proceed with quality inspection verification for customer <strong>{selectedPO.CustomerName}</strong>.
-                </Alert>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setManualOrder({ ...selectedPO });
+                        setShowManualModal(true);
+                      }}
+                      className="text-xs gap-1"
+                    >
+                      <Edit3 className="h-3.5 w-3.5" />
+                      Edit Details
+                    </Button>
+                  </div>
+                </div>
               )}
 
               <div className="flex justify-end pt-4 border-t border-ink-200">
