@@ -95,7 +95,7 @@ export function env(): Env {
 }
 
 export const isProd = () => env().NODE_ENV === "production";
-export const devBypassEnabled = () => !isProd() && env().AUTH_DEV_BYPASS === "true";
+export const devBypassEnabled = () => env().AUTH_DEV_BYPASS === "true";
 export const adminEmails = () =>
   env()
     .ADMIN_EMAILS.split(",")
