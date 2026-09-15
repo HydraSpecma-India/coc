@@ -1,0 +1,279 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Stage, Layer, Rect, Group, Transformer, Image as KImage, Line } from "react-konva";
+import Konva from "konva";
+import type { KonvaEventObject } from "konva/lib/Node";
+import { useDesigner } from "./store";
+import { ElementBody, tableSize } from "./elements";
+import { loadBackgroundImage } from "./background";
+import type { TemplateElement } from "@/lib/template/schema";
+import type { ElementType } from "@/lib/template/schema";
+
+interface Props {
+  assetMimeTypes: Record<string, string>;
+  onDropElement?: (type: ElementType, x: number, y: number, extra?: Record<string, unknown>) => void;
+}
+
+const GRID = 5;
+const snap = (v: number, on: boolean) => (on ? Math.round(v / GRID) * GRID : Math.round(v * 100) / 100);
+
+export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
+  const template = useDesigner((s) => s.template);
+  const pageIndex = useDesigner((s) => s.pageIndex);
+  const zoom = useDesigner((s) => s.zoom);
+  const selectedIds = useDesigner((s) => s.selectedIds);
+  const readOnly = useDesigner((s) => s.readOnly);
+  const gridSnap = useDesigner((s) => s.gridSnap);
+  const showGrid = useDesigner((s) => s.showGrid);
+  const { select, toggleSelect, commit } = useDesigner();
+
+  const stageRef = useRef<Konva.Stage>(null);
+  const trRef = useRef<Konva.Transformer>(null);
+  const layerRef = useRef<Konva.Layer>(null);
+  const [bgState, setBgState] = useState<{ key: string; img: HTMLImageElement | null; error: string | null }>({ key: "", img: null, error: null });
+  const [marquee, setMarquee] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const [dropTarget, setDropTarget] = useState(false);
+
+  const page = template?.pages[pageIndex];
+  const pw = template?.page.width ?? 595;
+  const ph = template?.page.height ?? 842;
+
+  // ── background ───────────────────────────────────────────────────────────
+  const bgKey = page?.background ? `${page.background.assetId}:${page.background.pageIndex}` : "";
+  useEffect(() => {
+    let alive = true;
+    const b = page?.background;
+    if (!b) return;
+    const key = `${b.assetId}:${b.pageIndex}`;
+    const mime = assetMimeTypes[b.assetId] ?? "application/pdf";
+    loadBackgroundImage(b.assetId, mime, b.pageIndex)
+      .then((img) => alive && setBgState({ key, img, error: null }))
+      .catch((e) => alive && setBgState({ key, img: null, error: (e as Error).message }));
+    return () => {
+      alive = false;
+    };
+  }, [page?.background, assetMimeTypes]);
+  const bg = bgState.key === bgKey ? bgState.img : null;
+  const bgError = bgState.key === bgKey ? bgState.error : null;
+
+  // ── transformer binding ──────────────────────────────────────────────────
+  useEffect(() => {
+    const tr = trRef.current;
+    const layer = layerRef.current;
+    if (!tr || !layer) return;
+    const nodes = selectedIds
+      .map((id) => layer.findOne(`#${CSS.escape(id)}`))
+      .filter((n): n is Konva.Node => Boolean(n) && !(n as Konva.Node).getAttr("locked"));
+    tr.nodes(readOnly ? [] : nodes);
+    tr.getLayer()?.batchDraw();
+  }, [selectedIds, page?.elements, readOnly, zoom]);
+
+  // ── mouse: selection + marquee ───────────────────────────────────────────
+  const onMouseDown = (e: KonvaEventObject<MouseEvent>) => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const clickedEmpty = e.target === stage || e.target.name() === "page-bg";
+    if (!clickedEmpty) return;
+    if (!e.evt.shiftKey) select([]);
+    const p = stage.getRelativePointerPosition();
+    if (p) setMarquee({ x1: p.x, y1: p.y, x2: p.x, y2: p.y });
+  };
+  const onMouseMove = () => {
+    if (!marquee) return;
+    const p = stageRef.current?.getRelativePointerPosition();
+    if (p) setMarquee({ ...marquee, x2: p.x, y2: p.y });
+  };
+  const onMouseUp = () => {
+    if (!marquee || !page) return;
+    const box = { x: Math.min(marquee.x1, marquee.x2), y: Math.min(marquee.y1, marquee.y2), w: Math.abs(marquee.x2 - marquee.x1), h: Math.abs(marquee.y2 - marquee.y1) };
+    if (box.w > 3 && box.h > 3) {
+      const hits = page.elements.filter((el) => !el.hidden && el.x < box.x + box.w && el.x + el.width > box.x && el.y < box.y + box.h && el.y + el.height > box.y).map((e) => e.id);
+      select(hits);
+    }
+    setMarquee(null);
+  };
+
+  const onElementClick = (e: KonvaEventObject<MouseEvent>, id: string) => {
+    e.cancelBubble = true;
+    if (readOnly) return select([id]);
+    if (e.evt.shiftKey) toggleSelect(id);
+    else if (!selectedIds.includes(id)) select([id]);
+  };
+
+  // ── drag / transform ─────────────────────────────────────────────────────
+  const onDragEnd = (e: KonvaEventObject<DragEvent>, id: string) => {
+    const node = e.target;
+    const dx = snap(node.x(), gridSnap) - (page?.elements.find((el) => el.id === id)?.x ?? 0);
+    const dy = snap(node.y(), gridSnap) - (page?.elements.find((el) => el.id === id)?.y ?? 0);
+    const ids = selectedIds.includes(id) ? selectedIds : [id];
+    commit((t) => {
+      for (const el of t.pages[pageIndex].elements) {
+        if (ids.includes(el.id) && !el.locked) {
+          el.x = snap(el.x + dx, gridSnap);
+          el.y = snap(el.y + dy, gridSnap);
+        }
+      }
+    });
+    // Konva already moved the dragged node; other selected nodes were moved by the transformer group drag
+  };
+
+  const onTransformEnd = () => {
+    const tr = trRef.current;
+    if (!tr) return;
+    const patches: Record<string, Record<string, unknown>> = {};
+    for (const node of tr.nodes()) {
+      const id = node.id();
+      const sx = node.scaleX();
+      const sy = node.scaleY();
+      const el = page?.elements.find((e) => e.id === id);
+      if (!el) continue;
+      const w = Math.max(el.type === "line" ? 0 : 4, el.width * sx);
+      const h = Math.max(el.type === "line" ? 0 : 4, el.height * sy);
+      node.scaleX(1);
+      node.scaleY(1);
+      const patch: Record<string, unknown> = { x: snap(node.x(), gridSnap), y: snap(node.y(), gridSnap), width: snap(w, gridSnap), height: snap(h, gridSnap), rotation: Math.round(node.rotation() * 10) / 10 };
+      if (el.type === "table") {
+        // scale columns proportionally, keep row heights
+        const ratio = w / el.width;
+        patch.columns = el.columns.map((c) => ({ ...c, width: Math.max(5, Math.round(c.width * ratio * 100) / 100) }));
+        const rowRatio = h / el.height;
+        patch.rowHeight = Math.max(6, Math.round(el.rowHeight * rowRatio * 100) / 100);
+        patch.headerHeight = Math.max(6, Math.round(el.headerHeight * rowRatio * 100) / 100);
+      }
+      patches[id] = patch;
+    }
+    commit((t) => {
+      for (const el of t.pages[pageIndex].elements) if (patches[el.id]) Object.assign(el, patches[el.id]);
+    });
+  };
+
+  // ── HTML5 drop from palette ──────────────────────────────────────────────
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDropTarget(false);
+      const stage = stageRef.current;
+      if (!stage || !onDropElement || readOnly) return;
+      const raw = e.dataTransfer.getData("application/x-coc-element");
+      if (!raw) return;
+      const data = JSON.parse(raw) as { type: ElementType; extra?: Record<string, unknown>; width?: number; height?: number };
+      stage.setPointersPositions(e.nativeEvent);
+      const p = stage.getRelativePointerPosition();
+      if (!p) return;
+      const w = data.width ?? 140;
+      const h = data.height ?? 18;
+      onDropElement(data.type, snap(p.x - w / 2, gridSnap), snap(p.y - h / 2, gridSnap), data.extra);
+    },
+    [onDropElement, readOnly, gridSnap],
+  );
+
+  // ── grid lines ───────────────────────────────────────────────────────────
+  const gridLines = useMemo(() => {
+    if (!showGrid) return null;
+    const lines: React.ReactNode[] = [];
+    for (let x = 0; x <= pw; x += 10) lines.push(<Line key={`gx${x}`} points={[x, 0, x, ph]} stroke={x % 50 === 0 ? "#cbd5e1" : "#e8ecf1"} strokeWidth={0.5} listening={false} />);
+    for (let y = 0; y <= ph; y += 10) lines.push(<Line key={`gy${y}`} points={[0, y, pw, y]} stroke={y % 50 === 0 ? "#cbd5e1" : "#e8ecf1"} strokeWidth={0.5} listening={false} />);
+    return lines;
+  }, [showGrid, pw, ph]);
+
+  if (!template || !page) return null;
+
+  return (
+    <div
+      className="relative inline-block shadow-xl"
+      style={{ width: pw * zoom, height: ph * zoom, outline: dropTarget ? "2px dashed #f2b705" : undefined }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        if (!dropTarget) setDropTarget(true);
+      }}
+      onDragLeave={() => setDropTarget(false)}
+      onDrop={onDrop}
+    >
+      <Stage
+        ref={stageRef}
+        width={pw * zoom}
+        height={ph * zoom}
+        scaleX={zoom}
+        scaleY={zoom}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onTouchStart={onMouseDown as never}
+      >
+        <Layer listening={false}>
+          <Rect name="page-bg" x={0} y={0} width={pw} height={ph} fill="#ffffff" />
+          {bg && <KImage image={bg} x={0} y={0} width={pw} height={ph} opacity={page.background?.opacity ?? 1} />}
+          {gridLines}
+        </Layer>
+        <Layer ref={layerRef}>
+          <Rect name="page-bg" x={0} y={0} width={pw} height={ph} fill="rgba(0,0,0,0.001)" />
+          {page.elements.map((el) => (
+            <ElementNode
+              key={el.id}
+              el={el}
+              selected={selectedIds.includes(el.id)}
+              draggable={!readOnly && !el.locked}
+              onClick={(e) => onElementClick(e, el.id)}
+              onDragEnd={(e) => onDragEnd(e, el.id)}
+            />
+          ))}
+          <Transformer
+            ref={trRef}
+            rotateEnabled
+            rotationSnaps={[0, 90, 180, 270]}
+            keepRatio={false}
+            ignoreStroke
+            anchorSize={7}
+            anchorStroke="#0f172a"
+            anchorFill="#ffffff"
+            borderStroke="#0f172a"
+            borderDash={[3, 3]}
+            boundBoxFunc={(oldBox, newBox) => (newBox.width < 2 || newBox.height < 0 ? oldBox : newBox)}
+            onTransformEnd={onTransformEnd}
+          />
+          {marquee && (
+            <Rect
+              x={Math.min(marquee.x1, marquee.x2)}
+              y={Math.min(marquee.y1, marquee.y2)}
+              width={Math.abs(marquee.x2 - marquee.x1)}
+              height={Math.abs(marquee.y2 - marquee.y1)}
+              fill="rgba(15,23,42,0.08)"
+              stroke="#0f172a"
+              strokeWidth={1 / zoom}
+              dash={[4, 3]}
+              listening={false}
+            />
+          )}
+        </Layer>
+      </Stage>
+      {bgError && <div className="absolute left-2 top-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700">Background failed: {bgError}</div>}
+      {page.background && !bg && !bgError && <div className="absolute left-2 top-2 rounded bg-white/80 px-2 py-1 text-xs text-ink-500">Rendering background…</div>}
+    </div>
+  );
+}
+
+function ElementNode({ el, selected, draggable, onClick, onDragEnd }: { el: TemplateElement; selected: boolean; draggable: boolean; onClick: (e: KonvaEventObject<MouseEvent>) => void; onDragEnd: (e: KonvaEventObject<DragEvent>) => void }) {
+  if (el.hidden) return null;
+  const size = el.type === "table" ? tableSize(el) : { width: el.width, height: el.height };
+  return (
+    <Group
+      id={el.id}
+      x={el.x}
+      y={el.y}
+      width={size.width}
+      height={size.height}
+      rotation={el.rotation}
+      opacity={el.opacity}
+      draggable={draggable}
+      locked={el.locked}
+      onClick={onClick}
+      onTap={onClick as never}
+      onDragEnd={onDragEnd}
+    >
+      <ElementBody el={el} fields={fields} selected={selected} designMode />
+      {el.locked && selected && <Rect width={size.width} height={size.height} stroke="#ef4444" strokeWidth={1} dash={[2, 2]} listening={false} />}
+    </Group>
+  );
+}

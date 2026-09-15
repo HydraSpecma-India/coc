@@ -9,9 +9,24 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
+    "@supabase/supabase-js": "^2.116.0",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.4.0",
+    "konva": "^10.5.0",
+    "lucide-react": "^1.46.0",
+    "nanoid": "^6.0.1",
     "next": "16.3.5",
+    "next-auth": "^5.0.0-beta.32",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.3.289",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-konva": "^19.2.7",
+    "tailwind-merge": "^3.7.0",
+    "use-image": "^1.1.4",
+    "zod": "^4.6.5",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
