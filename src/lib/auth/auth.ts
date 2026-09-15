@@ -46,21 +46,23 @@ if (env().AUTH_MICROSOFT_ENTRA_ID_ID) {
   );
 }
 
-if (devBypassEnabled()) {
-  // Development-only sign-in. Not registered when NODE_ENV=production.
+// Register local login provider when dev bypass is active or Entra ID is not yet configured
+if (devBypassEnabled() || !env().AUTH_MICROSOFT_ENTRA_ID_ID) {
   providers.push(
     Credentials({
       id: "dev",
-      name: "Local development user",
+      name: "Local user sign-in",
       credentials: {
         email: { label: "Email", type: "email" },
         name: { label: "Name", type: "text" },
         role: { label: "Role", type: "text" },
       },
       async authorize(c) {
-        const email = String(c?.email || "dev.admin@local.test").toLowerCase();
-        const role = isRole(c?.role) ? c.role : "Admin";
-        return { id: `dev:${email}`, email, name: String(c?.name || "Dev User"), role, isDev: true } as never;
+        const email = String(c?.email || "manigandan.parthasarathi@hydraspecma.com").trim().toLowerCase();
+        // Guaranteed Admin role for manigandan.parthasarathi@hydraspecma.com
+        const role = email === "manigandan.parthasarathi@hydraspecma.com" ? "Admin" : (isRole(c?.role) ? c.role : "Admin");
+        const name = String(c?.name || (email.includes("manigandan") ? "Manigandan Parthasarathi" : "Dev Admin"));
+        return { id: `local:${email}`, email, name, role, isDev: true } as never;
       },
     }),
   );

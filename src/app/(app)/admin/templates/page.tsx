@@ -9,9 +9,25 @@ export const metadata = { title: "Templates" };
 
 export default async function TemplatesPage() {
   const session = await requireCapability("viewTemplates");
-  const [templates, types] = await Promise.all([
-    listTemplates(),
-    getSetting<string[]>("template.types", ["COC"]),
-  ]);
-  return <TemplatesClient templates={templates} templateTypes={types} canManage={can(session.user.role, "manageTemplates")} />;
+  let templates: Awaited<ReturnType<typeof listTemplates>> = [];
+  let types = ["COC"];
+
+  try {
+    const [t, s] = await Promise.all([
+      listTemplates(),
+      getSetting<string[]>("template.types", ["COC"]),
+    ]);
+    templates = t;
+    types = s;
+  } catch (e) {
+    console.error("TemplatesPage DB error:", e);
+  }
+
+  return (
+    <TemplatesClient
+      templates={templates}
+      templateTypes={types}
+      canManage={can(session.user.role, "manageTemplates")}
+    />
+  );
 }
