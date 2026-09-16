@@ -212,40 +212,20 @@ export class TeamsService {
       cocUrl,
     };
 
-    // Strict Microsoft Teams 28KB Limit Protection:
-    // Microsoft Teams connectors and webhooks strictly reject payloads exceeding 28KB:
-    // {"error":"The payload is too large. Please make sure the size is less than 28KB."}
-    // We attach raw binary byte representations only if the entire JSON is safely below 24KB.
+    // Always include fileContent, content, and file object for SharePoint "Create file" in Power Automate.
+    // Power Automate HTTP trigger supports payloads up to 100MB, allowing SharePoint to store the complete PDF.
     if (params.pdfBytes && params.pdfBytes.length > 0) {
       const base64Pdf = Buffer.from(params.pdfBytes).toString("base64");
-      const trialPayload = {
-        ...payload,
-        fileContent: base64Pdf,
+      payload.fileContent = base64Pdf;
+      payload.fileContentBase64 = base64Pdf;
+      payload.content = base64Pdf;
+      payload.file = {
+        name: fileName,
         content: base64Pdf,
-        file: {
-          name: fileName,
-          content: base64Pdf,
-          contentBytes: base64Pdf,
-          "$content-type": "application/pdf",
-          "$content": base64Pdf,
-        },
-        attachments: [
-          {
-            name: fileName,
-            contentType: "application/pdf",
-            content: base64Pdf,
-            contentBytes: base64Pdf,
-          },
-        ],
+        contentBytes: base64Pdf,
+        "$content-type": "application/pdf",
+        "$content": base64Pdf,
       };
-      if (JSON.stringify(trialPayload).length < 24000) {
-        Object.assign(payload, trialPayload);
-      } else {
-        logger.info(
-          "PDF binary size exceeds Teams 28KB limit. Delivered lightweight notification with direct PDF access link.",
-          { cocNumber: cocNum, pdfBytesLength: params.pdfBytes.length }
-        );
-      }
     }
 
     const controller = new AbortController();
