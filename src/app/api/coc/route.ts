@@ -6,6 +6,7 @@ import { D365Service } from "@/lib/integrations/d365/service";
 import { supabaseAdmin } from "@/lib/db/supabase-admin";
 import { logger } from "@/lib/logging/logger";
 import { Errors } from "@/lib/errors";
+import { advanceProductSequence } from "@/lib/sequences/repository";
 import { z } from "zod";
 
 const createCocSchema = z.object({
@@ -222,6 +223,15 @@ export const POST = route(async (req) => {
       coc_number: cocNumber,
       details: { productionOrder: parsed.productionOrder, itemNumber: parsed.itemNumber },
     });
+
+    // Advance continuous product sequence counter
+    if (parsed.itemNumber) {
+      try {
+        await advanceProductSequence(parsed.itemNumber, parsed.serialNumber || undefined);
+      } catch (seqErr) {
+        logger.warn("Failed to advance product sequence", { error: (seqErr as Error).message });
+      }
+    }
 
     return json({ ok: true, documentId: doc.id, cocNumber });
   } catch (err) {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Save, Undo2, Redo2, ZoomIn, ZoomOut, Maximize, Upload, Grid3X3, Magnet, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Rocket, Lock } from "lucide-react";
+import { ArrowLeft, Save, Undo2, Redo2, ZoomIn, ZoomOut, Maximize, Upload, Grid3X3, Magnet, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Rocket, Lock, Type, Minus } from "lucide-react";
 import { useDesigner } from "./store";
 import type { FieldDef } from "./store";
 import { ElementPalette } from "./ElementPalette";
@@ -71,7 +71,19 @@ export function Designer(props: Props) {
     if (!t || readOnly) return;
     setSaving(true);
     try {
-      const bgAsset = t.pages.find((p) => p.background)?.background?.assetId ?? null;
+      let bgAsset = t.pages.find((p) => p.background)?.background?.assetId ?? null;
+      if (
+        bgAsset === "builtin-hydraspecma" ||
+        bgAsset === "default" ||
+        bgAsset === "00000000-0000-0000-0000-000000000001"
+      ) {
+        bgAsset = "00000000-0000-0000-0000-000000000001";
+      } else if (
+        bgAsset &&
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bgAsset)
+      ) {
+        bgAsset = null;
+      }
       await api(`/api/templates/${props.templateId}/versions/${props.versionId}`, {
         method: "PUT",
         json: { templateJson: t, revision: t.revision, backgroundAssetId: bgAsset },
@@ -215,7 +227,31 @@ export function Designer(props: Props) {
         <ToolBtn title="Zoom out" onClick={() => setZoom(zoom / 1.2)}><ZoomOut className="h-4 w-4" /></ToolBtn>
         <span className="w-12 text-center text-xs tabular-nums text-ink-600">{Math.round(zoom * 100)}%</span>
         <ToolBtn title="Zoom in" onClick={() => setZoom(zoom * 1.2)}><ZoomIn className="h-4 w-4" /></ToolBtn>
-        <ToolBtn title="Fit" onClick={() => { const el = scrollRef.current; if (el) setZoom((el.clientWidth - 64) / template.page.width); }}><Maximize className="h-4 w-4" /></ToolBtn>
+        <div className="mx-2 h-6 w-px bg-ink-200" />
+        {!readOnly && (
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => addElement("text", 60, 150, { text: "Edit this text", width: 180, height: 20 })}
+              className="h-8 gap-1 px-2.5 text-xs font-semibold text-ink-800 hover:bg-brand-50 hover:border-brand-400 shadow-xs"
+              title="Add editable text block onto page"
+            >
+              <Type className="h-3.5 w-3.5 text-brand-600" />
+              + Text
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => addElement("line", 55, 200, { width: 485, height: 0, stroke: { color: "#000000", width: 0.75 } })}
+              className="h-8 gap-1 px-2.5 text-xs font-semibold text-ink-800 hover:bg-brand-50 hover:border-brand-400 shadow-xs"
+              title="Add horizontal divider line"
+            >
+              <Minus className="h-3.5 w-3.5 text-brand-600" />
+              + Line
+            </Button>
+          </div>
+        )}
 
         <div className="flex-1" />
         <input ref={bgInputRef} type="file" accept="application/pdf,image/png,image/jpeg" className="hidden" onChange={(e) => e.target.files?.[0] && uploadBackground(e.target.files[0])} />

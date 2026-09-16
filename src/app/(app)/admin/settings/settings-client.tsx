@@ -15,7 +15,8 @@ import {
 } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
-import { KeyRound, Database, Share2, Cog, RefreshCw, CheckCircle2, AlertCircle } from "lucide-react";
+import { KeyRound, Database, Share2, Cog, RefreshCw, CheckCircle2, AlertCircle, Hash } from "lucide-react";
+import { NumberSequencesPanel } from "./number-sequences-panel";
 
 interface ConfigState {
   entra: {
@@ -64,7 +65,7 @@ interface ConfigState {
 
 export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }) {
   const [config, setConfig] = useState<ConfigState>(initialConfig);
-  const [activeTab, setActiveTab] = useState<"entra" | "d365" | "sharepoint" | "app">("d365");
+  const [activeTab, setActiveTab] = useState<"entra" | "d365" | "sharepoint" | "app" | "sequences">("d365");
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -170,6 +171,18 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
         >
           <Cog className="h-4 w-4" />
           App & Document Rules
+        </button>
+
+        <button
+          onClick={() => { setActiveTab("sequences"); setTestResult(null); }}
+          className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            activeTab === "sequences"
+              ? "border-brand-500 text-brand-700"
+              : "border-transparent text-ink-600 hover:text-ink-900"
+          }`}
+        >
+          <Hash className="h-4 w-4" />
+          Number Sequences
         </button>
       </div>
 
@@ -601,6 +614,8 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
           </CardBody>
         </Card>
       )}
+
+      {activeTab === "sequences" && <NumberSequencesPanel />}
     </div>
   );
 }

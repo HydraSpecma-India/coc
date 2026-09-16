@@ -34,6 +34,7 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
   const [bgState, setBgState] = useState<{ key: string; img: HTMLImageElement | null; error: string | null }>({ key: "", img: null, error: null });
   const [marquee, setMarquee] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const [dropTarget, setDropTarget] = useState(false);
+  const [inlineEditing, setInlineEditing] = useState<{ id: string; text: string } | null>(null);
 
   const page = template?.pages[pageIndex];
   const pw = template?.page.width ?? 595;
@@ -100,6 +101,14 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
     if (readOnly) return select([id]);
     if (e.evt.shiftKey) toggleSelect(id);
     else if (!selectedIds.includes(id)) select([id]);
+  };
+
+  const onElementDblClick = (id: string) => {
+    if (readOnly) return;
+    const el = page?.elements.find((e) => e.id === id);
+    if (el && el.type === "text") {
+      setInlineEditing({ id: el.id, text: el.text });
+    }
   };
 
   // ── drag / transform ─────────────────────────────────────────────────────
@@ -217,6 +226,7 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
               selected={selectedIds.includes(el.id)}
               draggable={!readOnly && !el.locked}
               onClick={(e) => onElementClick(e, el.id)}
+              onDblClick={onElementDblClick}
               onDragEnd={(e) => onDragEnd(e, el.id)}
             />
           ))}
@@ -249,16 +259,70 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
           )}
         </Layer>
       </Stage>
+      {inlineEditing && (() => {
+        const editingEl = page?.elements.find((e) => e.id === inlineEditing.id);
+        if (!editingEl || editingEl.type !== "text") return null;
+        return (
+          <textarea
+            autoFocus
+            value={inlineEditing.text}
+            onChange={(e) => setInlineEditing({ ...inlineEditing, text: e.target.value })}
+            onBlur={() => {
+              commit((t) => {
+                const target = t.pages[pageIndex].elements.find((e) => e.id === inlineEditing.id);
+                if (target && target.type === "text") target.text = inlineEditing.text;
+              });
+              setInlineEditing(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setInlineEditing(null);
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                (e.target as HTMLTextAreaElement).blur();
+              }
+            }}
+            className="absolute z-30 rounded border-2 border-brand-500 bg-white p-1.5 text-xs shadow-xl focus:outline-none"
+            style={{
+              left: editingEl.x * zoom,
+              top: editingEl.y * zoom,
+              width: Math.max(editingEl.width * zoom, 160),
+              minHeight: Math.max(editingEl.height * zoom, 32),
+              fontSize: Math.max(11, (editingEl.style.fontSize ?? 10) * zoom),
+              fontFamily: editingEl.style.fontFamily,
+              fontWeight: editingEl.style.bold ? "bold" : "normal",
+            }}
+          />
+        );
+      })()}
       {bgError && <div className="absolute left-2 top-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700">Background failed: {bgError}</div>}
       {!bg && !bgError && <div className="absolute left-2 top-2 rounded bg-white/90 shadow-sm border border-ink-200 px-2.5 py-1 text-xs font-medium text-ink-600">Rendering certificate layout…</div>}
     </div>
   );
 }
 
-function ElementNode({ el, selected, draggable, onClick, onDragEnd }: { el: TemplateElement; selected: boolean; draggable: boolean; onClick: (e: KonvaEventObject<MouseEvent>) => void; onDragEnd: (e: KonvaEventObject<DragEvent>) => void }) {
+function ElementNode({
+  el,
+  selected,
+  draggable,
+  onClick,
+  onDblClick,
+  onDragEnd,
+}: {
+  el: TemplateElement;
+  selected: boolean;
+  draggable: boolean;
+  onClick: (e: KonvaEventObject<MouseEvent>) => void;
+  onDblClick?: (id: string) => void;
+  onDragEnd: (e: KonvaEventObject<DragEvent>) => void;
+}) {
   const fields = useDesigner((s) => s.fields);
   if (el.hidden) return null;
   const size = el.type === "table" ? tableSize(el) : { width: el.width, height: el.height };
+  const isLine = el.type === "line";
+  const hitW = isLine && el.width < 14 ? 14 : Math.max(size.width, 8);
+  const hitH = isLine && el.height < 14 ? 14 : Math.max(size.height, 8);
+  const hitX = isLine && el.width < 14 ? -7 : 0;
+  const hitY = isLine && el.height < 14 ? -7 : size.height < 6 ? -3 : 0;
+
   return (
     <Group
       id={el.id}
@@ -272,10 +336,12 @@ function ElementNode({ el, selected, draggable, onClick, onDragEnd }: { el: Temp
       locked={el.locked}
       onClick={onClick}
       onTap={onClick as never}
+      onDblClick={() => onDblClick?.(el.id)}
+      onDblTap={() => onDblClick?.(el.id)}
       onDragEnd={onDragEnd}
     >
-      {/* hit area so the whole element is clickable/draggable even though inner shapes don't listen */}
-      <Rect width={size.width} height={Math.max(size.height, 6)} y={size.height < 6 ? -3 : 0} fill="transparent" />
+      {/* generous hit area so lines and small elements are easily clickable */}
+      <Rect x={hitX} y={hitY} width={hitW} height={hitH} fill="transparent" />
       <ElementBody el={el} fields={fields} selected={selected} designMode />
       {el.locked && selected && <Rect width={size.width} height={size.height} stroke="#ef4444" strokeWidth={1} dash={[2, 2]} listening={false} />}
     </Group>

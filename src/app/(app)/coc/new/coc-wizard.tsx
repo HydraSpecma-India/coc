@@ -72,6 +72,7 @@ export function CocWizard({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(
     templates.find((t) => t.active_version_id)?.id || templates[0]?.id || ""
   );
+  const selectedTemplate = templateList.find((t) => t.id === selectedTemplateId) || templateList[0];
   const [showUploadPdfModal, setShowUploadPdfModal] = useState(false);
   const [uploadPdfFile, setUploadPdfFile] = useState<File | null>(null);
   const [uploadPdfName, setUploadPdfName] = useState("");
@@ -283,6 +284,39 @@ export function CocWizard({
   const [serialWarning, setSerialWarning] = useState<string | null>(null);
   const [serialNotice, setSerialNotice] = useState<string | null>(null);
 
+  // Product-specific continuous serial sequence state
+  const [productSequence, setProductSequence] = useState<{
+    rule: { itemNumber: string; mode: "auto" | "manual"; pattern: string; nextNumber: number };
+    nextSerial: string;
+  } | null>(null);
+
+  const fetchProductSequence = async (itemNumber: string, productName?: string) => {
+    const cleanItem = itemNumber?.trim();
+    if (!cleanItem) return;
+    try {
+      const res = await api<{
+        ok: boolean;
+        rule: { itemNumber: string; mode: "auto" | "manual"; pattern: string; nextNumber: number };
+        nextSerial: string;
+      }>(`/api/sequences/next?itemNumber=${encodeURIComponent(cleanItem)}&productName=${encodeURIComponent(productName || cleanItem)}`);
+
+      if (res.ok && res.rule) {
+        setProductSequence(res);
+        setManualFields((prev) => ({
+          ...prev,
+          SerialNumber: res.nextSerial,
+        }));
+        if (res.rule.mode === "auto") {
+          setSerialNotice(`Continuous Product Series (${res.rule.itemNumber} • Auto #${res.rule.nextNumber}): ${res.nextSerial}`);
+        } else {
+          setSerialNotice(`Product Series (${res.rule.itemNumber} • Manual): Suggested ${res.nextSerial}`);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch product sequence", e);
+    }
+  };
+
   const fetchExistingCocsForPO = async (productionOrder: string, itemNumber: string) => {
     const cleanPO = productionOrder?.trim();
     if (!cleanPO) return;
@@ -295,34 +329,29 @@ export function CocWizard({
 
       const usedSerials = docs.map((d) => d.serial_number?.trim()).filter(Boolean) as string[];
 
-      // Calculate next recommended serial number
-      const basePrefix = `${itemNumber || cleanPO} - SN`;
-      let nextNum = 1;
-      for (const s of usedSerials) {
-        const match = s.match(/SN(\d+)/i);
-        if (match) {
-          const num = parseInt(match[1], 10);
-          if (num >= nextNum) {
-            nextNum = num + 1;
+      // If no product sequence is active and earlier units exist for this order
+      if (usedSerials.length > 0 && !productSequence) {
+        const basePrefix = `${itemNumber || cleanPO} - SN`;
+        let nextNum = 1;
+        for (const s of usedSerials) {
+          const match = s.match(/SN(\d+)/i);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            if (num >= nextNum) {
+              nextNum = num + 1;
+            }
           }
         }
-      }
-
-      const nextSerial = `${basePrefix}${String(nextNum).padStart(3, "0")}`;
-
-      if (usedSerials.length > 0) {
+        const nextSerial = `${basePrefix}${String(nextNum).padStart(3, "0")}`;
         const lastDoc = docs[0]?.coc_number || "Existing Certificate";
         setSerialNotice(
           `Auto-selected next unit: SN${String(nextNum).padStart(3, "0")} (${lastDoc} already issued for earlier unit)`
         );
-      } else {
-        setSerialNotice(null);
+        setManualFields((prev) => ({
+          ...prev,
+          SerialNumber: prev.SerialNumber || nextSerial,
+        }));
       }
-
-      setManualFields((prev) => ({
-        ...prev,
-        SerialNumber: nextSerial,
-      }));
     } catch (e) {
       console.warn("Could not fetch existing COCs for order", e);
     }
@@ -475,6 +504,7 @@ export function CocWizard({
     }));
     fetchSalesOrdersForPO(order.ItemNumber, order.dataAreaId || selectedCompany, order);
     fetchExistingCocsForPO(order.ProductionOrder, order.ItemNumber);
+    fetchProductSequence(order.ItemNumber, order.ItemDescription);
   };
 
   // Initial PO search
@@ -727,79 +757,56 @@ export function CocWizard({
       {/* Step 1: Production Order & Template Selection */}
       {step === 1 && (
         <div className="space-y-6">
-          <Card>
-            <CardHeader
-              title="1. Document Template"
-              description="Choose the approved layout template for this certificate, or upload a custom PDF template."
-              actions={
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowUploadPdfModal(true)}
-                    className="gap-1.5 text-xs text-brand-800 border-brand-300 hover:bg-brand-50"
-                  >
-                    <Upload className="h-3.5 w-3.5" />
-                    Upload PDF Template
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleModifyTemplate(selectedTemplateId)}
-                    loading={modifyingTemplate}
-                    className="gap-1.5 text-xs text-ink-800"
-                  >
-                    <PencilRuler className="h-3.5 w-3.5" />
-                    Modify in Designer
-                  </Button>
-                </div>
-              }
-            />
-            <CardBody>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {templateList.map((tpl) => {
-                  const isSelected = selectedTemplateId === tpl.id;
-                  return (
-                    <div
-                      key={tpl.id}
-                      onClick={() => setSelectedTemplateId(tpl.id)}
-                      className={`cursor-pointer rounded-lg border p-4 transition-all relative ${
-                        isSelected
-                          ? "border-brand-500 bg-brand-50/30 ring-2 ring-brand-400 shadow-xs"
-                          : "border-ink-200 hover:border-ink-300 bg-white"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="font-semibold text-ink-900 line-clamp-1">{tpl.name}</div>
-                        <Badge tone={tpl.active_version_id ? "success" : "warning"}>
-                          {tpl.active_version_id ? "Published v" + tpl.active_version_number : "Draft"}
-                        </Badge>
-                      </div>
-                      <div className="mt-1.5 text-xs text-ink-500 flex items-center justify-between">
-                        <span>Standard A4 Portrait Certificate • ISO 9001:2015 Compliant</span>
-                      </div>
-                      <div className="mt-3 pt-2 border-t border-ink-100 flex items-center justify-between text-xs">
-                        <span className="text-[11px] text-ink-500 font-mono">
-                          {isSelected ? "✓ Active Selection" : "Click to select"}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleModifyTemplate(tpl.id);
-                          }}
-                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-700 hover:text-brand-900 underline"
-                        >
-                          <PencilRuler className="h-3 w-3" />
-                          Modify in Designer
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+          {/* 1. Document Template Selector (Compact Bar) */}
+          <div className="rounded-lg border border-ink-200 bg-white p-2.5 sm:px-4 sm:py-2.5 shadow-xs flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-brand-50 text-brand-800 font-bold text-xs border border-brand-200">
+                1
               </div>
-            </CardBody>
-          </Card>
+              <span className="text-xs font-semibold text-ink-800 whitespace-nowrap">Document Template:</span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => setSelectedTemplateId(e.target.value)}
+                  className="h-8 max-w-[240px] sm:max-w-xs truncate rounded border border-ink-300 bg-ink-50/60 px-2.5 py-0 text-xs font-semibold text-ink-900 focus:border-brand-500 focus:bg-white focus:outline-hidden cursor-pointer"
+                >
+                  {templateList.map((tpl) => (
+                    <option key={tpl.id} value={tpl.id}>
+                      {tpl.name} {tpl.active_version_id ? `(v${tpl.active_version_number})` : "(Draft)"}
+                    </option>
+                  ))}
+                </select>
+                {selectedTemplate && (
+                  <Badge tone={selectedTemplate.active_version_id ? "success" : "warning"} className="text-[10px] px-1.5 py-0.5 font-medium shrink-0">
+                    {selectedTemplate.active_version_id ? `v${selectedTemplate.active_version_number} Published` : "Draft"}
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 ml-auto shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleModifyTemplate(selectedTemplateId)}
+                loading={modifyingTemplate}
+                className="h-7 text-xs gap-1 py-0 px-2.5 text-ink-700 hover:text-ink-900"
+                title="Edit layout, text & lines in designer"
+              >
+                <PencilRuler className="h-3 w-3" />
+                <span>Designer</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowUploadPdfModal(true)}
+                className="h-7 text-xs gap-1 py-0 px-2.5 text-brand-700 border-brand-200 hover:bg-brand-50"
+                title="Upload a custom PDF template"
+              >
+                <Upload className="h-3 w-3" />
+                <span>Upload PDF</span>
+              </Button>
+            </div>
+          </div>
 
           {/* Selected Order Banner - Mobile/Small Screen Fallback */}
           {selectedPO && (
@@ -1252,6 +1259,7 @@ export function CocWizard({
                         setShowManualModal(false);
                         fetchSalesOrdersForPO(finalOrder.ItemNumber, finalOrder.dataAreaId || selectedCompany, finalOrder);
                         fetchExistingCocsForPO(finalOrder.ProductionOrder, finalOrder.ItemNumber);
+                        fetchProductSequence(finalOrder.ItemNumber, finalOrder.ItemDescription);
                         toast.success(`Applied order: ${manualOrder.ProductionOrder} (Customer Part: ${finalCustPart})`);
                       }}
                     >
@@ -1293,7 +1301,7 @@ export function CocWizard({
                   </div>
                 </div>
               ) : (
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
                   {searchResults.map((order) => {
                     const isSelected = selectedPO?.ProductionOrder === order.ProductionOrder;
                     const entityBadge = order.dataAreaId || (order.CustomerAccount ? order.CustomerAccount.toUpperCase() : selectedCompany);
@@ -1318,85 +1326,105 @@ export function CocWizard({
                       <div
                         key={order.ProductionOrder}
                         onClick={() => applySelectedPO(order)}
-                        className={`cursor-pointer rounded-lg border p-4 transition-all ${
+                        className={`cursor-pointer rounded-lg border p-2.5 transition-all flex flex-col justify-between text-xs relative ${
                           isSelected
-                            ? "border-brand-500 bg-brand-50/30 ring-2 ring-brand-400 shadow-sm"
+                            ? "border-brand-500 bg-brand-50/30 ring-2 ring-brand-400 shadow-xs"
                             : order.isFullyCertified
-                            ? "border-emerald-300 bg-emerald-50/25 hover:border-emerald-400"
+                            ? "border-emerald-300 bg-emerald-50/20 hover:border-emerald-400"
                             : order.certifiedQuantity
                             ? "border-amber-300 bg-amber-50/15 hover:border-amber-400"
                             : "border-ink-200 hover:border-ink-300 bg-white"
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-mono text-xs font-bold text-brand-700">
+                        <div>
+                          {/* Top: Order & Badges */}
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <span className="font-mono text-xs font-bold text-brand-700 truncate" title={order.ProductionOrder}>
                               {order.ProductionOrder}
                             </span>
-                            {entityBadge && (
-                              <Badge tone="brand" className="text-[10px] font-mono font-bold px-1.5 py-0.5">
-                                {entityBadge}
-                              </Badge>
-                            )}
-                            {statusLabel && (
-                              <Badge tone={statusTone} className="text-[10px] font-semibold px-1.5 py-0.5">
-                                {statusLabel}
-                              </Badge>
-                            )}
-                            {/* Qualification Badge */}
+                            <div className="flex items-center gap-1 shrink-0">
+                              {entityBadge && (
+                                <span className="text-[9px] font-mono font-bold bg-ink-100 text-ink-700 px-1 py-0.5 rounded">
+                                  {entityBadge}
+                                </span>
+                              )}
+                              {statusLabel && (
+                                <Badge tone={statusTone} className="text-[9px] font-semibold px-1 py-0.5">
+                                  {statusLabel}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Item Description */}
+                          <div className="font-semibold text-xs text-ink-900 line-clamp-1 mb-1" title={order.ItemDescription}>
+                            {order.ItemDescription}
+                          </div>
+
+                          {/* Customer & Qualification Pill */}
+                          <div className="flex items-center justify-between gap-1 mb-1.5 text-[10px]">
+                            <span className="text-ink-500 truncate max-w-[100px]" title={order.CustomerName}>
+                              {order.CustomerName}
+                            </span>
                             {order.isFullyCertified ? (
-                              <Badge tone="success" className="text-[10px] font-bold px-1.5 py-0.5">
-                                COC Created ({order.certifiedQuantity}/{order.Quantity} Qty)
+                              <Badge tone="success" className="text-[9px] font-bold px-1 py-0">
+                                COC Created ({order.certifiedQuantity}/{order.Quantity})
                               </Badge>
                             ) : order.certifiedQuantity ? (
-                              <Badge tone="warning" className="text-[10px] font-bold px-1.5 py-0.5">
-                                {order.certifiedQuantity}/{order.Quantity} Certified &bull; {order.pendingCocQuantity} Pending
+                              <Badge tone="warning" className="text-[9px] font-bold px-1 py-0">
+                                {order.certifiedQuantity}/{order.Quantity} Cert • {order.pendingCocQuantity} Pend
                               </Badge>
                             ) : (
-                              <Badge tone="neutral" className="text-[10px] font-medium px-1.5 py-0.5">
+                              <Badge tone="neutral" className="text-[9px] font-medium px-1 py-0">
                                 {order.Quantity} Qty Pending
                               </Badge>
                             )}
                           </div>
-                          <Badge tone="info" className="truncate max-w-[130px]">{order.CustomerName}</Badge>
-                        </div>
-                        <div className="mt-1 font-semibold text-sm text-ink-900 line-clamp-1">
-                          {order.ItemDescription}
-                        </div>
-                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-ink-600">
-                          <div>Product / Part: <span className="font-mono font-bold text-ink-900">{order.ItemNumber}</span></div>
-                          <div>Customer Part: <span className="font-mono font-semibold text-brand-800">{order.CustomerPartNumber || "160072"}</span></div>
-                          <div>Cust PO: <span className="font-medium">{order.CustomerPO || "—"}</span></div>
-                          <div>Qty: <span className="font-semibold text-ink-900">{order.Quantity} {order.UnitOfMeasure}</span></div>
+
+                          {/* 2x2 Specs Grid */}
+                          <div className="pt-1.5 border-t border-ink-100 grid grid-cols-2 gap-x-1.5 gap-y-0.5 text-[10.5px] text-ink-600">
+                            <div className="truncate">
+                              Part: <span className="font-mono font-bold text-ink-900">{order.ItemNumber}</span>
+                            </div>
+                            <div className="truncate">
+                              Cust: <span className="font-mono font-semibold text-brand-800">{order.CustomerPartNumber || "160072"}</span>
+                            </div>
+                            <div className="truncate">
+                              PO: <span className="font-medium text-ink-700">{order.CustomerPO || "—"}</span>
+                            </div>
+                            <div className="truncate">
+                              Qty: <span className="font-bold text-ink-900">{order.Quantity} {order.UnitOfMeasure || "Pcs"}</span>
+                            </div>
+                          </div>
                         </div>
 
-                        {/* Direct Action / View COC Links */}
+                        {/* Bottom: View COC Action if Certified */}
                         {order.isFullyCertified && order.cocList?.[0] ? (
-                          <div className="mt-3 pt-2 border-t border-emerald-200/80 flex items-center justify-between">
-                            <span className="text-[11px] font-semibold text-emerald-800">
-                              Fully Certified &bull; Not Qualified for Another COC
+                          <div className="mt-2 pt-1.5 border-t border-emerald-200 flex items-center justify-between gap-1">
+                            <span className="text-[10px] font-semibold text-emerald-800 truncate">
+                              Certified
                             </span>
                             <Link
                               href={`/coc/${order.cocList[0].id}`}
                               target="_blank"
                               onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center gap-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-2.5 py-1 rounded shadow-xs transition-colors"
+                              className="inline-flex items-center gap-1 text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-2 py-0.5 rounded shadow-2xs transition-colors shrink-0"
                             >
-                              <Eye className="h-3.5 w-3.5" /> View COC ({order.cocList[0].coc_number})
+                              <Eye className="h-3 w-3" /> View COC ({order.cocList[0].coc_number})
                             </Link>
                           </div>
                         ) : order.certifiedQuantity && order.cocList?.[0] ? (
-                          <div className="mt-3 pt-2 border-t border-amber-200/80 flex items-center justify-between text-[11px]">
-                            <span className="font-semibold text-amber-800">
-                              {order.pendingCocQuantity} unit(s) pending for certification
+                          <div className="mt-2 pt-1.5 border-t border-amber-200 flex items-center justify-between gap-1 text-[10px]">
+                            <span className="font-semibold text-amber-800 truncate">
+                              {order.pendingCocQuantity} pending
                             </span>
                             <Link
                               href={`/coc/${order.cocList[0].id}`}
                               target="_blank"
                               onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center gap-1 font-semibold text-brand-800 hover:underline"
+                              className="inline-flex items-center gap-0.5 font-semibold text-brand-800 hover:underline shrink-0"
                             >
-                              View Certified Unit ({order.cocList[0].coc_number}) <ExternalLink className="h-3 w-3" />
+                              View ({order.cocList[0].coc_number}) <ExternalLink className="h-2.5 w-2.5" />
                             </Link>
                           </div>
                         ) : null}
@@ -2316,6 +2344,37 @@ export function CocWizard({
                   </div>
                 )}
               </div>
+
+              {/* Product Continuous Serial Sequence Status */}
+              {productSequence ? (
+                <div className="rounded-xl border border-emerald-300 bg-emerald-50/50 p-2.5 text-xs space-y-1 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10.5px] font-bold text-emerald-900 flex items-center gap-1">
+                      <Sparkles className="h-3 w-3 text-emerald-600" />
+                      Continuous Series: {productSequence.rule.itemNumber}
+                    </span>
+                    <Badge tone={productSequence.rule.mode === "auto" ? "success" : "warning"} className="text-[9px] px-1 py-0 font-bold uppercase">
+                      {productSequence.rule.mode}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-emerald-700">Serial for this COC:</span>
+                    <span className="font-mono font-bold text-emerald-950">
+                      {manualFields.SerialNumber || productSequence.nextSerial}
+                    </span>
+                  </div>
+                  <div className="text-[9.5px] text-emerald-700">
+                    Pattern: <code className="font-mono">{productSequence.rule.pattern}</code> &bull; Unit #{productSequence.rule.nextNumber}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-ink-200 bg-white p-2.5 text-xs flex items-center justify-between text-ink-600 shadow-2xs">
+                  <span className="text-[11px] text-ink-500">Assigned Serial:</span>
+                  <span className="font-mono font-bold text-ink-900 text-[11px]">
+                    {manualFields.SerialNumber || "—"}
+                  </span>
+                </div>
+              )}
 
               {/* Step Companion status */}
               {step > 1 && (

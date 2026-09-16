@@ -269,7 +269,35 @@ export function PropertiesPanel() {
       {el.type === "line" && (
         <Section title="Line">
           <Color label="Color" value={el.stroke.color} onChange={(v) => set({ stroke: { color: v ?? "#000" } })} />
+          <div className="flex items-center gap-1.5 text-[11px] text-ink-500">
+            <span>Preset:</span>
+            {["#000000", "#334155", "#64748b", "#cbd5e1", "#2563eb"].map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => set({ stroke: { color: c } })}
+                className="h-4 w-4 rounded-full border border-ink-300"
+                style={{ backgroundColor: c }}
+                title={c}
+              />
+            ))}
+          </div>
           <Num label="Width" value={el.stroke.width} onChange={(v) => set({ stroke: { width: v } })} step={0.25} min={0} suffix="pt" />
+          <div className="flex items-center gap-1 pt-0.5">
+            {[0.5, 0.75, 1, 1.5, 2].map((w) => (
+              <button
+                key={w}
+                type="button"
+                onClick={() => set({ stroke: { width: w } })}
+                className={cn(
+                  "flex-1 rounded border py-0.5 text-[10px] font-mono transition-colors",
+                  el.stroke.width === w ? "border-ink-900 bg-ink-900 text-white font-bold" : "border-ink-200 text-ink-600 hover:bg-ink-50"
+                )}
+              >
+                {w}pt
+              </button>
+            ))}
+          </div>
           <Sel label="Style" value={el.stroke.dash?.length ? "dashed" : "solid"} onChange={(v) => set({ stroke: { dash: v === "dashed" ? [4, 2] : undefined } })} options={[{ value: "solid", label: "Solid" }, { value: "dashed", label: "Dashed" }]} />
           <p className="text-[10px] text-ink-400">Tip: set H = 0 for a horizontal line, W = 0 for vertical.</p>
         </Section>
