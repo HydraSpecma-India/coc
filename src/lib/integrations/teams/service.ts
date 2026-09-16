@@ -4,6 +4,7 @@ import { logger } from "@/lib/logging/logger";
 export { DEFAULT_TEAMS_WEBHOOK_URL };
 
 export interface SendCocTeamsParams {
+  cocId?: string | null;
   cocNumber: string;
   productionOrder: string;
   itemNumber: string;
@@ -48,23 +49,6 @@ export class TeamsService {
       summary: "Connection test from COC Platform",
       timestamp: new Date().toISOString(),
       fileName: "test-notification.txt",
-      content: "VGVzdCBub3RpZmljYXRpb24=",
-      contentType: "text/plain",
-      file: {
-        name: "test-notification.txt",
-        content: "VGVzdCBub3RpZmljYXRpb24=",
-        contentBytes: "VGVzdCBub3RpZmljYXRpb24=",
-        "$content-type": "text/plain",
-        "$content": "VGVzdCBub3RpZmljYXRpb24=",
-      },
-      attachments: [
-        {
-          name: "test-notification.txt",
-          content: "VGVzdCBub3RpZmljYXRpb24=",
-          contentType: "text/plain",
-          contentBytes: "VGVzdCBub3RpZmljYXRpb24=",
-        },
-      ],
     };
 
     const controller = new AbortController();
@@ -120,11 +104,32 @@ export class TeamsService {
     const issueDateStr = params.issueDate || new Date().toISOString().slice(0, 10);
     const issuedByStr = params.issuedBy || "Quality System";
 
-    // Encode PDF bytes to base64 if available
-    let base64Pdf = "";
-    if (params.pdfBytes && params.pdfBytes.length > 0) {
-      base64Pdf = Buffer.from(params.pdfBytes).toString("base64");
+    const baseUrl = (config.app.url || "").replace(/\/$/, "");
+    const pdfUrl = params.cocId ? `${baseUrl}/api/coc/${params.cocId}/pdf` : "";
+    const cocUrl = params.cocId ? `${baseUrl}/coc/${params.cocId}` : "";
+
+    const cardActions: Array<Record<string, unknown>> = [];
+    if (pdfUrl) {
+      cardActions.push({
+        type: "Action.OpenUrl",
+        title: "📄 View / Download PDF",
+        url: pdfUrl,
+      });
     }
+    if (cocUrl) {
+      cardActions.push({
+        type: "Action.OpenUrl",
+        title: "🔍 Open COC Details",
+        url: cocUrl,
+      });
+    }
+
+    const linksMd = [
+      pdfUrl ? `[📄 View / Download PDF](${pdfUrl})` : "",
+      cocUrl ? `[🔍 Open COC Details](${cocUrl})` : "",
+    ]
+      .filter(Boolean)
+      .join("  |  ");
 
     const markdownMessage = [
       `### 📋 Certificate of Conformity Issued`,
@@ -139,9 +144,12 @@ export class TeamsService {
       `**Quantity:** ${params.quantity ?? 1} ${params.unitOfMeasure || "Pcs"}`,
       `**Issued By:** ${issuedByStr}`,
       `**Date:** ${issueDateStr}`,
-    ].join("\n");
+      linksMd ? `\n${linksMd}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-    const adaptiveCard = {
+    const adaptiveCard: Record<string, unknown> = {
       type: "AdaptiveCard",
       $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
       version: "1.4",
@@ -170,6 +178,9 @@ export class TeamsService {
         },
       ],
     };
+    if (cardActions.length > 0) {
+      adaptiveCard.actions = cardActions;
+    }
 
     const payload: Record<string, unknown> = {
       cocNumber: cocNum,
@@ -196,29 +207,46 @@ export class TeamsService {
 
       fileName,
       contentType: "application/pdf",
-      content: base64Pdf,
-      fileContent: base64Pdf,
-      fileContentBase64: base64Pdf,
-      contentBytes: base64Pdf,
-      file: {
-        name: fileName,
-        content: base64Pdf,
-        contentBytes: base64Pdf,
-        "$content-type": "application/pdf",
-        "$content": base64Pdf,
-      },
-      attachments: base64Pdf
-        ? [
-            {
-              name: fileName,
-              contentType: "application/pdf",
-              content: base64Pdf,
-              contentBytes: base64Pdf,
-              contentUrl: `data:application/pdf;base64,${base64Pdf}`,
-            },
-          ]
-        : [],
+      pdfUrl,
+      downloadUrl: pdfUrl,
+      cocUrl,
     };
+
+    // Strict Microsoft Teams 28KB Limit Protection:
+    // Microsoft Teams connectors and webhooks strictly reject payloads exceeding 28KB:
+    // {"error":"The payload is too large. Please make sure the size is less than 28KB."}
+    // We attach raw binary byte representations only if the entire JSON is safely below 24KB.
+    if (params.pdfBytes && params.pdfBytes.length > 0) {
+      const base64Pdf = Buffer.from(params.pdfBytes).toString("base64");
+      const trialPayload = {
+        ...payload,
+        fileContent: base64Pdf,
+        content: base64Pdf,
+        file: {
+          name: fileName,
+          content: base64Pdf,
+          contentBytes: base64Pdf,
+          "$content-type": "application/pdf",
+          "$content": base64Pdf,
+        },
+        attachments: [
+          {
+            name: fileName,
+            contentType: "application/pdf",
+            content: base64Pdf,
+            contentBytes: base64Pdf,
+          },
+        ],
+      };
+      if (JSON.stringify(trialPayload).length < 24000) {
+        Object.assign(payload, trialPayload);
+      } else {
+        logger.info(
+          "PDF binary size exceeds Teams 28KB limit. Delivered lightweight notification with direct PDF access link.",
+          { cocNumber: cocNum, pdfBytesLength: params.pdfBytes.length }
+        );
+      }
+    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);

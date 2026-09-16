@@ -30,6 +30,7 @@ export const POST = route(async (_req, { params }) => {
       }
 
       await TeamsService.sendCocToTeams({
+        cocId: doc.id,
         cocNumber: doc.coc_number || `COC-${doc.id.slice(0, 8)}`,
         productionOrder: doc.production_order,
         itemNumber: doc.item_number || "",

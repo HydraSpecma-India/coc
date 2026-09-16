@@ -57,6 +57,7 @@ export const POST = route(async (_req, { params }) => {
     await logProcessStep(doc.id, "TEAMS_WEBHOOK", "STARTED", { retriedBy: session.user.email });
 
     const teamsRes = await TeamsService.sendCocToTeams({
+      cocId: doc.id,
       cocNumber: doc.coc_number || `COC-${doc.id.slice(0, 8)}`,
       productionOrder: doc.production_order,
       itemNumber: doc.item_number || "",
