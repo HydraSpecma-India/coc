@@ -33,3 +33,19 @@ export interface D365COCDocumentRecord {
   IssuedBy: string;
   IssueDate: string;
 }
+
+export interface D365SalesOrderLine {
+  SalesOrder: string;
+  LineNumber: string;
+  ItemNumber: string;
+  ItemDescription?: string;
+  CustomerAccount: string;
+  CustomerName: string;
+  CustomerPO: string;
+  ExternalItemNumber: string; // Customer Part Number
+  Quantity: number;
+  UnitOfMeasure?: string;
+  DeliveryDate?: string;
+  dataAreaId?: string;
+}
+

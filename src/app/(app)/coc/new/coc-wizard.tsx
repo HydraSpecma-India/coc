@@ -20,7 +20,7 @@ import {
 } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
-import type { D365ProductionOrder } from "@/lib/integrations/d365/types";
+import type { D365ProductionOrder, D365SalesOrderLine } from "@/lib/integrations/d365/types";
 import {
   Search,
   CheckCircle2,
@@ -43,6 +43,8 @@ import {
   Upload,
   PencilRuler,
   FileUp,
+  ShoppingCart,
+  Tag,
 } from "lucide-react";
 
 interface TemplateSummary {
@@ -176,29 +178,185 @@ export function CocWizard({
     Specification: "ISO 9001:2015 / HydraSpecma Technical Standard",
   });
 
+  // Sales Order selection state for active Production Order
+  const [salesOrders, setSalesOrders] = useState<D365SalesOrderLine[]>([]);
+  const [loadingSalesOrders, setLoadingSalesOrders] = useState(false);
+  const [isCustomSO, setIsCustomSO] = useState(false);
+  const [customSOValue, setCustomSOValue] = useState("");
+
+  // Sales Order selection state for Manual / Custom Order Modal
+  const [modalSalesOrders, setModalSalesOrders] = useState<D365SalesOrderLine[]>([]);
+  const [loadingModalSO, setLoadingModalSO] = useState(false);
+  const [modalIsCustomSO, setModalIsCustomSO] = useState(false);
+
+  const fetchSalesOrdersForPO = async (
+    itemNumber: string,
+    company = selectedCompany,
+    currentPO?: D365ProductionOrder
+  ) => {
+    const cleanItem = itemNumber?.trim();
+    if (!cleanItem) return;
+    setLoadingSalesOrders(true);
+    setIsCustomSO(false);
+    try {
+      const compParam = company && company !== "ALL" ? `&company=${encodeURIComponent(company)}` : "";
+      const res = await api<{
+        ok: boolean;
+        mode?: "mock" | "live";
+        salesOrders: D365SalesOrderLine[];
+        error?: string;
+      }>(`/api/d365/sales-orders?itemNumber=${encodeURIComponent(cleanItem)}${compParam}`);
+
+      const list = res.salesOrders || [];
+      setSalesOrders(list);
+
+      const targetOrder = currentPO || selectedPO;
+      const targetSO = targetOrder?.SalesOrder?.trim().toLowerCase();
+      const matched = (targetSO ? list.find((so) => so.SalesOrder.toLowerCase() === targetSO) : null) || list[0];
+
+      if (matched) {
+        const extPart = matched.ExternalItemNumber || targetOrder?.CustomerPartNumber || "160072";
+        const poNum = matched.CustomerPO || targetOrder?.CustomerPO || "4509008214";
+        const custName = matched.CustomerName || targetOrder?.CustomerName || "HydraSpecma India Pvt Ltd";
+
+        setSelectedPO((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            SalesOrder: matched.SalesOrder,
+            CustomerPartNumber: extPart,
+            CustomerPO: poNum,
+            CustomerName: custName,
+          };
+        });
+
+        setManualFields((prev) => ({
+          ...prev,
+          CustomerPartNo: extPart,
+          CustomerPO: poNum,
+        }));
+      }
+    } catch (e) {
+      console.warn("Could not fetch sales orders for item", e);
+    } finally {
+      setLoadingSalesOrders(false);
+    }
+  };
+
+  const fetchModalSalesOrders = async (itemNumber: string, company = selectedCompany) => {
+    const cleanItem = itemNumber?.trim();
+    if (!cleanItem) return;
+    setLoadingModalSO(true);
+    try {
+      const compParam = company && company !== "ALL" ? `&company=${encodeURIComponent(company)}` : "";
+      const res = await api<{
+        ok: boolean;
+        mode?: "mock" | "live";
+        salesOrders: D365SalesOrderLine[];
+        error?: string;
+      }>(`/api/d365/sales-orders?itemNumber=${encodeURIComponent(cleanItem)}${compParam}`);
+
+      const list = res.salesOrders || [];
+      setModalSalesOrders(list);
+
+      if (list.length > 0) {
+        const matched = list.find((so) => so.SalesOrder.toLowerCase() === manualOrder.SalesOrder?.toLowerCase()) || list[0];
+        if (matched) {
+          setManualOrder((prev) => ({
+            ...prev,
+            SalesOrder: matched.SalesOrder,
+            CustomerPartNumber: matched.ExternalItemNumber || prev.CustomerPartNumber || "160072",
+            CustomerPO: matched.CustomerPO || prev.CustomerPO,
+            CustomerName: matched.CustomerName || prev.CustomerName,
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch modal sales orders", e);
+    } finally {
+      setLoadingModalSO(false);
+    }
+  };
+
+  const handleSelectSalesOrder = (soNumber: string) => {
+    if (soNumber === "__custom__") {
+      setIsCustomSO(true);
+      return;
+    }
+    setIsCustomSO(false);
+    const matched = salesOrders.find((so) => so.SalesOrder === soNumber);
+    if (matched) {
+      const extPart = matched.ExternalItemNumber || "160072";
+      const poNum = matched.CustomerPO || selectedPO?.CustomerPO || "4509008214";
+      const custName = matched.CustomerName || selectedPO?.CustomerName || "HydraSpecma India Pvt Ltd";
+
+      setSelectedPO((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          SalesOrder: matched.SalesOrder,
+          CustomerPartNumber: extPart,
+          CustomerPO: poNum,
+          CustomerName: custName,
+        };
+      });
+
+      setManualFields((prev) => ({
+        ...prev,
+        CustomerPartNo: extPart,
+        CustomerPO: poNum,
+      }));
+
+      toast.success(`Selected Sales Order ${matched.SalesOrder} (Customer Part: ${extPart})`);
+    }
+  };
+
+  const handleSelectModalSalesOrder = (soNumber: string) => {
+    if (soNumber === "__custom__") {
+      setModalIsCustomSO(true);
+      return;
+    }
+    setModalIsCustomSO(false);
+    const matched = modalSalesOrders.find((so) => so.SalesOrder === soNumber);
+    if (matched) {
+      setManualOrder((prev) => ({
+        ...prev,
+        SalesOrder: matched.SalesOrder,
+        CustomerPartNumber: matched.ExternalItemNumber || prev.CustomerPartNumber || "160072",
+        CustomerPO: matched.CustomerPO || prev.CustomerPO,
+        CustomerName: matched.CustomerName || prev.CustomerName,
+      }));
+    }
+  };
+
   const openManualOrder = (defaultQuery = "") => {
     const q = defaultQuery.trim();
-    setManualOrder({
-      ProductionOrder: q || "HSIN-000011",
-      ItemNumber: q || "29110478R05",
-      ItemDescription: q ? `HydraSpecma Assembly (${q})` : "Main tank assembly V112",
-      CustomerAccount: selectedCompany !== "ALL" ? selectedCompany : "HSIN",
-      CustomerName: "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
+    const defaultItem = q || "1070.0049";
+    const comp = selectedCompany !== "ALL" ? selectedCompany : "HSIN";
+    const initialOrder: D365ProductionOrder = {
+      ProductionOrder: q || "HSIN-008617",
+      ItemNumber: defaultItem,
+      ItemDescription: q ? `HydraSpecma Assembly (${q})` : "Baseframe Module",
+      CustomerAccount: comp,
+      CustomerName: comp === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
       CustomerPO: "4509008214",
-      CustomerPartNumber: "160072",
-      dataAreaId: selectedCompany !== "ALL" ? selectedCompany : "HSIN",
-      SalesOrder: "SO-002859",
+      CustomerPartNumber: defaultItem === "1070.0049" ? "29107156" : "160072",
+      dataAreaId: comp,
+      SalesOrder: defaultItem === "1070.0049" ? "SO-1070-01" : "SO-002859",
       SalesLine: "1.0",
-      BatchNumber: "HS-B24-0011",
-      SerialNumber: "SN-HSIN-000011",
-      DrawingNumber: q ? `DWG-${q}` : "DWG-29110478",
-      Revision: "Rev 05",
+      BatchNumber: "HS-B24-0747",
+      SerialNumber: `SN-${defaultItem}-01`,
+      DrawingNumber: `DWG-${defaultItem}`,
+      Revision: "Rev 02",
       Quantity: 1,
-      UnitOfMeasure: "pcs",
+      UnitOfMeasure: "Pcs",
       RemainingQuantity: 1,
-      Specification: "0068-7211 / 0069-2093 Latest version",
-    });
+      Specification: "DIN EN 853 2SN, Max WP 275 bar",
+    };
+    setManualOrder(initialOrder);
+    setModalIsCustomSO(false);
     setShowManualModal(true);
+    fetchModalSalesOrders(defaultItem, comp);
   };
 
   // Quality & Official Checklist Fields (Aligned with 1 COC-1070.0049-Rev.02-merged 1.pdf)
@@ -238,12 +396,14 @@ export function CocWizard({
 
   const applySelectedPO = (order: D365ProductionOrder) => {
     setSelectedPO(order);
+    const initialExtPart = order.CustomerPartNumber || "160072";
     setManualFields((prev) => ({
       ...prev,
-      CustomerPartNo: order.CustomerPartNumber || prev.CustomerPartNo || "160072",
+      CustomerPartNo: initialExtPart,
       CustomerPO: order.CustomerPO || prev.CustomerPO || "4509008214",
       SerialNumber: order.SerialNumber || `${order.ItemNumber || order.ProductionOrder} - SN001`,
     }));
+    fetchSalesOrdersForPO(order.ItemNumber, order.dataAreaId || selectedCompany, order);
   };
 
   // Initial PO search
@@ -818,15 +978,21 @@ export function CocWizard({
                       <Input
                         value={manualOrder.ProductionOrder}
                         onChange={(e) => setManualOrder({ ...manualOrder, ProductionOrder: e.target.value })}
-                        placeholder="e.g. 1071.0747"
+                        placeholder="e.g. HSIN-008617 or 1071.0747"
                         required
                       />
                     </Field>
                     <Field label="Item / Part Number *">
                       <Input
                         value={manualOrder.ItemNumber}
-                        onChange={(e) => setManualOrder({ ...manualOrder, ItemNumber: e.target.value })}
-                        placeholder="e.g. 1071.0747"
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setManualOrder({ ...manualOrder, ItemNumber: val });
+                          if (val.trim()) {
+                            fetchModalSalesOrders(val.trim(), manualOrder.dataAreaId || selectedCompany);
+                          }
+                        }}
+                        placeholder="e.g. 1070.0049 or 29110478R05"
                         required
                       />
                     </Field>
@@ -834,7 +1000,7 @@ export function CocWizard({
                       <Input
                         value={manualOrder.ItemDescription}
                         onChange={(e) => setManualOrder({ ...manualOrder, ItemDescription: e.target.value })}
-                        placeholder="e.g. High Pressure Flexible Hose Assembly"
+                        placeholder="e.g. Baseframe Module"
                         required
                       />
                     </Field>
@@ -873,11 +1039,58 @@ export function CocWizard({
                         placeholder="Pcs"
                       />
                     </Field>
-                    <Field label="Sales Order Number">
+
+                    {/* Sales Order Dropdown */}
+                    <Field
+                      label="Sales Order Number *"
+                      hint={loadingModalSO ? "Checking matching SOs in D365..." : `${modalSalesOrders.length} matching sales order(s)`}
+                    >
+                      {modalIsCustomSO ? (
+                        <div className="flex gap-1.5">
+                          <Input
+                            value={manualOrder.SalesOrder}
+                            onChange={(e) => setManualOrder({ ...manualOrder, SalesOrder: e.target.value })}
+                            placeholder="Enter custom SO..."
+                            className="font-mono text-xs"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setModalIsCustomSO(false)}
+                            className="text-xs px-2"
+                            title="Return to dropdown list"
+                          >
+                            List
+                          </Button>
+                        </div>
+                      ) : (
+                        <Select
+                          value={modalSalesOrders.some((s) => s.SalesOrder === manualOrder.SalesOrder) ? manualOrder.SalesOrder : (modalSalesOrders[0]?.SalesOrder || "__custom__")}
+                          onChange={(e) => handleSelectModalSalesOrder(e.target.value)}
+                          className="font-mono text-xs"
+                        >
+                          {modalSalesOrders.map((so) => (
+                            <option key={so.SalesOrder} value={so.SalesOrder}>
+                              {so.SalesOrder} — {so.CustomerName?.slice(0, 20)} (Cust Part: {so.ExternalItemNumber || "N/A"})
+                            </option>
+                          ))}
+                          <option value="__custom__">+ Enter Custom Sales Order...</option>
+                        </Select>
+                      )}
+                    </Field>
+
+                    {/* Customer Part Number (External Item Number) */}
+                    <Field
+                      label="Customer Part No. (External Item No.) *"
+                      hint="Auto-populated from Sales Order ExternalItemNumber"
+                    >
                       <Input
-                        value={manualOrder.SalesOrder}
-                        onChange={(e) => setManualOrder({ ...manualOrder, SalesOrder: e.target.value })}
-                        placeholder="e.g. SO-74721"
+                        value={manualOrder.CustomerPartNumber || ""}
+                        onChange={(e) => setManualOrder({ ...manualOrder, CustomerPartNumber: e.target.value })}
+                        placeholder="e.g. 160072 or 29107156"
+                        className="font-mono font-bold text-brand-900 bg-brand-50/60 border-brand-300"
+                        required
                       />
                     </Field>
                   </div>
@@ -893,9 +1106,18 @@ export function CocWizard({
                           toast.error("Please fill required fields: Production Order, Item Number, and Description");
                           return;
                         }
-                        setSelectedPO({ ...manualOrder });
+                        const finalCustPart = manualOrder.CustomerPartNumber?.trim() || "160072";
+                        const finalOrder = { ...manualOrder, CustomerPartNumber: finalCustPart };
+                        setSelectedPO(finalOrder);
+                        setManualFields((prev) => ({
+                          ...prev,
+                          CustomerPartNo: finalCustPart,
+                          CustomerPO: manualOrder.CustomerPO || prev.CustomerPO || "4509008214",
+                          SerialNumber: manualOrder.SerialNumber || `${manualOrder.ItemNumber} - SN001`,
+                        }));
                         setShowManualModal(false);
-                        toast.success(`Applied order: ${manualOrder.ProductionOrder}`);
+                        fetchSalesOrdersForPO(finalOrder.ItemNumber, finalOrder.dataAreaId || selectedCompany, finalOrder);
+                        toast.success(`Applied order: ${manualOrder.ProductionOrder} (Customer Part: ${finalCustPart})`);
                       }}
                     >
                       Apply This Production Order
@@ -1002,31 +1224,135 @@ export function CocWizard({
 
               {/* Selected Order Summary */}
               {selectedPO && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+                <div className="rounded-xl border-2 border-brand-300 bg-gradient-to-br from-brand-50/40 via-white to-emerald-50/30 p-4 sm:p-5 shadow-xs space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink-100 pb-3">
+                    <div className="flex items-start sm:items-center gap-2.5">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500 text-ink-900 font-bold shadow-xs shrink-0">
+                        <CheckCircle2 className="h-5 w-5" />
+                      </div>
                       <div>
-                        <div className="text-sm font-semibold text-emerald-950">
-                          Selected Order: <span className="font-mono font-bold text-brand-700">{selectedPO.ProductionOrder}</span> &bull; {selectedPO.ItemDescription}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs text-ink-500 font-semibold uppercase tracking-wider">Active Production Order</span>
+                          <span className="font-mono text-sm font-bold text-brand-800 bg-brand-100/70 px-2 py-0.5 rounded border border-brand-200">
+                            {selectedPO.ProductionOrder}
+                          </span>
+                          {selectedPO.dataAreaId && (
+                            <Badge tone="brand" className="text-[10px] font-mono font-bold">
+                              {selectedPO.dataAreaId}
+                            </Badge>
+                          )}
+                          {selectedPO.ProductionOrderStatus && (
+                            <Badge tone="success" className="text-[10px]">
+                              {selectedPO.ProductionOrderStatus}
+                            </Badge>
+                          )}
                         </div>
-                        <div className="text-xs text-emerald-800 mt-0.5">
-                          Part: <span className="font-mono font-medium">{selectedPO.ItemNumber}</span> &bull; Customer: <strong>{selectedPO.CustomerName}</strong> &bull; Qty: <strong>{selectedPO.Quantity} {selectedPO.UnitOfMeasure}</strong>
+                        <div className="text-sm font-semibold text-ink-900 mt-0.5">
+                          {selectedPO.ItemDescription}
                         </div>
                       </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setManualOrder({ ...selectedPO });
-                        setShowManualModal(true);
-                      }}
-                      className="text-xs gap-1"
-                    >
-                      <Edit3 className="h-3.5 w-3.5" />
-                      Edit Details
-                    </Button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setManualOrder({ ...selectedPO });
+                          setModalIsCustomSO(false);
+                          setShowManualModal(true);
+                          fetchModalSalesOrders(selectedPO.ItemNumber, selectedPO.dataAreaId || selectedCompany);
+                        }}
+                        className="text-xs gap-1.5"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                        Edit Details
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Cross-checked Sales Order & External Customer Part Box */}
+                  <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 bg-white/80 p-3.5 rounded-lg border border-brand-200/80">
+                    {/* Sales Order Dropdown */}
+                    <div className="space-y-1.5 sm:col-span-2 md:col-span-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-ink-800 flex items-center gap-1.5">
+                          <ShoppingCart className="h-3.5 w-3.5 text-brand-600" />
+                          Sales Order Number (Cross-checked by Item: {selectedPO.ItemNumber})
+                        </label>
+                        <span className="text-[11px] text-brand-700 font-medium">
+                          {loadingSalesOrders ? "Querying D365..." : `${salesOrders.length} matching order(s)`}
+                        </span>
+                      </div>
+
+                      {isCustomSO ? (
+                        <div className="flex gap-2">
+                          <Input
+                            value={customSOValue || selectedPO.SalesOrder}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setCustomSOValue(v);
+                              setSelectedPO({ ...selectedPO, SalesOrder: v });
+                            }}
+                            placeholder="Enter custom Sales Order Number..."
+                            className="font-mono text-xs"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsCustomSO(false)}
+                            className="text-xs px-2.5 shrink-0"
+                          >
+                            Back to List
+                          </Button>
+                        </div>
+                      ) : (
+                        <Select
+                          value={salesOrders.some((s) => s.SalesOrder === selectedPO.SalesOrder) ? selectedPO.SalesOrder : (salesOrders[0]?.SalesOrder || "__custom__")}
+                          onChange={(e) => handleSelectSalesOrder(e.target.value)}
+                          className="font-medium text-xs bg-slate-50 border-brand-200 focus:border-brand-500"
+                        >
+                          {salesOrders.map((so) => (
+                            <option key={so.SalesOrder} value={so.SalesOrder}>
+                              {so.SalesOrder} &bull; {so.CustomerName?.slice(0, 24)} &bull; Cust Part: {so.ExternalItemNumber || "160072"} &bull; PO: {so.CustomerPO || "N/A"}
+                            </option>
+                          ))}
+                          <option value="__custom__">+ Enter Custom Sales Order...</option>
+                        </Select>
+                      )}
+                      <p className="text-[11px] text-ink-500">
+                        Cross-referenced between Production Item Number <span className="font-mono font-medium text-ink-700">{selectedPO.ItemNumber}</span> and Sales Order Line items in D365.
+                      </p>
+                    </div>
+
+                    {/* Customer Part Number (External Item Number) */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-ink-800 flex items-center gap-1.5">
+                        <Tag className="h-3.5 w-3.5 text-brand-600" />
+                        Customer Part No. (External Item)
+                      </label>
+                      <Input
+                        value={selectedPO.CustomerPartNumber || ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSelectedPO({ ...selectedPO, CustomerPartNumber: val });
+                          setManualFields((prev) => ({ ...prev, CustomerPartNo: val }));
+                        }}
+                        placeholder="e.g. 160072 or 29107156"
+                        className="font-mono font-bold text-brand-900 bg-brand-50/50 border-brand-300 text-xs"
+                      />
+                      <p className="text-[11px] text-brand-700">
+                        Populated from <strong>ExternalItemNumber</strong> on Sales Line.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Summary Badges: Customer Name, Customer PO, Quantity */}
+                  <div className="flex items-center gap-4 text-xs text-ink-600 flex-wrap pt-1">
+                    <div>Customer: <strong className="text-ink-900">{selectedPO.CustomerName || "—"}</strong></div>
+                    <div>Customer PO: <strong className="font-mono text-ink-900">{selectedPO.CustomerPO || "—"}</strong></div>
+                    <div>Qty: <strong className="text-ink-900">{selectedPO.Quantity} {selectedPO.UnitOfMeasure}</strong></div>
+                    <div>Batch: <span className="font-mono text-ink-800">{selectedPO.BatchNumber || "—"}</span></div>
                   </div>
                 </div>
               )}

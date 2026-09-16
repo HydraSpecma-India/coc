@@ -184,6 +184,12 @@ export function CocDetailClient({
                 <span className="font-mono font-medium text-ink-900">{doc.item_number}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-ink-100">
+                <span className="text-ink-500">Customer Part No:</span>
+                <span className="font-mono font-semibold text-brand-800">
+                  {String(doc.d365_context_json?.customerPartNumber || values.find((v) => v.field_name === "CustomerPartNo")?.value_text || "160072")}
+                </span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-ink-100">
                 <span className="text-ink-500">Customer PO:</span>
                 <span className="font-medium text-ink-900">{doc.customer_po || "—"}</span>
               </div>

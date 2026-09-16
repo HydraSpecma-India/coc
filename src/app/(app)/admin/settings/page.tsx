@@ -34,6 +34,7 @@ export default async function SettingsPage() {
       company: config.d365.company,
       productionEntity: config.d365.productionEntity,
       cocEntity: config.d365.cocEntity,
+      salesOrderEntity: config.d365.salesOrderEntity,
     },
     sharepoint: {
       mode: config.sharepoint.mode,

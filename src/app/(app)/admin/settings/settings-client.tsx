@@ -37,6 +37,7 @@ interface ConfigState {
     company: string;
     productionEntity: string;
     cocEntity: string;
+    salesOrderEntity?: string;
   };
   sharepoint: {
     mode: "mock" | "live";
@@ -296,6 +297,14 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
                 <Input
                   value={config.d365.cocEntity}
                   onChange={(e) => setConfig({ ...config, d365: { ...config.d365, cocEntity: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Sales Order Lines Entity" hint="Default: SalesOrderLines">
+                <Input
+                  value={config.d365.salesOrderEntity || "SalesOrderLines"}
+                  onChange={(e) => setConfig({ ...config, d365: { ...config.d365, salesOrderEntity: e.target.value } })}
+                  placeholder="SalesOrderLines"
                 />
               </Field>
             </div>

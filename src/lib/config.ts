@@ -20,6 +20,7 @@ export interface IntegrationConfig {
     company: string;
     productionEntity: string;
     cocEntity: string;
+    salesOrderEntity: string;
   };
   sharepoint: {
     mode: "mock" | "live";
@@ -126,6 +127,7 @@ export async function getActiveConfig(): Promise<IntegrationConfig> {
       company: str("d365.company", e.D365_COMPANY),
       productionEntity: str("d365.productionEntity", e.D365_PRODUCTION_ENTITY),
       cocEntity: str("d365.cocEntity", e.D365_COC_ENTITY),
+      salesOrderEntity: str("d365.salesOrderEntity", "SalesOrderLines"),
     },
     sharepoint: {
       mode: mode("sharepoint.mode", e.STORAGE_MODE),

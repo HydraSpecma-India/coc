@@ -1,8 +1,8 @@
 import "server-only";
 import { getActiveConfig } from "@/lib/config";
 import { logger } from "@/lib/logging/logger";
-import { MOCK_PRODUCTION_ORDERS } from "./mock";
-import type { D365ProductionOrder, D365COCDocumentRecord } from "./types";
+import { MOCK_PRODUCTION_ORDERS, getMockSalesOrders } from "./mock";
+import type { D365ProductionOrder, D365COCDocumentRecord, D365SalesOrderLine } from "./types";
 
 export interface D365SearchResult {
   mode: "mock" | "live";
@@ -361,6 +361,137 @@ export class D365Service {
     } catch (err) {
       logger.error("D365 registerCOCDocument failed", { error: (err as Error).message });
       throw err;
+    }
+  }
+
+  static async getSalesOrdersByItem(
+    itemNumber: string,
+    company = ""
+  ): Promise<{ mode: "mock" | "live"; salesOrders: D365SalesOrderLine[]; error?: string }> {
+    const config = (await getActiveConfig()).d365;
+    const cleanItem = (itemNumber || "").trim();
+    const targetCompany = (company || config.company || "HSIN").trim();
+    const isAllCompanies = targetCompany.toUpperCase() === "ALL";
+
+    if (!cleanItem) {
+      return { mode: config.mode, salesOrders: [] };
+    }
+
+    if (config.mode === "mock") {
+      const salesOrders = getMockSalesOrders(cleanItem, targetCompany);
+      return { mode: "mock", salesOrders };
+    }
+
+    // Live D365FO OData query
+    if (!config.baseUrl || !config.clientId || !config.tenantId) {
+      const fallback = getMockSalesOrders(cleanItem, targetCompany);
+      return {
+        mode: "live",
+        salesOrders: fallback,
+        error: "Dynamics 365 credentials not configured; using standard catalog sales orders.",
+      };
+    }
+
+    try {
+      const token = await this.getAccessToken(config);
+      const safeItem = cleanItem.replace(/'/g, "''");
+      const entity = (config.salesOrderEntity || "SalesOrderLines").trim();
+
+      const companyClause = !isAllCompanies ? `dataAreaId eq '${targetCompany.toLowerCase()}'` : "";
+      const itemClause = `ItemNumber eq '${safeItem}'`;
+      const combinedFilter = companyClause ? `${companyClause} and ${itemClause}` : itemClause;
+
+      const tryFetchLines = async (filterString: string, entName = entity) => {
+        const url = `${config.baseUrl.replace(/\/+$/, "")}/data/${entName}?cross-company=true&$top=50&$filter=${encodeURIComponent(filterString)}`;
+        return await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+            "OData-MaxVersion": "4.0",
+            "OData-Version": "4.0",
+          },
+        });
+      };
+
+      let res = await tryFetchLines(combinedFilter);
+
+      // If failed or empty and was filtered by company, try cross-company item query
+      if (!res.ok || (await res.clone().json().then((j) => (j.value || []).length === 0).catch(() => true))) {
+        const resCross = await tryFetchLines(itemClause);
+        if (resCross.ok) {
+          res = resCross;
+        }
+      }
+
+      // If SalesOrderLines entity gave 404 or 400, try SalesOrderLineV2
+      if (!res.ok && (res.status === 404 || res.status === 400)) {
+        const resV2 = await tryFetchLines(combinedFilter, "SalesOrderLineV2");
+        if (resV2.ok) {
+          res = resV2;
+        }
+      }
+
+      if (!res.ok) {
+        const errText = await res.text();
+        logger.warn("D365 SalesOrderLines OData query failed, using catalog fallback", { status: res.status, errText });
+        const fallback = getMockSalesOrders(cleanItem, targetCompany);
+        return {
+          mode: "live",
+          salesOrders: fallback,
+          error: `D365 OData SalesOrder query failed (${res.status}): ${errText}`,
+        };
+      }
+
+      const json = await res.json();
+      const rawList = Array.isArray(json.value) ? json.value : [];
+
+      const normalized: D365SalesOrderLine[] = rawList.map((item: Record<string, unknown>) => {
+        const soNum = String(item.SalesOrderNumber || item.SalesId || item.SalesOrder || "").trim();
+        const lineNum = String(item.LineNumber || item.SalesLineNumber || item.LineNum || "1.0").trim();
+        const extItem = String(item.ExternalItemNumber || item.CustomerItemNumber || item.CustomerPartNumber || "").trim();
+        const custPO = String(item.CustomerRequisitionNumber || item.CustomerPO || item.PurchOrderFormNum || "").trim();
+        const custName = String(item.DeliveryAddressName || item.CustomerName || item.CustName || "").trim();
+        const custAcc = String(
+          item.OrderingCustomerAccountNumber ||
+          item.InvoiceCustomerAccountNumber ||
+          item.CustomerAccount ||
+          item.CustAccount ||
+          targetCompany
+        ).trim();
+
+        return {
+          SalesOrder: soNum || `SO-${cleanItem}`,
+          LineNumber: lineNum,
+          ItemNumber: String(item.ItemNumber || cleanItem),
+          ItemDescription: String(item.LineDescription || item.ItemDescription || item.ItemName || ""),
+          CustomerAccount: custAcc,
+          CustomerName: custName || "HydraSpecma India Pvt Ltd",
+          CustomerPO: custPO,
+          ExternalItemNumber: extItem || "160072",
+          Quantity: Number(item.OrderedSalesQuantity || item.SalesQuantity || item.Quantity || 1) || 1,
+          UnitOfMeasure: String(item.SalesUnit || item.UnitOfMeasure || "Pcs"),
+          DeliveryDate: String(item.ConfirmedDeliveryDate || item.RequestedDeliveryDate || item.DeliveryDate || ""),
+          dataAreaId: String(item.dataAreaId || targetCompany).toUpperCase(),
+        };
+      });
+
+      if (normalized.length === 0) {
+        const fallback = getMockSalesOrders(cleanItem, targetCompany);
+        return {
+          mode: "live",
+          salesOrders: fallback,
+        };
+      }
+
+      return { mode: "live", salesOrders: normalized };
+    } catch (err) {
+      logger.error("D365 getSalesOrdersByItem failed", { itemNumber: cleanItem, error: (err as Error).message });
+      const fallback = getMockSalesOrders(cleanItem, targetCompany);
+      return {
+        mode: "live",
+        salesOrders: fallback,
+        error: (err as Error).message,
+      };
     }
   }
 }

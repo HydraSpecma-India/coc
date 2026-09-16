@@ -1,4 +1,4 @@
-import type { D365ProductionOrder } from "./types";
+import type { D365ProductionOrder, D365SalesOrderLine } from "./types";
 
 export const MOCK_PRODUCTION_ORDERS: D365ProductionOrder[] = [
   {
@@ -258,3 +258,268 @@ export const MOCK_PRODUCTION_ORDERS: D365ProductionOrder[] = [
     DeliveryDate: "2026-09-30",
   },
 ];
+
+export const MOCK_SALES_ORDER_LINES: D365SalesOrderLine[] = [
+  // 29110478R05 - Main tank assembly V112
+  {
+    SalesOrder: "SO-002859",
+    LineNumber: "1.0",
+    ItemNumber: "29110478R05",
+    ItemDescription: "Main tank assembly V112",
+    CustomerAccount: "HSIN",
+    CustomerName: "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
+    CustomerPO: "4509008214",
+    ExternalItemNumber: "160072",
+    Quantity: 10,
+    UnitOfMeasure: "pcs",
+    DeliveryDate: "2023-10-18",
+    dataAreaId: "HSIN",
+  },
+  {
+    SalesOrder: "SO-002860",
+    LineNumber: "1.0",
+    ItemNumber: "29110478R05",
+    ItemDescription: "Main tank assembly V112 (Standard Batch)",
+    CustomerAccount: "HSIN",
+    CustomerName: "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
+    CustomerPO: "4509008299",
+    ExternalItemNumber: "160072-V112",
+    Quantity: 25,
+    UnitOfMeasure: "pcs",
+    DeliveryDate: "2023-11-05",
+    dataAreaId: "HSIN",
+  },
+  {
+    SalesOrder: "SO-002861",
+    LineNumber: "2.0",
+    ItemNumber: "29110478R05",
+    ItemDescription: "Main tank assembly V112 - Spare Series",
+    CustomerAccount: "HSIN",
+    CustomerName: "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
+    CustomerPO: "4509009100",
+    ExternalItemNumber: "160072-SP",
+    Quantity: 5,
+    UnitOfMeasure: "pcs",
+    DeliveryDate: "2023-11-20",
+    dataAreaId: "HSIN",
+  },
+  {
+    SalesOrder: "SO-CN-0982",
+    LineNumber: "1.0",
+    ItemNumber: "29110478R05",
+    ItemDescription: "Main tank assembly V112 (China Production)",
+    CustomerAccount: "HGCN",
+    CustomerName: "VESTAS WIND TECHNOLOGY CHINA CO LTD",
+    CustomerPO: "4509009981",
+    ExternalItemNumber: "160072-CN",
+    Quantity: 15,
+    UnitOfMeasure: "pcs",
+    DeliveryDate: "2023-11-12",
+    dataAreaId: "HGCN",
+  },
+  {
+    SalesOrder: "SO-DK-0192",
+    LineNumber: "1.0",
+    ItemNumber: "29110478R05",
+    ItemDescription: "Main tank assembly V112 (Denmark Plant)",
+    CustomerAccount: "HSDK",
+    CustomerName: "VESTAS WIND SYSTEMS A/S",
+    CustomerPO: "4509001122",
+    ExternalItemNumber: "160072-DK",
+    Quantity: 20,
+    UnitOfMeasure: "pcs",
+    DeliveryDate: "2023-12-01",
+    dataAreaId: "HSDK",
+  },
+
+  // 1070.0049 - Hydraulic Assembly DN12 (Customer Part 29107156)
+  {
+    SalesOrder: "SO-1070-01",
+    LineNumber: "1.0",
+    ItemNumber: "1070.0049",
+    ItemDescription: "Hydraulic Assembly DN12 - 1070.0049",
+    CustomerAccount: "HSIN",
+    CustomerName: "JCB India Limited",
+    CustomerPO: "4509008214",
+    ExternalItemNumber: "29107156",
+    Quantity: 200,
+    UnitOfMeasure: "Pcs",
+    DeliveryDate: "2026-09-15",
+    dataAreaId: "HSIN",
+  },
+  {
+    SalesOrder: "SO-1070-02",
+    LineNumber: "2.0",
+    ItemNumber: "1070.0049",
+    ItemDescription: "Hydraulic Assembly DN12 - 1070.0049",
+    CustomerAccount: "HSIN",
+    CustomerName: "JCB India Limited",
+    CustomerPO: "4509008990",
+    ExternalItemNumber: "29107156",
+    Quantity: 100,
+    UnitOfMeasure: "Pcs",
+    DeliveryDate: "2026-09-22",
+    dataAreaId: "HSIN",
+  },
+
+  // 1071.0747 - High Pressure Flexible Hose Assembly DN16
+  {
+    SalesOrder: "SO-74721",
+    LineNumber: "1.0",
+    ItemNumber: "1071.0747",
+    ItemDescription: "High Pressure Flexible Hose Assembly DN16 - 1071.0747",
+    CustomerAccount: "HSIN",
+    CustomerName: "HydraSpecma India Pvt Ltd",
+    CustomerPO: "PO-HSIN-74721",
+    ExternalItemNumber: "160072",
+    Quantity: 100,
+    UnitOfMeasure: "Pcs",
+    DeliveryDate: "2026-09-28",
+    dataAreaId: "HSIN",
+  },
+  {
+    SalesOrder: "SO-74722",
+    LineNumber: "1.0",
+    ItemNumber: "1071.0747",
+    ItemDescription: "High Pressure Flexible Hose Assembly DN16 - 1071.0747",
+    CustomerAccount: "HSIN",
+    CustomerName: "HydraSpecma India Pvt Ltd",
+    CustomerPO: "PO-HSIN-74755",
+    ExternalItemNumber: "160072-V",
+    Quantity: 50,
+    UnitOfMeasure: "Pcs",
+    DeliveryDate: "2026-10-02",
+    dataAreaId: "HSIN",
+  },
+
+  // Other standard product numbers
+  {
+    SalesOrder: "SO-10923",
+    LineNumber: "1.0",
+    ItemNumber: "HS-HOSE-050-2SN",
+    ItemDescription: 'Hydraulic Hose Assembly 1/2" 2SN BSP Female 1200mm',
+    CustomerAccount: "CUST-JCB",
+    CustomerName: "JCB India Limited",
+    CustomerPO: "JCB-PO-88214",
+    ExternalItemNumber: "29107156",
+    Quantity: 250,
+    UnitOfMeasure: "Pcs",
+    DeliveryDate: "2026-09-20",
+    dataAreaId: "HSIN",
+  },
+  {
+    SalesOrder: "SO-10924",
+    LineNumber: "1.0",
+    ItemNumber: "HS-FIT-316-0808",
+    ItemDescription: 'Stainless Steel 316 Swivel Female Fitting 1/2" x 1/2"',
+    CustomerAccount: "CUST-CAT",
+    CustomerName: "Caterpillar India Pvt Ltd",
+    CustomerPO: "CAT-IN-4921",
+    ExternalItemNumber: "CAT-4921-X",
+    Quantity: 500,
+    UnitOfMeasure: "Pcs",
+    DeliveryDate: "2026-09-22",
+    dataAreaId: "HSIN",
+  },
+  {
+    SalesOrder: "SO-10925",
+    LineNumber: "2.0",
+    ItemNumber: "HS-FLG-6000-100",
+    ItemDescription: 'High Pressure Code 62 Flange 1" SAE 6000 PSI',
+    CustomerAccount: "CUST-VOLVO",
+    CustomerName: "Volvo Construction Equipment India",
+    CustomerPO: "VCE-77312",
+    ExternalItemNumber: "VCE-77312-A",
+    Quantity: 120,
+    UnitOfMeasure: "Pcs",
+    DeliveryDate: "2026-09-25",
+    dataAreaId: "HSIN",
+  },
+  {
+    SalesOrder: "SO-10926",
+    LineNumber: "1.0",
+    ItemNumber: "HS-TUBE-10MM-ST",
+    ItemDescription: "Hydraulic Seamless Precision Steel Tube 10mm OD x 1.5mm",
+    CustomerAccount: "CUST-AL",
+    CustomerName: "Ashok Leyland Defence",
+    CustomerPO: "AL-DIR-33291",
+    ExternalItemNumber: "AL-99821",
+    Quantity: 1000,
+    UnitOfMeasure: "Mtr",
+    DeliveryDate: "2026-09-28",
+    dataAreaId: "HSIN",
+  },
+  {
+    SalesOrder: "SO-10927",
+    LineNumber: "3.0",
+    ItemNumber: "HS-QDC-7241-08",
+    ItemDescription: 'Quick Disconnect Hydraulic Coupling ISO 7241-1 A 1/2"',
+    CustomerAccount: "CUST-TH",
+    CustomerName: "Tata Hitachi Construction Machinery",
+    CustomerPO: "TH-PO-01924",
+    ExternalItemNumber: "TH-QDC-019",
+    Quantity: 75,
+    UnitOfMeasure: "Pcs",
+    DeliveryDate: "2026-09-30",
+    dataAreaId: "HSIN",
+  },
+];
+
+export function getMockSalesOrders(itemNumber: string, company?: string): D365SalesOrderLine[] {
+  const cleanItem = (itemNumber || "").trim().toLowerCase();
+  const cleanComp = (company || "").trim().toLowerCase();
+  const isAllComp = !cleanComp || cleanComp === "all";
+
+  let matched = MOCK_SALES_ORDER_LINES.filter((so) => {
+    const soItem = so.ItemNumber.toLowerCase();
+    const itemMatch = soItem === cleanItem || cleanItem.includes(soItem) || soItem.includes(cleanItem);
+    const compMatch = isAllComp || (so.dataAreaId?.toLowerCase() === cleanComp) || (so.CustomerAccount?.toLowerCase().includes(cleanComp));
+    return itemMatch && compMatch;
+  });
+
+  if (matched.length === 0 && cleanItem) {
+    const baseCode = cleanItem.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+    const shortCode = baseCode.slice(-6) || "9001";
+    const comp = !isAllComp ? company!.toUpperCase() : "HSIN";
+    const custName = comp === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD";
+    
+    // Check known item mappings
+    let derivedCustomerPart = "160072";
+    if (cleanItem.includes("1070.0049") || cleanItem.includes("10700049")) {
+      derivedCustomerPart = "29107156";
+    }
+
+    matched = [
+      {
+        SalesOrder: `SO-${shortCode}`,
+        LineNumber: "1.0",
+        ItemNumber: itemNumber,
+        ItemDescription: `Assembly Specification for ${itemNumber}`,
+        CustomerAccount: comp,
+        CustomerName: custName,
+        CustomerPO: `PO-${shortCode}-01`,
+        ExternalItemNumber: derivedCustomerPart,
+        Quantity: 50,
+        UnitOfMeasure: "Pcs",
+        DeliveryDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+        dataAreaId: comp,
+      },
+      {
+        SalesOrder: `SO-${shortCode}-02`,
+        LineNumber: "2.0",
+        ItemNumber: itemNumber,
+        ItemDescription: `Assembly Specification for ${itemNumber}`,
+        CustomerAccount: comp,
+        CustomerName: custName,
+        CustomerPO: `PO-${shortCode}-02`,
+        ExternalItemNumber: derivedCustomerPart,
+        Quantity: 25,
+        UnitOfMeasure: "Pcs",
+        DeliveryDate: new Date(Date.now() + 28 * 86400000).toISOString().slice(0, 10),
+        dataAreaId: comp,
+      },
+    ];
+  }
+
+  return matched;
+}
