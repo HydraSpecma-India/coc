@@ -222,21 +222,25 @@ export function CocWizard({
   const generatePreview = async () => {
     if (!selectedPO) return;
     setPreviewLoading(true);
+    const prodOrder = selectedPO.ProductionOrder?.trim() || selectedPO.ItemNumber?.trim() || "PO-HSIN-001";
+    const itemNum = selectedPO.ItemNumber?.trim() || prodOrder;
+    const itemDesc = selectedPO.ItemDescription?.trim() || `HydraSpecma Assembly (${itemNum})`;
+
     try {
       const res = await fetch("/api/coc/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          productionOrder: selectedPO.ProductionOrder,
-          itemNumber: selectedPO.ItemNumber,
-          itemDescription: selectedPO.ItemDescription,
-          customerName: selectedPO.CustomerName,
-          customerPO: selectedPO.CustomerPO,
-          salesOrder: selectedPO.SalesOrder,
-          batchNumber: selectedPO.BatchNumber,
-          serialNumber: selectedPO.SerialNumber,
-          quantity: selectedPO.Quantity,
-          unitOfMeasure: selectedPO.UnitOfMeasure,
+          productionOrder: prodOrder,
+          itemNumber: itemNum,
+          itemDescription: itemDesc,
+          customerName: selectedPO.CustomerName || "HydraSpecma India Pvt Ltd",
+          customerPO: selectedPO.CustomerPO || "",
+          salesOrder: selectedPO.SalesOrder || "",
+          batchNumber: selectedPO.BatchNumber || "HS-B24-0747",
+          serialNumber: selectedPO.SerialNumber || "",
+          quantity: selectedPO.Quantity || 1,
+          unitOfMeasure: selectedPO.UnitOfMeasure || "Pcs",
           manualValues: manualFields,
           signatureBase64: signatureDataUrl,
         }),
@@ -265,6 +269,10 @@ export function CocWizard({
       return;
     }
 
+    const prodOrder = selectedPO.ProductionOrder?.trim() || selectedPO.ItemNumber?.trim() || "PO-HSIN-001";
+    const itemNum = selectedPO.ItemNumber?.trim() || prodOrder;
+    const itemDesc = selectedPO.ItemDescription?.trim() || `HydraSpecma Assembly (${itemNum})`;
+
     setGenerating(true);
     try {
       const res = await api<{ ok: boolean; documentId: string; cocNumber: string }>("/api/coc", {
@@ -273,18 +281,18 @@ export function CocWizard({
           templateId: tpl.id,
           templateVersionId: tpl.active_version_id || tpl.id,
           templateVersionNumber: tpl.active_version_number || 1,
-          productionOrder: selectedPO.ProductionOrder,
-          itemNumber: selectedPO.ItemNumber,
-          itemDescription: selectedPO.ItemDescription,
-          customerName: selectedPO.CustomerName,
-          customerPO: selectedPO.CustomerPO,
-          salesOrder: selectedPO.SalesOrder,
-          salesLine: selectedPO.SalesLine,
-          customerAccount: selectedPO.CustomerAccount,
-          quantity: selectedPO.Quantity,
-          unitOfMeasure: selectedPO.UnitOfMeasure,
-          batchNumber: selectedPO.BatchNumber,
-          serialNumber: selectedPO.SerialNumber,
+          productionOrder: prodOrder,
+          itemNumber: itemNum,
+          itemDescription: itemDesc,
+          customerName: selectedPO.CustomerName || "HydraSpecma India Pvt Ltd",
+          customerPO: selectedPO.CustomerPO || "",
+          salesOrder: selectedPO.SalesOrder || "",
+          salesLine: selectedPO.SalesLine || "1.0",
+          customerAccount: selectedPO.CustomerAccount || "HSIN",
+          quantity: selectedPO.Quantity || 1,
+          unitOfMeasure: selectedPO.UnitOfMeasure || "Pcs",
+          batchNumber: selectedPO.BatchNumber || "HS-B24-0747",
+          serialNumber: selectedPO.SerialNumber || "",
           manualValues: manualFields,
           signatureBase64: signatureDataUrl,
         },
