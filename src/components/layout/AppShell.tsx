@@ -45,6 +45,7 @@ const nav = (role: Role) => [
 export function AppShell({ user, d365Mode, storageMode, children }: Props) {
   const pathname = usePathname();
   const isDesigner = pathname.includes("/designer/");
+  const isCocNew = pathname.startsWith("/coc/new");
   const groups = nav(user.role);
 
   return (
@@ -106,8 +107,15 @@ export function AppShell({ user, d365Mode, storageMode, children }: Props) {
           </div>
         </aside>
       )}
-      <main className={cn("flex min-w-0 flex-1 flex-col overflow-hidden", isDesigner ? "" : "")}>
-        <div className={cn("flex-1 overflow-y-auto", isDesigner ? "" : "px-8 py-6")}>{children}</div>
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div
+          className={cn(
+            "flex-1",
+            isDesigner || isCocNew ? "overflow-hidden flex flex-col" : "overflow-y-auto px-8 py-6"
+          )}
+        >
+          {children}
+        </div>
       </main>
       <Toaster />
     </div>

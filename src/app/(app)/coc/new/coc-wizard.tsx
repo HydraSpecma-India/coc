@@ -675,14 +675,17 @@ export function CocWizard({
   };
 
   return (
-    <div className="mx-auto max-w-5xl pb-16">
-      <PageHeader
-        title="Create Certificate of Conformity"
-        description="Issue an official COC by selecting a production order, validating quality parameters, and applying an authorized digital signature."
-      />
+    <div className="flex h-full w-full overflow-hidden">
+      {/* Center Main Scrollable Workflow Canvas */}
+      <div className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="mx-auto max-w-5xl space-y-6 pb-20">
+          <PageHeader
+            title="Create Certificate of Conformity"
+            description="Issue an official COC by selecting a production order, validating quality parameters, and applying an authorized digital signature."
+          />
 
-      {/* Step Progress Bar */}
-      <div className="mb-8 grid grid-cols-4 gap-2">
+          {/* Step Progress Bar */}
+          <div className="mb-6 grid grid-cols-4 gap-2">
         {[
           { num: 1, label: "Select Order", icon: FileCheck },
           { num: 2, label: "Quality Checks", icon: Sparkles },
@@ -798,9 +801,9 @@ export function CocWizard({
             </CardBody>
           </Card>
 
-          {/* Selected Order Banner - Positioned Under Document Template */}
+          {/* Selected Order Banner - Mobile/Small Screen Fallback */}
           {selectedPO && (
-            <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/80 p-4 sm:p-5 shadow-xs animate-in fade-in">
+            <div className="lg:hidden rounded-xl border-2 border-emerald-300 bg-emerald-50/80 p-4 sm:p-5 shadow-xs animate-in fade-in">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-start sm:items-center gap-2.5 min-w-0">
                   <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
@@ -1403,9 +1406,9 @@ export function CocWizard({
                 </div>
               )}
 
-              {/* Selected Order Summary */}
+              {/* Selected Order Summary (mobile / small screen fallback) */}
               {selectedPO && (
-                <div className="rounded-xl border-2 border-brand-300 bg-gradient-to-br from-brand-50/40 via-white to-emerald-50/30 p-4 sm:p-5 shadow-xs space-y-4">
+                <div className="lg:hidden rounded-xl border-2 border-brand-300 bg-gradient-to-br from-brand-50/40 via-white to-emerald-50/30 p-4 sm:p-5 shadow-xs space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink-100 pb-3">
                     <div className="flex items-start sm:items-center gap-2.5">
                       <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500 text-ink-900 font-bold shadow-xs shrink-0">
@@ -2007,6 +2010,425 @@ export function CocWizard({
           </CardBody>
         </Card>
       )}
+
+        </div>
+      </div>
+
+      {/* Fixed Right Sidebar - Fixed like the left menu bar */}
+      <aside className="hidden lg:flex w-96 xl:w-[420px] 2xl:w-[460px] shrink-0 flex-col border-l border-ink-200 bg-white h-full overflow-hidden shadow-xs">
+        {/* Right Sidebar Header */}
+        <div className="flex items-center justify-between border-b border-ink-200 px-4 py-3 bg-white shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 text-ink-900 font-bold shadow-xs shrink-0">
+              <CheckCircle2 className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-ink-500 leading-tight">
+                Active Production Order
+              </div>
+              <div className="text-xs font-bold text-ink-900 truncate">
+                {selectedPO ? selectedPO.ProductionOrder : "None Selected"}
+              </div>
+            </div>
+          </div>
+          {selectedPO && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setManualOrder({ ...selectedPO });
+                setModalIsCustomSO(false);
+                setShowManualModal(true);
+                fetchModalSalesOrders(selectedPO.ItemNumber, selectedPO.dataAreaId || selectedCompany);
+              }}
+              className="text-xs gap-1 h-7 px-2 shrink-0 border-ink-200 hover:bg-ink-100"
+            >
+              <Edit3 className="h-3 w-3" />
+              Edit Details
+            </Button>
+          )}
+        </div>
+
+        {/* Right Sidebar Scrollable Body */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+          {selectedPO ? (
+            <>
+              {/* Order Number & Badges */}
+              <div className="rounded-xl border border-brand-200 bg-white p-3.5 shadow-xs space-y-2.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-mono text-xs font-bold text-brand-900 bg-brand-100/80 px-2 py-0.5 rounded border border-brand-300">
+                    {selectedPO.ProductionOrder}
+                  </span>
+                  {selectedPO.dataAreaId && (
+                    <Badge tone="brand" className="text-[10px] font-mono font-bold">
+                      {selectedPO.dataAreaId}
+                    </Badge>
+                  )}
+                  {selectedPO.ProductionOrderStatus && (
+                    <Badge
+                      tone={
+                        selectedPO.ProductionOrderStatus === "Completed"
+                          ? "success"
+                          : selectedPO.ProductionOrderStatus === "Started"
+                          ? "warning"
+                          : selectedPO.ProductionOrderStatus === "Released"
+                          ? "info"
+                          : "brand"
+                      }
+                      className="text-[10px] font-semibold"
+                    >
+                      {selectedPO.ProductionOrderStatus === "Completed"
+                        ? "End"
+                        : selectedPO.ProductionOrderStatus === "ReportedFinished"
+                        ? "Reported as finished"
+                        : selectedPO.ProductionOrderStatus}
+                    </Badge>
+                  )}
+                </div>
+
+                <div>
+                  <div className="text-sm font-bold text-ink-900 leading-snug">
+                    {selectedPO.ItemDescription}
+                  </div>
+                  <div className="text-[11px] font-mono text-ink-500 mt-0.5">
+                    D365 Item: <strong className="text-ink-800">{selectedPO.ItemNumber}</strong>
+                  </div>
+                </div>
+
+                {/* Qualification Status Badges */}
+                <div className="pt-1">
+                  {selectedPO.isFullyCertified ? (
+                    <div className="rounded-md border border-emerald-300 bg-emerald-50/90 p-2.5 text-xs text-emerald-950 space-y-1">
+                      <div className="flex items-start gap-1.5">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 shrink-0 mt-0.5" />
+                        <span className="leading-tight">
+                          <strong>COC Created ({selectedPO.certifiedQuantity}/{selectedPO.Quantity} Qty):</strong> All units certified. Not qualified for generating another COC.
+                        </span>
+                      </div>
+                      {selectedPO.cocList?.[0] && (
+                        <Link
+                          href={`/coc/${selectedPO.cocList[0].id}`}
+                          target="_blank"
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 underline hover:text-emerald-950"
+                        >
+                          Open Certificate ({selectedPO.cocList[0].coc_number}) <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      )}
+                    </div>
+                  ) : selectedPO.certifiedQuantity ? (
+                    <div className="rounded-md border border-amber-300 bg-amber-50/90 p-2.5 text-xs text-amber-950 space-y-1">
+                      <div className="flex items-start gap-1.5">
+                        <Info className="h-3.5 w-3.5 text-amber-700 shrink-0 mt-0.5" />
+                        <span className="leading-tight">
+                          <strong>Partial Certification:</strong> {selectedPO.certifiedQuantity} of {selectedPO.Quantity} certified. {selectedPO.pendingCocQuantity} unit(s) pending.
+                        </span>
+                      </div>
+                      {selectedPO.cocList?.[0] && (
+                        <Link
+                          href={`/coc/${selectedPO.cocList[0].id}`}
+                          target="_blank"
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-900 underline hover:text-amber-950"
+                        >
+                          View Certified Unit ({selectedPO.cocList[0].coc_number}) <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      )}
+                    </div>
+                  ) : (
+                    <Badge tone="neutral" className="text-[10px] font-medium">
+                      {selectedPO.Quantity} Qty Pending for COC
+                    </Badge>
+                  )}
+                </div>
+
+                {/* Serial Warning if duplicate serial */}
+                {serialWarning && (
+                  <div className="rounded-md border border-red-300 bg-red-50 p-2 text-xs text-red-900 flex items-start gap-1.5">
+                    <AlertCircle className="h-3.5 w-3.5 text-red-600 shrink-0 mt-0.5" />
+                    <span className="text-[11px] leading-tight">{serialWarning}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Sales Order & Customer Part Configuration Card */}
+              <div className="rounded-xl border border-brand-200 bg-white p-3.5 shadow-xs space-y-3">
+                {/* Sales Order Dropdown */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-ink-800 flex items-center gap-1.5">
+                      <ShoppingCart className="h-3.5 w-3.5 text-brand-600" />
+                      Sales Order Number
+                    </label>
+                    <span className="text-[11px] text-brand-700 font-medium">
+                      {loadingSalesOrders ? "Querying D365..." : `${salesOrders.length} matching order(s)`}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-ink-400 font-mono">
+                    Cross-checked by Item: {selectedPO.ItemNumber}
+                  </div>
+
+                  {isCustomSO ? (
+                    <div className="flex gap-1.5">
+                      <Input
+                        value={customSOValue || selectedPO.SalesOrder}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setCustomSOValue(v);
+                          setSelectedPO({ ...selectedPO, SalesOrder: v });
+                        }}
+                        placeholder="Enter custom SO..."
+                        className="font-mono text-xs"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsCustomSO(false)}
+                        className="text-xs px-2 shrink-0"
+                      >
+                        Back
+                      </Button>
+                    </div>
+                  ) : (
+                    <Select
+                      value={salesOrders.some((s) => s.SalesOrder === selectedPO.SalesOrder) ? selectedPO.SalesOrder : (salesOrders[0]?.SalesOrder || "__custom__")}
+                      onChange={(e) => handleSelectSalesOrder(e.target.value)}
+                      className="font-medium text-xs bg-slate-50 border-brand-200 focus:border-brand-500 w-full"
+                    >
+                      {salesOrders.map((so) => {
+                        let prefix = "🟢";
+                        let statusText = `${so.Quantity} pcs available`;
+                        if (so.isFullyAssigned) {
+                          prefix = "🔴 FULLY ASSIGNED:";
+                          statusText = `${so.assignedQuantity}/${so.Quantity} pcs used (${so.assignedCocs?.map((c) => c.coc_number).join(", ")})`;
+                        } else if (so.assignedQuantity) {
+                          prefix = "🟡 PARTIAL:";
+                          statusText = `${so.assignedQuantity}/${so.Quantity} assigned, ${so.remainingSalesQty} pending (${so.assignedCocs?.map((c) => c.coc_number).join(", ")})`;
+                        }
+                        return (
+                          <option key={so.SalesOrder} value={so.SalesOrder}>
+                            {prefix} {so.SalesOrder} • {so.CustomerName?.slice(0, 16)} • Cust Part: {so.ExternalItemNumber || "160072"} • [{statusText}]
+                          </option>
+                        );
+                      })}
+                      <option value="__custom__">+ Enter Custom Sales Order...</option>
+                    </Select>
+                  )}
+
+                  <p className="text-[10px] text-ink-500 leading-tight">
+                    Cross-referenced between Production Item Number <span className="font-mono font-medium text-ink-700">{selectedPO.ItemNumber}</span> and Sales Order Line items in D365.
+                  </p>
+
+                  {/* Active Sales Order Allocation Box */}
+                  {(() => {
+                    const activeSO = salesOrders.find((s) => s.SalesOrder === selectedPO.SalesOrder);
+                    if (!activeSO) return null;
+                    return (
+                      <div className="mt-2 rounded-lg border border-brand-200 bg-brand-50/50 p-2.5 text-xs space-y-2">
+                        <div className="flex items-center justify-between font-bold text-ink-900 text-[11px]">
+                          <span className="flex items-center gap-1 truncate">
+                            <ShoppingCart className="h-3 w-3 text-brand-600 shrink-0" />
+                            SO Allocation: <span className="font-mono text-brand-900">{activeSO.SalesOrder}</span>
+                          </span>
+                          <Badge tone={activeSO.isFullyAssigned ? "danger" : activeSO.assignedQuantity ? "warning" : "success"} className="text-[10px] px-1.5 py-0">
+                            {activeSO.isFullyAssigned
+                              ? "Fully Assigned"
+                              : activeSO.assignedQuantity
+                              ? `${activeSO.assignedQuantity}/${activeSO.Quantity} Assigned`
+                              : "Available"}
+                          </Badge>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-1.5 text-[10px] text-ink-700 bg-white/90 p-1.5 rounded border border-brand-100 text-center">
+                          <div>Total: <strong className="text-ink-900 block">{activeSO.Quantity} Pcs</strong></div>
+                          <div>Certified: <strong className="text-emerald-700 block">{activeSO.assignedQuantity || 0} Pcs</strong></div>
+                          <div>Pending: <strong className="text-brand-800 block">{activeSO.remainingSalesQty !== undefined ? activeSO.remainingSalesQty : activeSO.Quantity} Pcs</strong></div>
+                        </div>
+
+                        {activeSO.assignedCocs && activeSO.assignedCocs.length > 0 && (
+                          <div className="pt-1 text-[10px] space-y-1">
+                            <p className="font-semibold text-ink-800">Assigned COCs:</p>
+                            <div className="flex flex-wrap gap-1">
+                              {activeSO.assignedCocs.map((c) => (
+                                <Link
+                                  key={c.id}
+                                  href={`/coc/${c.id}`}
+                                  target="_blank"
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-brand-300 text-brand-900 font-mono font-bold hover:bg-brand-100 text-[10px]"
+                                >
+                                  <span>{c.coc_number}</span>
+                                  <ExternalLink className="h-2.5 w-2.5 text-brand-600" />
+                                </Link>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Customer Part Number (External Item Number) */}
+                <div className="space-y-1.5 pt-2 border-t border-ink-100">
+                  <label className="text-xs font-bold text-ink-800 flex items-center gap-1.5">
+                    <Tag className="h-3.5 w-3.5 text-brand-600" />
+                    Customer Part No. (External Item)
+                  </label>
+                  <Input
+                    value={selectedPO.CustomerPartNumber || ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedPO({ ...selectedPO, CustomerPartNumber: val });
+                      setManualFields((prev) => ({ ...prev, CustomerPartNo: val }));
+                    }}
+                    placeholder="e.g. 160072 or 29274288"
+                    className="font-mono font-bold text-brand-900 bg-brand-50/50 border-brand-300 text-xs"
+                  />
+                  <p className="text-[10px] text-brand-700">
+                    Populated from <strong>ExternalItemNumber</strong> on Sales Line.
+                  </p>
+                </div>
+              </div>
+
+              {/* Order Key Metadata Box */}
+              <div className="rounded-xl border border-ink-200 bg-white p-3 text-xs space-y-1.5 text-ink-700 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-ink-500 text-[11px]">Customer:</span>
+                  <span className="font-semibold text-ink-900 text-right truncate max-w-[200px]" title={selectedPO.CustomerName}>
+                    {selectedPO.CustomerName || "—"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-ink-500 text-[11px]">Customer PO:</span>
+                  <span className="font-mono font-semibold text-ink-900">{selectedPO.CustomerPO || "—"}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-ink-500 text-[11px]">Total Quantity:</span>
+                  <span className="font-semibold text-ink-900">{selectedPO.Quantity} {selectedPO.UnitOfMeasure}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-ink-500 text-[11px]">Batch Number:</span>
+                  <span className="font-mono text-ink-800">{selectedPO.BatchNumber || "—"}</span>
+                </div>
+                {selectedPO.dataAreaId && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-ink-500 text-[11px]">Legal Entity:</span>
+                    <span className="font-mono font-bold text-brand-800">{selectedPO.dataAreaId}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Step Companion status */}
+              {step > 1 && (
+                <div className="rounded-xl border border-sky-200 bg-sky-50/50 p-3 text-xs space-y-1.5 text-sky-900 shadow-xs">
+                  <div className="font-bold text-sky-950 flex items-center justify-between text-[11px]">
+                    <span>Active Step: Step {step}</span>
+                    <Badge tone="info" className="text-[10px]">
+                      {step === 2 ? "Quality Checks" : step === 3 ? "Digital Sign" : "Review & Issue"}
+                    </Badge>
+                  </div>
+                  {step === 2 && (
+                    <div className="text-[11px] text-sky-800">
+                      Inspector: <strong>{manualFields.InspectorName}</strong> • Date: <strong>{manualFields.InspectionDate}</strong>
+                    </div>
+                  )}
+                  {step === 3 && (
+                    <div className="text-[11px] text-sky-800">
+                      Signature: {hasSignature ? <strong className="text-emerald-700">Captured ✓</strong> : <strong className="text-amber-700">Pending drawing...</strong>}
+                    </div>
+                  )}
+                  {step === 4 && (
+                    <div className="text-[11px] text-sky-800">
+                      Certificate ready for official issuance and SharePoint upload.
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center p-8 text-center space-y-3 my-auto h-full">
+              <div className="h-12 w-12 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 shadow-xs">
+                <ShoppingCart className="h-6 w-6" />
+              </div>
+              <h4 className="text-sm font-bold text-ink-900">No Order Selected</h4>
+              <p className="text-xs text-ink-500 max-w-[240px]">
+                Select a production order from the list on the left to verify sales orders and proceed directly.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => openManualOrder(poQuery)}
+                className="text-xs gap-1.5"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Enter Custom Order
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* Right Sidebar Pinned Footer */}
+        <div className="border-t border-ink-200 p-4 bg-white shrink-0 space-y-2 shadow-xs">
+          {step === 1 ? (
+            <div className="space-y-2">
+              {selectedPO?.isFullyCertified ? (
+                <>
+                  <div className="text-[11px] font-semibold text-emerald-950 bg-emerald-100/70 p-2 rounded border border-emerald-300 text-center">
+                    Fully certified ({selectedPO.certifiedQuantity}/{selectedPO.Quantity}). Not qualified for another COC.
+                  </div>
+                  {selectedPO.cocList?.[0] && (
+                    <Link
+                      href={`/coc/${selectedPO.cocList[0].id}`}
+                      target="_blank"
+                      className="flex items-center justify-center gap-1.5 w-full px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      View Certificate ({selectedPO.cocList[0].coc_number})
+                    </Link>
+                  )}
+                  <Button disabled className="w-full justify-center opacity-50 text-xs">
+                    Next: Quality Checks <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  disabled={!selectedPO}
+                  onClick={() => setStep(2)}
+                  className="w-full justify-center gap-2 font-bold py-2.5 shadow-sm text-sm"
+                >
+                  Next: Quality Checks <ArrowRight className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          ) : step === 2 ? (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setStep(1)} className="flex-1 justify-center text-xs">
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Orders
+              </Button>
+              <Button onClick={() => setStep(3)} className="flex-1 justify-center text-xs font-bold">
+                Next: Sign <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
+          ) : step === 3 ? (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setStep(2)} className="flex-1 justify-center text-xs">
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Quality
+              </Button>
+              <Button onClick={() => { generatePreview(); setStep(4); }} className="flex-1 justify-center text-xs font-bold">
+                Next: Review <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setStep(3)} className="flex-1 justify-center text-xs">
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Sign
+              </Button>
+              <Button loading={generating} onClick={handleCreateCoc} className="flex-1 justify-center text-xs font-bold bg-brand-500 hover:bg-brand-600 text-ink-900">
+                Issue COC <FileCheck className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
+          )}
+        </div>
+      </aside>
 
       {/* Upload PDF Template Modal */}
       <Dialog
