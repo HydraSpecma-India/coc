@@ -227,6 +227,14 @@ export class TeamsService {
         "$content-type": "application/pdf",
         "$content": base64Pdf,
       };
+      payload.attachments = [
+        {
+          name: fileName,
+          content: base64Pdf,
+          contentBytes: base64Pdf,
+          contentType: "application/pdf",
+        },
+      ];
     }
 
     const controller = new AbortController();
