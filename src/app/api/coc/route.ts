@@ -131,8 +131,15 @@ export const POST = route(async (req) => {
     await logProcessStep(doc.id, "RENDER", "OK", { byteLength: pdfBytes.length });
 
     // Step 4: Storage / SharePoint Upload
-    const storagePath = await uploadGeneratedPdf(cocNumber, pdfBytes);
-    await logProcessStep(doc.id, "SP_UPLOAD", "OK", { storagePath });
+    let storagePath: string | null = null;
+    try {
+      storagePath = await uploadGeneratedPdf(cocNumber, pdfBytes);
+      await logProcessStep(doc.id, "SP_UPLOAD", "OK", { storagePath });
+    } catch (spErr) {
+      logger.error("Storage upload error", { error: (spErr as Error).message });
+      await logProcessStep(doc.id, "SP_UPLOAD", "FAILED", {}, (spErr as Error).message);
+      storagePath = `${new Date().getFullYear()}/${cocNumber}.pdf`;
+    }
 
     // Step 5: D365 Update
     try {

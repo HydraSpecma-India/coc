@@ -37,6 +37,7 @@ import {
   Building2,
   ShieldCheck,
   Check,
+  Filter,
 } from "lucide-react";
 
 interface TemplateSummary {
@@ -67,6 +68,7 @@ export function CocWizard({
 
   // PO Search & Selection
   const [selectedCompany, setSelectedCompany] = useState<string>("HSIN");
+  const [selectedStatus, setSelectedStatus] = useState<string>("ALL_ACTIVE");
   const [poQuery, setPoQuery] = useState("");
   const [searchResults, setSearchResults] = useState<D365ProductionOrder[]>([]);
   const [selectedPO, setSelectedPO] = useState<D365ProductionOrder | null>(null);
@@ -169,16 +171,17 @@ export function CocWizard({
 
   // Initial PO search
   useEffect(() => {
-    searchOrders("", "HSIN");
+    searchOrders("", "HSIN", "ALL_ACTIVE");
   }, []);
 
-  const searchOrders = async (q: string, comp = selectedCompany) => {
+  const searchOrders = async (q: string, comp = selectedCompany, st = selectedStatus) => {
     setSearching(true);
     setD365Error(null);
     try {
       const compParam = comp ? `&company=${encodeURIComponent(comp)}` : "";
+      const statusParam = st ? `&status=${encodeURIComponent(st)}` : "";
       const res = await api<{ ok: boolean; mode?: "mock" | "live"; orders: D365ProductionOrder[]; error?: string }>(
-        `/api/d365/production-orders?q=${encodeURIComponent(q)}${compParam}`
+        `/api/d365/production-orders?q=${encodeURIComponent(q)}${compParam}${statusParam}`
       );
       if (res.mode) setD365Mode(res.mode);
       if (res.error) setD365Error(res.error);
@@ -201,7 +204,12 @@ export function CocWizard({
 
   const handleCompanyChange = (newCompany: string) => {
     setSelectedCompany(newCompany);
-    searchOrders(poQuery, newCompany);
+    searchOrders(poQuery, newCompany, selectedStatus);
+  };
+
+  const handleStatusChange = (newStatus: string) => {
+    setSelectedStatus(newStatus);
+    searchOrders(poQuery, selectedCompany, newStatus);
   };
 
   // Canvas drawing handlers
@@ -509,12 +517,12 @@ export function CocWizard({
                     <Input
                       value={poQuery}
                       onChange={(e) => setPoQuery(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && searchOrders(poQuery, selectedCompany)}
-                      placeholder={`Search in ${selectedCompany === "ALL" ? "all entities" : selectedCompany} (e.g. HSIN-000011, 29110478R05)...`}
+                      onKeyDown={(e) => e.key === "Enter" && searchOrders(poQuery, selectedCompany, selectedStatus)}
+                      placeholder="Search product number, order, or customer part (e.g. 29110478R05, HSIN-000011, 160072)..."
                       className="pl-9"
                     />
                   </div>
-                  <Button loading={searching} onClick={() => searchOrders(poQuery, selectedCompany)}>
+                  <Button loading={searching} onClick={() => searchOrders(poQuery, selectedCompany, selectedStatus)}>
                     Search D365
                   </Button>
                   <Button
@@ -528,7 +536,7 @@ export function CocWizard({
                 </div>
 
                 {/* Quick Entity Switcher Tabs */}
-                <div className="flex items-center gap-1.5 text-xs text-ink-500 pt-1">
+                <div className="flex items-center gap-1.5 text-xs text-ink-500 pt-1 flex-wrap">
                   <span className="text-[11px] font-medium text-ink-400">Legal Entity:</span>
                   {[
                     { code: "HSIN", label: "HSIN (India)" },
@@ -552,6 +560,38 @@ export function CocWizard({
                   ))}
                   <span className="ml-auto text-[11px] font-mono text-ink-400">
                     OData dataAreaId: <strong>{selectedCompany === "ALL" ? "cross-company" : selectedCompany.toLowerCase()}</strong>
+                  </span>
+                </div>
+
+                {/* Production Order Status Filter (Released, Started, Reported as finished, End only - sorted last to first) */}
+                <div className="flex items-center gap-1.5 text-xs text-ink-600 pt-2 border-t border-ink-100 flex-wrap">
+                  <div className="flex items-center gap-1 text-[11px] font-semibold text-ink-700 mr-1">
+                    <Filter className="h-3.5 w-3.5 text-brand-600" />
+                    <span>Status Filter:</span>
+                  </div>
+                  {[
+                    { code: "ALL_ACTIVE", label: "All Active (4 Statuses)" },
+                    { code: "Released", label: "Released" },
+                    { code: "Started", label: "Started" },
+                    { code: "ReportedFinished", label: "Reported as finished" },
+                    { code: "Completed", label: "End (Completed)" },
+                    { code: "ALL", label: "All Statuses" },
+                  ].map((st) => (
+                    <button
+                      key={st.code}
+                      type="button"
+                      onClick={() => handleStatusChange(st.code)}
+                      className={`px-2.5 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                        selectedStatus === st.code
+                          ? "bg-ink-900 text-white border-ink-900 font-bold shadow-xs"
+                          : "bg-white text-ink-600 border-ink-200 hover:bg-ink-100"
+                      }`}
+                    >
+                      {st.label}
+                    </button>
+                  ))}
+                  <span className="ml-auto text-[11px] font-medium text-brand-800 bg-brand-50 px-2 py-0.5 rounded border border-brand-200">
+                    Sorted: Last to First &darr;
                   </span>
                 </div>
               </div>
@@ -701,6 +741,23 @@ export function CocWizard({
                   {searchResults.map((order) => {
                     const isSelected = selectedPO?.ProductionOrder === order.ProductionOrder;
                     const entityBadge = order.dataAreaId || (order.CustomerAccount ? order.CustomerAccount.toUpperCase() : selectedCompany);
+                    const status = order.ProductionOrderStatus;
+                    let statusTone: "neutral" | "success" | "warning" | "danger" | "info" | "brand" = "neutral";
+                    let statusLabel = status || "";
+                    if (status === "Completed") {
+                      statusTone = "success";
+                      statusLabel = "End";
+                    } else if (status === "ReportedFinished") {
+                      statusTone = "brand";
+                      statusLabel = "Reported as finished";
+                    } else if (status === "Started") {
+                      statusTone = "warning";
+                      statusLabel = "Started";
+                    } else if (status === "Released") {
+                      statusTone = "info";
+                      statusLabel = "Released";
+                    }
+
                     return (
                       <div
                         key={order.ProductionOrder}
@@ -711,8 +768,8 @@ export function CocWizard({
                             : "border-ink-200 hover:border-ink-300 bg-white"
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-mono text-xs font-bold text-brand-700">
                               {order.ProductionOrder}
                             </span>
@@ -721,15 +778,20 @@ export function CocWizard({
                                 {entityBadge}
                               </Badge>
                             )}
+                            {statusLabel && (
+                              <Badge tone={statusTone} className="text-[10px] font-semibold px-1.5 py-0.5">
+                                {statusLabel}
+                              </Badge>
+                            )}
                           </div>
-                          <Badge tone="info">{order.CustomerName}</Badge>
+                          <Badge tone="info" className="truncate max-w-[130px]">{order.CustomerName}</Badge>
                         </div>
                         <div className="mt-1 font-semibold text-sm text-ink-900 line-clamp-1">
                           {order.ItemDescription}
                         </div>
                         <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-ink-600">
-                          <div>Part: <span className="font-mono font-medium text-ink-900">{order.ItemNumber}</span></div>
-                          <div>Customer Part: <span className="font-mono font-medium text-brand-800">{order.CustomerPartNumber || "160072"}</span></div>
+                          <div>Product / Part: <span className="font-mono font-bold text-ink-900">{order.ItemNumber}</span></div>
+                          <div>Customer Part: <span className="font-mono font-semibold text-brand-800">{order.CustomerPartNumber || "160072"}</span></div>
                           <div>Cust PO: <span className="font-medium">{order.CustomerPO || "—"}</span></div>
                           <div>Qty: <span className="font-semibold text-ink-900">{order.Quantity} {order.UnitOfMeasure}</span></div>
                         </div>

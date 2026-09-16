@@ -33,31 +33,71 @@ export class D365Service {
     return data.access_token;
   }
 
-  static async searchProductionOrders(query = "", company = ""): Promise<D365SearchResult> {
+  static async searchProductionOrders(query = "", company = "", status = ""): Promise<D365SearchResult> {
     const config = (await getActiveConfig()).d365;
     const targetCompany = (company || config.company || "HSIN").trim();
     const isAllCompanies = targetCompany.toUpperCase() === "ALL";
 
+    // Allowed statuses per user requirements: Released, Started, Reported as finished (ReportedFinished), End (Completed)
+    const ALLOWED_STATUS_SET = new Set([
+      "released",
+      "started",
+      "reportedfinished",
+      "reported as finished",
+      "completed",
+      "ended",
+      "end",
+    ]);
+
+    const targetStatus = status.trim().toLowerCase();
+
+    const matchesStatus = (st?: string) => {
+      if (!st) return true;
+      const s = st.toLowerCase();
+      if (targetStatus && targetStatus !== "all_active" && targetStatus !== "all") {
+        if (targetStatus === "completed" || targetStatus === "end" || targetStatus === "ended") {
+          return s === "completed" || s === "end" || s === "ended";
+        }
+        if (targetStatus === "reportedfinished" || targetStatus === "reported as finished") {
+          return s === "reportedfinished" || s === "reported as finished";
+        }
+        return s === targetStatus;
+      }
+      if (targetStatus === "all") return true;
+      // Default: only allowed statuses (Released, Started, Reported as finished, End/Completed)
+      return ALLOWED_STATUS_SET.has(s);
+    };
+
     if (config.mode === "mock") {
       const q = query.trim().toLowerCase();
-      let list = MOCK_PRODUCTION_ORDERS;
+      let list = [...MOCK_PRODUCTION_ORDERS];
       if (!isAllCompanies) {
         list = list.filter((p) => {
           const area = (p.dataAreaId || p.CustomerAccount || "").toLowerCase();
           return area.includes(targetCompany.toLowerCase());
         });
       }
-      if (!q) return { mode: "mock", orders: list };
-      const filtered = list.filter(
-        (po) =>
-          po.ProductionOrder.toLowerCase().includes(q) ||
-          po.ItemNumber.toLowerCase().includes(q) ||
-          po.CustomerName.toLowerCase().includes(q) ||
-          po.CustomerPO.toLowerCase().includes(q) ||
-          po.BatchNumber.toLowerCase().includes(q) ||
-          po.DrawingNumber?.toLowerCase().includes(q)
-      );
-      return { mode: "mock", orders: filtered };
+
+      // Filter by production status
+      list = list.filter((p) => matchesStatus(p.ProductionOrderStatus));
+
+      if (q) {
+        list = list.filter(
+          (po) =>
+            po.ProductionOrder.toLowerCase().includes(q) ||
+            po.ItemNumber.toLowerCase().includes(q) ||
+            po.CustomerPartNumber?.toLowerCase().includes(q) ||
+            po.CustomerName.toLowerCase().includes(q) ||
+            po.CustomerPO.toLowerCase().includes(q) ||
+            po.BatchNumber.toLowerCase().includes(q) ||
+            po.DrawingNumber?.toLowerCase().includes(q)
+        );
+      }
+
+      // Sort "last to first" (descending order number)
+      list.sort((a, b) => b.ProductionOrder.localeCompare(a.ProductionOrder, undefined, { numeric: true, sensitivity: "base" }));
+
+      return { mode: "mock", orders: list };
     }
 
     // Live D365FO OData
@@ -73,13 +113,13 @@ export class D365Service {
       const token = await this.getAccessToken(config);
       const cleanQ = query.trim().replace(/'/g, "''");
       const entity = (config.productionEntity || "ProductionOrderHeaders").trim();
-      const isHeaders = /productionorderheader/i.test(entity);
 
       const companyClause = !isAllCompanies ? `dataAreaId eq '${targetCompany.toLowerCase()}'` : "";
 
-      const tryODataFetch = async (filterString: string) => {
+      const tryODataFetch = async (filterString: string, useOrder = true) => {
         const filterClause = filterString ? `&$filter=${filterString}` : "";
-        const url = `${config.baseUrl.replace(/\/+$/, "")}/data/${entity}?cross-company=true&$top=50${filterClause}`;
+        const orderClause = useOrder ? `&$orderby=ProductionOrderNumber desc` : "";
+        const url = `${config.baseUrl.replace(/\/+$/, "")}/data/${entity}?cross-company=true&$top=100${orderClause}${filterClause}`;
         return await fetch(url, {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -90,35 +130,49 @@ export class D365Service {
         });
       };
 
-      let res: Response;
+      let res: Response | null = null;
 
       if (!cleanQ) {
-        // No query: filter by company if specified
-        res = await tryODataFetch(companyClause);
-      } else {
-        // Query provided: combine company filter with item / order query
-        const qPart1 = isHeaders
-          ? `(ProductionOrderNumber eq '${cleanQ}' or ItemNumber eq '${cleanQ}' or startswith(ProductionOrderNumber,'${cleanQ}') or startswith(ItemNumber,'${cleanQ}'))`
-          : `(ProductionOrder eq '${cleanQ}' or ItemNumber eq '${cleanQ}' or startswith(ProductionOrder,'${cleanQ}') or startswith(ItemNumber,'${cleanQ}'))`;
-
-        const filter1 = companyClause ? `${companyClause} and ${qPart1}` : qPart1;
-        res = await tryODataFetch(filter1);
-
-        // If candidate 1 failed (e.g. unknown property), try alternative candidate
+        // No search query: fetch by company with orderby desc (last to first)
+        res = await tryODataFetch(companyClause, true);
         if (!res.ok) {
-          const qPart2 = isHeaders
-            ? `(ProductionOrder eq '${cleanQ}' or ItemNumber eq '${cleanQ}')`
-            : `(ProductionOrderNumber eq '${cleanQ}' or ItemNumber eq '${cleanQ}')`;
-          const filter2 = companyClause ? `${companyClause} and ${qPart2}` : qPart2;
-          const altRes = await tryODataFetch(filter2);
-          if (altRes.ok) {
-            res = altRes;
-          } else {
-            // If both filters failed with 400, fetch company-filtered top 50 and filter in memory
-            const unFilteredRes = await tryODataFetch(companyClause);
-            if (unFilteredRes.ok) {
-              res = unFilteredRes;
+          res = await tryODataFetch(companyClause, false);
+        }
+      } else {
+        // Query provided: Product Number (ItemNumber) or ProductionOrderNumber
+        // Candidate 1: ItemNumber eq cleanQ or ProductionOrderNumber eq cleanQ
+        const qCandidate1 = `(ItemNumber eq '${cleanQ}' or ProductionOrderNumber eq '${cleanQ}')`;
+        const filter1 = companyClause ? `${companyClause} and ${qCandidate1}` : qCandidate1;
+        res = await tryODataFetch(filter1, true);
+
+        // If candidate 1 failed or returned 0 items, try Candidate 2: ItemNumber eq cleanQ alone
+        if (!res.ok || (await res.clone().json().then((j) => (j.value || []).length === 0).catch(() => true))) {
+          const qCandidate2 = `ItemNumber eq '${cleanQ}'`;
+          const filter2 = companyClause ? `${companyClause} and ${qCandidate2}` : qCandidate2;
+          const res2 = await tryODataFetch(filter2, false);
+          if (res2.ok) {
+            const j2 = await res2.clone().json().catch(() => ({ value: [] }));
+            if ((j2.value || []).length > 0) {
+              res = res2;
             }
+          }
+        }
+
+        // If candidate 2 also didn't match, try Candidate 3: ProductionOrderNumber eq cleanQ alone
+        if (!res || !res.ok) {
+          const qCandidate3 = `ProductionOrderNumber eq '${cleanQ}'`;
+          const filter3 = companyClause ? `${companyClause} and ${qCandidate3}` : qCandidate3;
+          const res3 = await tryODataFetch(filter3, false);
+          if (res3.ok) {
+            res = res3;
+          }
+        }
+
+        // If specific candidate queries failed with 400 or returned empty, fetch latest company orders and filter in memory
+        if (!res || !res.ok) {
+          res = await tryODataFetch(companyClause, true);
+          if (!res || !res.ok) {
+            res = await tryODataFetch(companyClause, false);
           }
         }
       }
@@ -168,6 +222,7 @@ export class D365Service {
           CustomerPO: String(item.CustomerRequisitionNumber || item.CustomerPO || item.PurchOrderFormNum || item.CustomerRef || "PO-HSIN"),
           CustomerPartNumber: String(item.ExternalItemNumber || item.CustomerPartNumber || item.CustomerItemNumber || ""),
           dataAreaId: String(item.dataAreaId || "").toUpperCase(),
+          ProductionOrderStatus: String(item.ProductionOrderStatus || item.Status || item.ProdStatus || "Completed"),
           SalesOrder: String(item.SalesOrder || item.SalesId || ""),
           SalesLine: String(item.SalesLine || item.SalesLineNumber || item.LineNum || "1.0"),
           BatchNumber: String(item.BatchNumber || item.InventBatchId || "HS-B24-0747"),
@@ -182,23 +237,27 @@ export class D365Service {
         };
       });
 
-      // If user searched, also filter in-memory in case the OData query returned top 50
-      let filteredOrders = normalized;
+      // 1. Filter by production status (Released, Started, Reported as finished, End/Completed)
+      let filteredOrders = normalized.filter((po) => matchesStatus(po.ProductionOrderStatus));
+
+      // 2. If user searched, also filter in-memory across all fields (ItemNumber, ProductionOrder, CustomerPartNumber, CustomerPO, Description)
       if (cleanQ) {
         const qLow = cleanQ.toLowerCase();
-        const inMem = normalized.filter(
+        const inMem = filteredOrders.filter(
           (po) =>
             po.ProductionOrder.toLowerCase().includes(qLow) ||
             po.ItemNumber.toLowerCase().includes(qLow) ||
+            po.CustomerPartNumber?.toLowerCase().includes(qLow) ||
             po.ItemDescription.toLowerCase().includes(qLow) ||
             po.CustomerPO.toLowerCase().includes(qLow) ||
+            po.CustomerName.toLowerCase().includes(qLow) ||
             po.BatchNumber.toLowerCase().includes(qLow)
         );
-        // If in-memory matched, use it; otherwise return whatever D365 returned
-        if (inMem.length > 0) {
-          filteredOrders = inMem;
-        }
+        filteredOrders = inMem;
       }
+
+      // 3. Sort "last to first" (descending order number)
+      filteredOrders.sort((a, b) => b.ProductionOrder.localeCompare(a.ProductionOrder, undefined, { numeric: true, sensitivity: "base" }));
 
       return { mode: "live", orders: filteredOrders };
     } catch (err) {

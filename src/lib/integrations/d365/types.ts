@@ -10,6 +10,7 @@ export interface D365ProductionOrder {
   BatchNumber: string;
   CustomerPartNumber?: string;
   dataAreaId?: string;
+  ProductionOrderStatus?: string;
   SerialNumber?: string;
   DrawingNumber?: string;
   Revision?: string;
