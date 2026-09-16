@@ -26,53 +26,66 @@ export const POST = route(async (req) => {
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(templateId);
 
   if (isFallback) {
-    const { data: existing } = await sb
+    // 1. Check exact standard ID
+    const { data: standardById } = await sb
       .from("coc_templates")
       .select("id")
-      .order("created_at", { ascending: false })
-      .limit(1)
+      .eq("id", "00000000-0000-0000-0000-000000000001")
       .maybeSingle();
 
-    if (existing) {
-      targetTemplateId = existing.id;
+    if (standardById) {
+      targetTemplateId = standardById.id;
     } else {
-      // Seed default template
-      const filePath = path.join(process.cwd(), "public", "templates", "hydraspecma-coc-template.pdf");
-      let bytes: Buffer;
-      try {
-        bytes = await readFile(filePath);
-      } catch {
-        const refPath = path.join(process.cwd(), "reference", "COC-1070.0049-Rev02.pdf");
-        bytes = await readFile(refPath);
+      // 2. Check by name
+      const { data: standardByName } = await sb
+        .from("coc_templates")
+        .select("id")
+        .ilike("name", "%HydraSpecma%")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (standardByName) {
+        targetTemplateId = standardByName.id;
+      } else {
+        // 3. Seed default template
+        const filePath = path.join(process.cwd(), "public", "templates", "hydraspecma-coc-template.pdf");
+        let bytes: Buffer;
+        try {
+          bytes = await readFile(filePath);
+        } catch {
+          const refPath = path.join(process.cwd(), "reference", "COC-1070.0049-Rev02.pdf");
+          bytes = await readFile(refPath);
+        }
+
+        const asset = await uploadAsset({
+          kind: "background",
+          fileName: "hydraspecma-coc-template.pdf",
+          mimeType: "application/pdf",
+          bytes,
+          userId: session.user.id,
+        });
+
+        const seedJson = buildHydraSpecmaSeed(asset.id, asset.page_count ?? 7);
+        const created = await createTemplate({
+          name: "Standard HydraSpecma A4 Certificate",
+          description: "Official HydraSpecma Certificate of Conformity layout",
+          templateType: "COC",
+          userId: session.user.id,
+          templateJson: seedJson,
+        });
+
+        await sb
+          .from("coc_template_versions")
+          .update({ background_asset_id: asset.id, revision: "Rev 02" })
+          .eq("id", created.version.id);
+
+        return json({
+          ok: true,
+          templateId: created.template.id,
+          versionId: created.version.id,
+        });
       }
-
-      const asset = await uploadAsset({
-        kind: "background",
-        fileName: "hydraspecma-coc-template.pdf",
-        mimeType: "application/pdf",
-        bytes,
-        userId: session.user.id,
-      });
-
-      const seedJson = buildHydraSpecmaSeed(asset.id, asset.page_count ?? 1);
-      const created = await createTemplate({
-        name: "Standard HydraSpecma A4 Certificate",
-        description: "Official HydraSpecma Certificate of Conformity layout",
-        templateType: "COC",
-        userId: session.user.id,
-        templateJson: seedJson,
-      });
-
-      await sb
-        .from("coc_template_versions")
-        .update({ background_asset_id: asset.id, revision: "Rev 02" })
-        .eq("id", created.version.id);
-
-      return json({
-        ok: true,
-        templateId: created.template.id,
-        versionId: created.version.id,
-      });
     }
   }
 

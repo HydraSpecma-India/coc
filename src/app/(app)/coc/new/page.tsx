@@ -33,16 +33,22 @@ export default async function NewCocPage() {
     console.error("NewCocPage DB error:", e);
   }
 
-  // Always provide standard default templates so wizard functions seamlessly
-  const templates = templateSummaries.length > 0 ? templateSummaries : [
-    {
-      id: "00000000-0000-0000-0000-000000000001",
-      name: "Standard HydraSpecma A4 Certificate",
-      template_type: "COC",
-      active_version_id: "00000000-0000-0000-0000-000000000002",
-      active_version_number: 1,
-    },
-  ];
+  // Always prioritize the official Standard HydraSpecma template
+  const standardTemplate = {
+    id: "00000000-0000-0000-0000-000000000001",
+    name: "Standard HydraSpecma A4 Certificate",
+    template_type: "COC",
+    active_version_id: "00000000-0000-0000-0000-000000000002",
+    active_version_number: 1,
+  };
+
+  const hasStandard = templateSummaries.some(
+    (t) => t.id === standardTemplate.id || t.name.toLowerCase().includes("hydraspecma")
+  );
+
+  const templates = hasStandard
+    ? templateSummaries.sort((a) => (a.id === standardTemplate.id ? -1 : 1))
+    : [standardTemplate, ...templateSummaries];
 
   return (
     <CocWizard

@@ -40,20 +40,21 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
   const ph = template?.page.height ?? 842;
 
   // ── background ───────────────────────────────────────────────────────────
-  const bgKey = page?.background ? `${page.background.assetId}:${page.background.pageIndex}` : "";
+  const assetId = page?.background?.assetId || "00000000-0000-0000-0000-000000000001";
+  const bgPageIndex = page?.background?.pageIndex ?? pageIndex;
+  const bgKey = `${assetId}:${bgPageIndex}`;
+
   useEffect(() => {
     let alive = true;
-    const b = page?.background;
-    if (!b) return;
-    const key = `${b.assetId}:${b.pageIndex}`;
-    const mime = assetMimeTypes[b.assetId] ?? "application/pdf";
-    loadBackgroundImage(b.assetId, mime, b.pageIndex)
-      .then((img) => alive && setBgState({ key, img, error: null }))
-      .catch((e) => alive && setBgState({ key, img: null, error: (e as Error).message }));
+    const mime = (page?.background && assetMimeTypes[page.background.assetId]) ? assetMimeTypes[page.background.assetId] : "application/pdf";
+    loadBackgroundImage(assetId, mime, bgPageIndex)
+      .then((img) => alive && setBgState({ key: bgKey, img, error: null }))
+      .catch((e) => alive && setBgState({ key: bgKey, img: null, error: (e as Error).message }));
     return () => {
       alive = false;
     };
-  }, [page?.background, assetMimeTypes]);
+  }, [assetId, bgPageIndex, bgKey, assetMimeTypes]);
+
   const bg = bgState.key === bgKey ? bgState.img : null;
   const bgError = bgState.key === bgKey ? bgState.error : null;
 
@@ -249,7 +250,7 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
         </Layer>
       </Stage>
       {bgError && <div className="absolute left-2 top-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700">Background failed: {bgError}</div>}
-      {page.background && !bg && !bgError && <div className="absolute left-2 top-2 rounded bg-white/80 px-2 py-1 text-xs text-ink-500">Rendering background…</div>}
+      {!bg && !bgError && <div className="absolute left-2 top-2 rounded bg-white/90 shadow-sm border border-ink-200 px-2.5 py-1 text-xs font-medium text-ink-600">Rendering certificate layout…</div>}
     </div>
   );
 }

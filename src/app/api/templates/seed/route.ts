@@ -15,12 +15,17 @@ import { Errors } from "@/lib/errors";
  */
 export const POST = route(async () => {
   const session = await requireCapability("manageTemplates");
-  const filePath = path.join(process.cwd(), "reference", "COC-1070.0049-Rev02.pdf");
+  let filePath = path.join(process.cwd(), "public", "templates", "hydraspecma-coc-template.pdf");
   let bytes: Buffer;
   try {
     bytes = await readFile(filePath);
   } catch {
-    throw Errors.notFound("Reference COC PDF (reference/COC-1070.0049-Rev02.pdf)");
+    try {
+      filePath = path.join(process.cwd(), "reference", "COC-1070.0049-Rev02.pdf");
+      bytes = await readFile(filePath);
+    } catch {
+      throw Errors.notFound("Reference COC PDF template file");
+    }
   }
 
   const asset = await uploadAsset({

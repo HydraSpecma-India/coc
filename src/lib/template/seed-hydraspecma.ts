@@ -24,11 +24,18 @@ export function buildHydraSpecmaSeed(backgroundAssetId: string, pageCount: numbe
     background: { assetId: backgroundAssetId, pageIndex: 0, opacity: 1 },
     elements: [
       serialNo(1, 416, 110, 135),
+      field("p1-hsre-part", "HSREPartNumber", 60, 274, 150, 14, { name: "HSRE part no." }),
+      field("p1-cust-part", "CustomerPartNumber", 230, 274, 150, 14, { name: "Customer part no." }),
+      field("p1-desc", "ItemDescription", 395, 274, 155, 14, { name: "Description" }),
+      field("p1-batch", "BatchNumber", 374, 317, 176, 14, { name: "Batch number" }),
+      field("p1-qty", "Quantity", 374, 338, 176, 14, { name: "Quantity / Unit" }),
       field("p1-customer-po", "CustomerPO", 374, 358, 176, 15, { name: "Customer Purchase order" }),
       field("p1-top-serial", "TopLevelSerialNumber", 430, 379, 120, 14, { name: "Top level Serial number", binding: { required: true } }),
       field("p1-prod-order", "ProductionOrder", 374, 399, 176, 14, { name: "Manufacturing Order number", binding: { readOnly: true } }),
       field("p1-date", "COCDate", 70, 705, 220, 22, { name: "Date of Signature", binding: { format: "yyyy-MM-dd" } }),
       { id: "p1-signature", type: "signature", fieldName: "Signature", x: 320, y: 700, width: 220, height: 30, name: "Signature", binding: { required: true } } as TemplateElement,
+      { id: "p1-header-line", type: "line", x: 55, y: 145, width: 485, height: 0, stroke: { color: "#000000", width: 0.75 } } as TemplateElement,
+      { id: "p1-section-line", type: "line", x: 55, y: 445, width: 485, height: 0, stroke: { color: "#000000", width: 0.75 } } as TemplateElement,
     ],
   });
 
