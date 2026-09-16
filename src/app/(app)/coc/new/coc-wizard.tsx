@@ -604,83 +604,6 @@ export function CocWizard({
         description="Issue an official COC by selecting a production order, validating quality parameters, and applying an authorized digital signature."
       />
 
-      {/* Selected Order Header Banner */}
-      {selectedPO && (
-        <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 shadow-xs">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-emerald-950 flex items-center gap-2 flex-wrap">
-                  <span>
-                    Selected Order:{" "}
-                    <span className="font-mono font-bold text-brand-700">{selectedPO.ProductionOrder}</span>
-                    {" "}&bull;{" "}
-                    <span>{selectedPO.ItemDescription}</span>
-                  </span>
-                  {selectedPO.ProductionOrderStatus && (
-                    <Badge
-                      tone={
-                        selectedPO.ProductionOrderStatus === "Completed"
-                          ? "success"
-                          : selectedPO.ProductionOrderStatus === "Started"
-                          ? "warning"
-                          : selectedPO.ProductionOrderStatus === "Released"
-                          ? "info"
-                          : "brand"
-                      }
-                      className="text-[10px] font-bold"
-                    >
-                      {selectedPO.ProductionOrderStatus === "Completed"
-                        ? "End"
-                        : selectedPO.ProductionOrderStatus === "ReportedFinished"
-                        ? "Reported as finished"
-                        : selectedPO.ProductionOrderStatus}
-                    </Badge>
-                  )}
-                  {selectedPO.dataAreaId && (
-                    <Badge tone="brand" className="text-[10px] font-mono font-bold">
-                      {selectedPO.dataAreaId}
-                    </Badge>
-                  )}
-                </div>
-                <div className="text-xs text-emerald-800 mt-0.5 flex items-center gap-2 flex-wrap">
-                  <span>Part: <strong className="font-mono font-bold text-ink-900">{selectedPO.ItemNumber}</strong></span>
-                  <span>&bull;</span>
-                  <span>Customer: <strong>{selectedPO.CustomerName}</strong></span>
-                  <span>&bull;</span>
-                  <span>Qty: <strong>{selectedPO.Quantity} {selectedPO.UnitOfMeasure}</strong></span>
-                  {selectedPO.CustomerPartNumber && (
-                    <>
-                      <span>&bull;</span>
-                      <span>Customer Part: <strong className="font-mono text-brand-800">{selectedPO.CustomerPartNumber}</strong></span>
-                    </>
-                  )}
-                  {selectedPO.CustomerPO && (
-                    <>
-                      <span>&bull;</span>
-                      <span>Cust PO: <strong>{selectedPO.CustomerPO}</strong></span>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setManualOrder({ ...selectedPO });
-                setShowManualModal(true);
-              }}
-              className="text-xs gap-1 hover:bg-emerald-100 text-emerald-900 shrink-0"
-            >
-              <Edit3 className="h-3.5 w-3.5" />
-              Edit Details
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Step Progress Bar */}
       <div className="mb-8 grid grid-cols-4 gap-2">
         {[
@@ -797,6 +720,91 @@ export function CocWizard({
               </div>
             </CardBody>
           </Card>
+
+          {/* Selected Order Banner - Positioned Under Document Template */}
+          {selectedPO && (
+            <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/80 p-4 sm:p-5 shadow-xs animate-in fade-in">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-emerald-950 flex items-center gap-2 flex-wrap">
+                      <span>
+                        Selected Order:{" "}
+                        <span className="font-mono font-bold text-brand-800">{selectedPO.ProductionOrder}</span>
+                        {" "}&bull;{" "}
+                        <span>{selectedPO.ItemDescription}</span>
+                      </span>
+                      {selectedPO.ProductionOrderStatus && (
+                        <Badge
+                          tone={
+                            selectedPO.ProductionOrderStatus === "Completed"
+                              ? "success"
+                              : selectedPO.ProductionOrderStatus === "Started"
+                              ? "warning"
+                              : selectedPO.ProductionOrderStatus === "Released"
+                              ? "info"
+                              : "brand"
+                          }
+                          className="text-[10px] font-bold"
+                        >
+                          {selectedPO.ProductionOrderStatus === "Completed"
+                            ? "End"
+                            : selectedPO.ProductionOrderStatus === "ReportedFinished"
+                            ? "Reported as finished"
+                            : selectedPO.ProductionOrderStatus}
+                        </Badge>
+                      )}
+                      {selectedPO.dataAreaId && (
+                        <Badge tone="brand" className="text-[10px] font-mono font-bold">
+                          {selectedPO.dataAreaId}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-xs text-emerald-800 mt-1 flex items-center gap-2 flex-wrap">
+                      <span>Part: <strong className="font-mono font-bold text-ink-900">{selectedPO.ItemNumber}</strong></span>
+                      <span>&bull;</span>
+                      <span>Customer: <strong>{selectedPO.CustomerName}</strong></span>
+                      <span>&bull;</span>
+                      <span>Qty: <strong>{selectedPO.Quantity} {selectedPO.UnitOfMeasure}</strong></span>
+                      {selectedPO.CustomerPartNumber && (
+                        <>
+                          <span>&bull;</span>
+                          <span>Customer Part: <strong className="font-mono text-brand-900 font-bold">{selectedPO.CustomerPartNumber}</strong></span>
+                        </>
+                      )}
+                      {selectedPO.CustomerPO && (
+                        <>
+                          <span>&bull;</span>
+                          <span>Cust PO: <strong>{selectedPO.CustomerPO}</strong></span>
+                        </>
+                      )}
+                      {selectedPO.SalesOrder && (
+                        <>
+                          <span>&bull;</span>
+                          <span>SO: <strong className="font-mono text-ink-900">{selectedPO.SalesOrder}</strong></span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setManualOrder({ ...selectedPO });
+                    setModalIsCustomSO(false);
+                    setShowManualModal(true);
+                    fetchModalSalesOrders(selectedPO.ItemNumber, selectedPO.dataAreaId || selectedCompany);
+                  }}
+                  className="text-xs gap-1.5 bg-white hover:bg-emerald-100 text-emerald-950 border-emerald-300 shrink-0 self-start sm:self-center"
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                  Edit Details
+                </Button>
+              </div>
+            </div>
+          )}
 
           <Card>
             <CardHeader
