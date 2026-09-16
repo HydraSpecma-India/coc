@@ -26,6 +26,123 @@ export interface RenderContext {
 
 import { supabaseAdmin, Buckets } from "@/lib/db/supabase-admin";
 
+function resolveFieldValue(fieldName: string, context: RenderContext): string {
+  const fn = fieldName.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  if (fn === "hsrepartnumber" || fn === "itemnumber") {
+    return context.itemNumber || "";
+  }
+  if (fn === "customerpartnumber" || fn === "customerpartno" || fn === "custpartno") {
+    return (
+      context.customerPartNumber ||
+      context.manualValues?.["CustomerPartNo"] ||
+      context.manualValues?.["CustomerPartNumber"] ||
+      ""
+    );
+  }
+  if (fn === "itemdescription" || fn === "description" || fn === "productdescription") {
+    return context.itemDescription || "";
+  }
+  if (fn === "customerpo" || fn === "purchaseorder" || fn === "customerpurchaseorder") {
+    return context.customerPO || context.manualValues?.["CustomerPO"] || "";
+  }
+  if (fn === "toplevelserialnumber" || fn === "serialnumber" || fn === "serialno") {
+    return context.serialNumber || (context.productionOrder ? `SN-${context.productionOrder}` : "");
+  }
+  if (fn === "productionorder" || fn === "manufacturingorder" || fn === "manufacturingordernumber") {
+    return context.productionOrder || "";
+  }
+  if (fn === "cocdate" || fn === "date" || fn === "dateofsignature" || fn === "inspectiondate") {
+    return context.date || context.manualValues?.["InspectionDate"] || new Date().toISOString().slice(0, 10);
+  }
+  if (fn === "cocnumber") {
+    return context.cocNumber || "";
+  }
+  if (fn === "customername") {
+    return context.customerName || "";
+  }
+  if (fn === "salesorder") {
+    return context.salesOrder || "";
+  }
+  if (fn === "batchnumber") {
+    return context.batchNumber || "";
+  }
+  if (fn === "productionquantity" || fn === "quantity") {
+    return context.quantity !== undefined ? String(context.quantity) : "";
+  }
+  if (fn === "unitofmeasure") {
+    return context.unitOfMeasure || "";
+  }
+
+  if (context.manualValues) {
+    if (context.manualValues[fieldName] !== undefined) return context.manualValues[fieldName];
+    for (const [k, v] of Object.entries(context.manualValues)) {
+      if (k.toLowerCase().replace(/[^a-z0-9]/g, "") === fn) return v;
+    }
+  }
+
+  return "";
+}
+
+async function renderSignatureBox(
+  page: any,
+  pdfDoc: PDFDocument,
+  boxX: number,
+  boxY: number,
+  boxW: number,
+  boxH: number,
+  signatureBase64?: string,
+  fontBold?: any
+) {
+  if (signatureBase64) {
+    try {
+      const base64Data = signatureBase64.replace(/^data:image\/\w+;base64,/, "");
+      const imgBytes = Buffer.from(base64Data, "base64");
+      const sigImg =
+        base64Data.startsWith("/9j/") || signatureBase64.includes("image/jpeg") || signatureBase64.includes("image/jpg")
+          ? await pdfDoc.embedJpg(imgBytes)
+          : await pdfDoc.embedPng(imgBytes);
+
+      // Available drawing area with safe padding to NEVER touch borders or lines
+      const padH = 8;
+      const padV = 3;
+      const maxW = Math.max(10, boxW - padH * 2);
+      const maxH = Math.max(10, boxH - padV * 2);
+
+      const aspect = sigImg.width / sigImg.height;
+      let targetW = maxW;
+      let targetH = maxW / aspect;
+      if (targetH > maxH) {
+        targetH = maxH;
+        targetW = maxH * aspect;
+      }
+
+      // Center inside the signature box
+      const drawX = boxX + (boxW - targetW) / 2;
+      const drawY = boxY + (boxH - targetH) / 2;
+
+      page.drawImage(sigImg, {
+        x: drawX,
+        y: drawY,
+        width: targetW,
+        height: targetH,
+      });
+      return;
+    } catch (err) {
+      console.warn("Failed to embed signature image:", err);
+    }
+  }
+
+  // Fallback digital stamp if no image provided or embedding failed:
+  page.drawText("[DIGITALLY SIGNED]", {
+    x: boxX + Math.max(10, (boxW - 120) / 2),
+    y: boxY + Math.max(3, (boxH - 9) / 2),
+    size: 9,
+    font: fontBold,
+    color: rgb(0.1, 0.5, 0.2),
+  });
+}
+
 export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
   pdfDoc.registerFontkit(fontkit);
@@ -38,21 +155,58 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
   let templateBytes: Buffer | null = null;
   let templateJson: any = null;
 
-  // 1. Try to load custom background PDF from Supabase storage if template specified
-  if (context.templateVersionId || (context.templateId && context.templateId !== "00000000-0000-0000-0000-000000000001")) {
-    try {
-      const sb = supabaseAdmin();
-      let vId = context.templateVersionId;
-      if (!vId && context.templateId) {
-        const { data: t } = await sb.from("coc_templates").select("active_version_id").eq("id", context.templateId).maybeSingle();
-        vId = t?.active_version_id;
+  // 1. Resolve template definition and background PDF from Supabase
+  try {
+    const sb = supabaseAdmin();
+    let vId = context.templateVersionId;
+    const tId = context.templateId || "00000000-0000-0000-0000-000000000001";
+
+    if (vId) {
+      const { data: ver } = await sb
+        .from("coc_template_versions")
+        .select("id, background_asset_id, template_json, version_number")
+        .eq("id", vId)
+        .maybeSingle();
+      if (ver) {
+        templateJson = ver.template_json;
+        if (ver.background_asset_id) {
+          const { data: asset } = await sb
+            .from("coc_template_assets")
+            .select("storage_path")
+            .eq("id", ver.background_asset_id)
+            .maybeSingle();
+          if (asset?.storage_path) {
+            const { data: fileBlob } = await sb.storage.from(Buckets.templateAssets).download(asset.storage_path);
+            if (fileBlob) {
+              templateBytes = Buffer.from(await fileBlob.arrayBuffer());
+            }
+          }
+        }
       }
-      if (vId) {
-        const { data: ver } = await sb.from("coc_template_versions").select("background_asset_id, template_json").eq("id", vId).maybeSingle();
+    }
+
+    if (!templateJson && tId) {
+      const { data: t } = await sb
+        .from("coc_templates")
+        .select("active_version_id")
+        .eq("id", tId)
+        .maybeSingle();
+
+      const activeVerId = t?.active_version_id;
+      if (activeVerId) {
+        const { data: ver } = await sb
+          .from("coc_template_versions")
+          .select("id, background_asset_id, template_json, version_number")
+          .eq("id", activeVerId)
+          .maybeSingle();
         if (ver) {
           templateJson = ver.template_json;
-          if (ver.background_asset_id) {
-            const { data: asset } = await sb.from("coc_template_assets").select("storage_path").eq("id", ver.background_asset_id).maybeSingle();
+          if (ver.background_asset_id && !templateBytes) {
+            const { data: asset } = await sb
+              .from("coc_template_assets")
+              .select("storage_path")
+              .eq("id", ver.background_asset_id)
+              .maybeSingle();
             if (asset?.storage_path) {
               const { data: fileBlob } = await sb.storage.from(Buckets.templateAssets).download(asset.storage_path);
               if (fileBlob) {
@@ -62,9 +216,23 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
           }
         }
       }
-    } catch (err) {
-      console.warn("Could not load custom template asset from storage, falling back:", err);
     }
+
+    // Fallback if still no templateJson resolved: pick latest version for default template
+    if (!templateJson) {
+      const { data: ver } = await sb
+        .from("coc_template_versions")
+        .select("id, background_asset_id, template_json, version_number")
+        .eq("template_id", "00000000-0000-0000-0000-000000000001")
+        .order("version_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (ver) {
+        templateJson = ver.template_json;
+      }
+    }
+  } catch (err) {
+    console.warn("Could not load custom template from database/storage, falling back:", err);
   }
 
   // 2. Fallback to bundled official HydraSpecma template PDF
@@ -86,68 +254,119 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
         pdfDoc.addPage(p);
       }
       const page = copiedPages[0];
+      const { height } = page.getSize();
 
-      const fillField = (x: number, y: number, w: number, h: number, text: string, isBold = false) => {
-        page.drawRectangle({ x, y, width: w, height: h, color: rgb(1, 1, 1) });
-        if (text) {
-          page.drawText(text, {
-            x: x + 2,
-            y: y + 2,
-            size: 8,
-            font: isBold ? fontBold : fontRegular,
-            color: rgb(0, 0, 0),
-          });
-        }
-      };
+      // 3. Background Sanitization: Cleanly blank out static sample values from the background PDF
+      // Part Info Table row (cells 1, 2, 3): static text lies between y = 512.5 and 523.0
+      // Div dividing line is at 524.5, bottom table border is at 510.5.
+      // y: 511.5, height: 12.0 covers all text without touching the dividing line or the bottom border.
+      page.drawRectangle({ x: 58, y: 511.5, width: 163, height: 12.0, color: rgb(1, 1, 1) });
+      page.drawRectangle({ x: 224, y: 511.5, width: 163, height: 12.0, color: rgb(1, 1, 1) });
+      page.drawRectangle({ x: 390, y: 511.5, width: 162, height: 12.0, color: rgb(1, 1, 1) });
 
+      // Order Reference Table values: blank old sample values without touching borders
+      page.drawRectangle({ x: 366, y: 468, width: 186, height: 16, color: rgb(1, 1, 1) });
+      page.drawRectangle({ x: 366, y: 446, width: 186, height: 16, color: rgb(1, 1, 1) });
+      page.drawRectangle({ x: 366, y: 425, width: 186, height: 16, color: rgb(1, 1, 1) });
+
+      // Top table header values
+      page.drawRectangle({ x: 294, y: 760, width: 75, height: 13, color: rgb(1, 1, 1) });
+      page.drawRectangle({ x: 62, y: 735, width: 220, height: 13, color: rgb(1, 1, 1) });
+      page.drawRectangle({ x: 414, y: 718, width: 138, height: 14, color: rgb(1, 1, 1) });
+
+      // Date and Signature cell interiors (borders at y: 110.54 and 143.18 are 100% preserved)
+      page.drawRectangle({ x: 60, y: 112, width: 244, height: 29.5, color: rgb(1, 1, 1) });
+      page.drawRectangle({ x: 308, y: 112, width: 245, height: 29.5, color: rgb(1, 1, 1) });
+
+      // 4. Render top document title block
       const partNumberStr = context.cocNumber || `COC-${context.itemNumber}`;
       const prodDesc = context.itemDescription || "HydraSpecma Production Assembly";
-      const serialNo = context.serialNumber || (context.productionOrder ? `SN-${context.productionOrder}` : "");
-      const custPartNo = context.customerPartNumber || context.manualValues?.["CustomerPartNo"] || "160072";
-      const custPO = context.customerPO || context.manualValues?.["CustomerPO"] || "4509008214";
-      const topSerial = context.serialNumber || `${context.itemNumber} - SN001`;
-      const mfgOrder = context.productionOrder || "HSIN-000011";
-      const sigDate = context.date || context.manualValues?.["InspectionDate"] || new Date().toISOString().slice(0, 10);
+      page.drawText(partNumberStr.slice(0, 18), { x: 296, y: 764, size: 8, font: fontRegular, color: rgb(0, 0, 0) });
+      page.drawText(prodDesc.slice(0, 45), { x: 64, y: 739, size: 8, font: fontRegular, color: rgb(0, 0, 0) });
 
-      // 1. Part number in top table
-      fillField(295, 762, 75, 11, partNumberStr.slice(0, 18), false);
-      // 2. Product in top table
-      fillField(62, 737, 220, 12, prodDesc.slice(0, 45), false);
-      // 3. Serial no in top right
-      fillField(415, 720, 130, 12, serialNo, true);
-      // 4. HSRE part no
-      fillField(58, 507, 165, 12, context.itemNumber, false);
-      // 5. Customer part no
-      fillField(228, 507, 165, 12, custPartNo, false);
-      // 6. Description
-      fillField(395, 507, 160, 12, prodDesc.slice(0, 35), false);
-      // 7. Customer Purchase Order
-      fillField(370, 473, 185, 14, custPO, false);
-      // 8. Top level Serial number
-      fillField(370, 451, 185, 14, topSerial, false);
-      // 9. Manufacturing Order number
-      fillField(370, 429, 185, 14, mfgOrder, true);
-      // 10. Date of Signature
-      fillField(100, 115, 150, 16, sigDate, false);
+      // 5. Dynamic Elements Rendering (only fields in the template are drawn)
+      const elements = templateJson?.pages?.[0]?.elements;
+      if (Array.isArray(elements) && elements.length > 0) {
+        let hasSignatureElement = false;
 
-      // 11. Signature image or digital stamp
-      if (context.signatureBase64) {
-        try {
-          const base64Data = context.signatureBase64.replace(/^data:image\/\w+;base64,/, "");
-          const imgBytes = Buffer.from(base64Data, "base64");
-          const sigImg = await pdfDoc.embedPng(imgBytes);
-          page.drawRectangle({ x: 320, y: 95, width: 200, height: 45, color: rgb(1, 1, 1) });
-          page.drawImage(sigImg, {
-            x: 350,
-            y: 98,
-            width: 140,
-            height: 38,
-          });
-        } catch {
-          fillField(380, 115, 140, 16, "[DIGITALLY SIGNED]", true);
+        for (const el of elements) {
+          if (el.hidden) continue;
+          const pdfY = height - el.y - el.height;
+          const isBold = Boolean(el.style?.bold);
+          const font = isBold ? fontBold : fontRegular;
+          const fontSize = el.style?.fontSize || 8.5;
+
+          if (el.type === "field" && el.fieldName) {
+            const val = resolveFieldValue(el.fieldName, context);
+            if (val) {
+              const textX = el.x + (el.style?.padding || 2);
+              const textY = pdfY + Math.max(2, (el.height - fontSize * 0.85) / 2);
+              page.drawText(val, {
+                x: textX,
+                y: textY,
+                size: fontSize,
+                font,
+                color: rgb(0, 0, 0),
+              });
+            }
+          } else if (el.type === "signature") {
+            hasSignatureElement = true;
+            await renderSignatureBox(page, pdfDoc, el.x, pdfY, el.width, el.height, context.signatureBase64, fontBold);
+          } else if (el.type === "text" && el.text) {
+            const textX = el.x + (el.style?.padding || 2);
+            const textY = pdfY + Math.max(2, (el.height - fontSize * 0.85) / 2);
+            page.drawText(el.text, {
+              x: textX,
+              y: textY,
+              size: fontSize,
+              font,
+              color: rgb(0, 0, 0),
+            });
+          } else if (el.type === "line") {
+            const lineY = height - el.y;
+            page.drawLine({
+              start: { x: el.x, y: lineY },
+              end: { x: el.x + el.width, y: lineY },
+              thickness: 1,
+              color: rgb(0.85, 0.85, 0.85),
+            });
+          }
+        }
+
+        if (!hasSignatureElement) {
+          await renderSignatureBox(page, pdfDoc, 320, 112, 220, 30, context.signatureBase64, fontBold);
         }
       } else {
-        fillField(380, 115, 140, 16, "[DIGITALLY SIGNED]", true);
+        // Fallback default field values if no template elements found
+        const serialNo = context.serialNumber || (context.productionOrder ? `SN-${context.productionOrder}` : "");
+        const custPartNo = context.customerPartNumber || context.manualValues?.["CustomerPartNo"] || "160072";
+        const custPO = context.customerPO || context.manualValues?.["CustomerPO"] || "4509008214";
+        const topSerial = context.serialNumber || `${context.itemNumber} - SN001`;
+        const mfgOrder = context.productionOrder || "HSIN-000011";
+        const sigDate = context.date || context.manualValues?.["InspectionDate"] || new Date().toISOString().slice(0, 10);
+
+        const fillField = (x: number, y: number, text: string, isBold = false) => {
+          if (text) {
+            page.drawText(text, {
+              x: x + 2,
+              y: y + 2,
+              size: 8,
+              font: isBold ? fontBold : fontRegular,
+              color: rgb(0, 0, 0),
+            });
+          }
+        };
+
+        fillField(415, 720, serialNo, true);
+        fillField(58, 513, context.itemNumber, false);
+        fillField(228, 513, custPartNo, false);
+        fillField(395, 513, prodDesc.slice(0, 35), false);
+        fillField(370, 473, custPO, false);
+        fillField(370, 451, topSerial, false);
+        fillField(370, 429, mfgOrder, true);
+        fillField(100, 115, sigDate, false);
+
+        await renderSignatureBox(page, pdfDoc, 320, 112, 220, 30, context.signatureBase64, fontBold);
       }
 
       // Draft Watermark
@@ -229,9 +448,22 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
   page.drawText("Customer part no.", { x: 222, y: height - 253, size: 8, font: fontBold });
   page.drawText("Description", { x: 387, y: height - 253, size: 8, font: fontBold });
 
-  page.drawText(context.itemNumber, { x: 52, y: height - 273, size: 8, font: fontRegular });
-  page.drawText(context.customerPartNumber || context.manualValues?.["CustomerPartNo"] || "160072", { x: 222, y: height - 273, size: 8, font: fontRegular });
-  page.drawText(context.itemDescription.slice(0, 32), { x: 387, y: height - 273, size: 8, font: fontRegular });
+  const elements = templateJson?.pages?.[0]?.elements;
+  const hasField = (name: string) => {
+    if (!Array.isArray(elements) || elements.length === 0) return true;
+    const n = name.toLowerCase();
+    return elements.some((e: any) => e.type === "field" && e.fieldName?.toLowerCase() === n);
+  };
+
+  if (hasField("hsrepartnumber") || hasField("itemnumber")) {
+    page.drawText(context.itemNumber, { x: 52, y: height - 273, size: 8, font: fontRegular });
+  }
+  if (hasField("customerpartnumber") || hasField("customerpartno") || hasField("custpartno")) {
+    page.drawText(context.customerPartNumber || context.manualValues?.["CustomerPartNo"] || "160072", { x: 222, y: height - 273, size: 8, font: fontRegular });
+  }
+  if (hasField("itemdescription") || hasField("description")) {
+    page.drawText(context.itemDescription.slice(0, 32), { x: 387, y: height - 273, size: 8, font: fontRegular });
+  }
 
   // Order Reference Table
   page.drawRectangle({ x: 45, y: height - 350, width: 510, height: 60, borderColor: darkInk, borderWidth: 1 });
@@ -283,18 +515,7 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
   page.drawText(sigDate, { x: 135, y: 98, size: 8.5, font: fontRegular });
   page.drawText("Date of Signature", { x: 130, y: 76, size: 8, font: fontBold });
 
-  if (context.signatureBase64) {
-    try {
-      const base64Data = context.signatureBase64.replace(/^data:image\/\w+;base64,/, "");
-      const imgBytes = Buffer.from(base64Data, "base64");
-      const sigImg = await pdfDoc.embedPng(imgBytes);
-      page.drawImage(sigImg, { x: 360, y: 78, width: 120, height: 35 });
-    } catch {
-      page.drawText("[DIGITALLY SIGNED]", { x: 375, y: 98, size: 9, font: fontBold, color: rgb(0.1, 0.5, 0.2) });
-    }
-  } else {
-    page.drawText("[DIGITALLY SIGNED]", { x: 375, y: 98, size: 9, font: fontBold, color: rgb(0.1, 0.5, 0.2) });
-  }
+  await renderSignatureBox(page, pdfDoc, 305, 88, 245, 30, context.signatureBase64, fontBold);
   page.drawText("Signature", { x: 395, y: 76, size: 8, font: fontBold });
 
   // Footer
