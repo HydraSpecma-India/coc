@@ -47,12 +47,7 @@ function resolveFieldValue(fieldName: string, context: RenderContext, element?: 
     return context.customerPO || context.manualValues?.["CustomerPO"] || "";
   }
   if (fn === "toplevelserialnumber" || fn === "serialnumber" || fn === "serialno") {
-    let s = context.serialNumber || (context.productionOrder ? `SN-${context.productionOrder}` : "");
-    // If element is placed after the pre-printed prefix (e.g. x > 410) and serial starts with a prefix, extract suffix
-    if (element && element.x > 410 && s.includes(" - ")) {
-      s = s.split(" - ").slice(1).join(" - ");
-    }
-    return s;
+    return context.serialNumber || (context.productionOrder ? `SN-${context.productionOrder}` : "");
   }
   if (fn === "productionorder" || fn === "manufacturingorder" || fn === "manufacturingordernumber") {
     return context.productionOrder || "";
@@ -258,111 +253,174 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
       for (const p of copiedPages) {
         pdfDoc.addPage(p);
       }
-      const page = copiedPages[0];
-      const { height } = page.getSize();
+      for (let pageIdx = 0; pageIdx < copiedPages.length; pageIdx++) {
+        const page = copiedPages[pageIdx];
+        const { height } = page.getSize();
+        const pageElements = templateJson?.pages?.[pageIdx]?.elements;
 
-      // 3. Dynamic Elements Rendering (only fields mapped in the active template are drawn)
-      const elements = templateJson?.pages?.[0]?.elements;
-      if (Array.isArray(elements) && elements.length > 0) {
-        let hasSignatureElement = false;
+        if (pageIdx === 0) {
+          // Page 1: Dynamic Elements Rendering
+          const elements = pageElements || templateJson?.pages?.[0]?.elements;
+          if (Array.isArray(elements) && elements.length > 0) {
+            let hasSignatureElement = false;
 
-        for (const el of elements) {
-          if (el.hidden) continue;
-          const pdfY = height - el.y - el.height;
-          const isBold = Boolean(el.style?.bold);
-          const font = isBold ? fontBold : fontRegular;
-          const fontSize = el.style?.fontSize || 8.5;
+            for (const el of elements) {
+              if (el.hidden) continue;
+              const pdfY = height - el.y - el.height;
+              const isBold = Boolean(el.style?.bold);
+              const font = isBold ? fontBold : fontRegular;
+              const fontSize = el.style?.fontSize || 8.5;
 
-          if (el.type === "field" && el.fieldName) {
-            const val = resolveFieldValue(el.fieldName, context, el);
-            if (val) {
-              if (el.style?.backgroundColor) {
-                page.drawRectangle({
-                  x: el.x,
-                  y: pdfY,
-                  width: el.width,
-                  height: el.height,
-                  color: rgb(1, 1, 1),
+              if (el.type === "field" && el.fieldName) {
+                const val = resolveFieldValue(el.fieldName, context, el);
+                if (val) {
+                  if (el.style?.backgroundColor) {
+                    page.drawRectangle({
+                      x: el.x,
+                      y: pdfY,
+                      width: el.width,
+                      height: el.height,
+                      color: rgb(1, 1, 1),
+                    });
+                  }
+                  const textX = el.x + (el.style?.padding || 2);
+                  const textY = pdfY + Math.max(2, (el.height - fontSize * 0.85) / 2);
+                  page.drawText(val, {
+                    x: textX,
+                    y: textY,
+                    size: fontSize,
+                    font,
+                    color: rgb(0, 0, 0),
+                  });
+                }
+              } else if (el.type === "signature") {
+                hasSignatureElement = true;
+                await renderSignatureBox(page, pdfDoc, el.x, pdfY, el.width, el.height, context.signatureBase64, fontBold);
+              } else if (el.type === "text" && el.text) {
+                const textX = el.x + (el.style?.padding || 2);
+                const textY = pdfY + Math.max(2, (el.height - fontSize * 0.85) / 2);
+                page.drawText(el.text, {
+                  x: textX,
+                  y: textY,
+                  size: fontSize,
+                  font,
+                  color: rgb(0, 0, 0),
+                });
+              } else if (el.type === "line") {
+                const lineY = height - el.y;
+                page.drawLine({
+                  start: { x: el.x, y: lineY },
+                  end: { x: el.x + el.width, y: lineY },
+                  thickness: 1,
+                  color: rgb(0.85, 0.85, 0.85),
                 });
               }
-              const textX = el.x + (el.style?.padding || 2);
-              const textY = pdfY + Math.max(2, (el.height - fontSize * 0.85) / 2);
-              page.drawText(val, {
-                x: textX,
-                y: textY,
-                size: fontSize,
-                font,
-                color: rgb(0, 0, 0),
+            }
+
+            if (!hasSignatureElement && context.signatureBase64) {
+              await renderSignatureBox(page, pdfDoc, 320, 112, 220, 30, context.signatureBase64, fontBold);
+            }
+          } else {
+            // Fallback default field values only if no template elements are configured
+            const serialNo = context.serialNumber || (context.productionOrder ? `SN-${context.productionOrder}` : "");
+            const custPO = context.customerPO || context.manualValues?.["CustomerPO"] || "";
+            const mfgOrder = context.productionOrder || "";
+            const sigDate = context.date || context.manualValues?.["InspectionDate"] || new Date().toISOString().slice(0, 10);
+
+            const fillField = (x: number, y: number, text: string, isBold = false) => {
+              if (text) {
+                page.drawText(text, {
+                  x: x + 2,
+                  y: y + 2,
+                  size: 8,
+                  font: isBold ? fontBold : fontRegular,
+                  color: rgb(0, 0, 0),
+                });
+              }
+            };
+
+            if (custPO) fillField(374, 470, custPO, false);
+            if (serialNo) {
+              const sfx = serialNo.includes(" - ") ? serialNo.split(" - ").slice(1).join(" - ") : serialNo;
+              fillField(430, 450, sfx, false);
+            }
+            if (mfgOrder) fillField(374, 429, mfgOrder, true);
+            fillField(72, 118, sigDate, false);
+
+            await renderSignatureBox(page, pdfDoc, 320, 112, 220, 30, context.signatureBase64, fontBold);
+          }
+        } else {
+          // Page 2+: Multi-page serial number and reference stamping
+          if (Array.isArray(pageElements) && pageElements.length > 0) {
+            for (const el of pageElements) {
+              if (el.hidden) continue;
+              const pdfY = height - el.y - el.height;
+              const isBold = Boolean(el.style?.bold);
+              const font = isBold ? fontBold : fontRegular;
+              const fontSize = el.style?.fontSize || 8.5;
+              if (el.type === "field" && el.fieldName) {
+                const val = resolveFieldValue(el.fieldName, context, el);
+                if (val) {
+                  const textX = el.x + (el.style?.padding || 2);
+                  const textY = pdfY + Math.max(2, (el.height - fontSize * 0.85) / 2);
+                  page.drawText(val, { x: textX, y: textY, size: fontSize, font, color: rgb(0, 0, 0) });
+                }
+              }
+            }
+          } else {
+            // Apply serial number elements from template setup onto subsequent pages
+            const p0Elements = templateJson?.pages?.[0]?.elements;
+            let stampedSerial = false;
+            if (Array.isArray(p0Elements)) {
+              for (const el of p0Elements) {
+                if (el.hidden) continue;
+                const fn = (el.fieldName || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+                if (fn === "toplevelserialnumber" || fn === "serialnumber" || fn === "serialno") {
+                  const val = resolveFieldValue(el.fieldName!, context, el);
+                  if (val) {
+                    const pdfY = height - el.y - el.height;
+                    const fontSize = el.style?.fontSize || 8.5;
+                    const isBold = Boolean(el.style?.bold);
+                    page.drawText(val, {
+                      x: el.x + (el.style?.padding || 2),
+                      y: pdfY + Math.max(2, (el.height - fontSize * 0.85) / 2),
+                      size: fontSize,
+                      font: isBold ? fontBold : fontRegular,
+                      color: rgb(0, 0, 0),
+                    });
+                    stampedSerial = true;
+                  }
+                }
+              }
+            }
+
+            if (!stampedSerial && context.serialNumber) {
+              const stampText = `Serial No: ${context.serialNumber} | Production Order: ${context.productionOrder || ""} | Page ${pageIdx + 1} of ${copiedPages.length}`;
+              page.drawText(stampText, {
+                x: 40,
+                y: height - 25,
+                size: 8,
+                font: fontBold,
+                color: rgb(0.2, 0.2, 0.2),
               });
             }
-          } else if (el.type === "signature") {
-            hasSignatureElement = true;
-            await renderSignatureBox(page, pdfDoc, el.x, pdfY, el.width, el.height, context.signatureBase64, fontBold);
-          } else if (el.type === "text" && el.text) {
-            const textX = el.x + (el.style?.padding || 2);
-            const textY = pdfY + Math.max(2, (el.height - fontSize * 0.85) / 2);
-            page.drawText(el.text, {
-              x: textX,
-              y: textY,
-              size: fontSize,
-              font,
-              color: rgb(0, 0, 0),
-            });
-          } else if (el.type === "line") {
-            const lineY = height - el.y;
-            page.drawLine({
-              start: { x: el.x, y: lineY },
-              end: { x: el.x + el.width, y: lineY },
-              thickness: 1,
-              color: rgb(0.85, 0.85, 0.85),
-            });
           }
         }
-
-        if (!hasSignatureElement && context.signatureBase64) {
-          await renderSignatureBox(page, pdfDoc, 320, 112, 220, 30, context.signatureBase64, fontBold);
-        }
-      } else {
-        // Fallback default field values only if no template elements are configured
-        const serialNo = context.serialNumber || (context.productionOrder ? `SN-${context.productionOrder}` : "");
-        const custPO = context.customerPO || context.manualValues?.["CustomerPO"] || "";
-        const mfgOrder = context.productionOrder || "";
-        const sigDate = context.date || context.manualValues?.["InspectionDate"] || new Date().toISOString().slice(0, 10);
-
-        const fillField = (x: number, y: number, text: string, isBold = false) => {
-          if (text) {
-            page.drawText(text, {
-              x: x + 2,
-              y: y + 2,
-              size: 8,
-              font: isBold ? fontBold : fontRegular,
-              color: rgb(0, 0, 0),
-            });
-          }
-        };
-
-        if (custPO) fillField(374, 470, custPO, false);
-        if (serialNo) {
-          const sfx = serialNo.includes(" - ") ? serialNo.split(" - ").slice(1).join(" - ") : serialNo;
-          fillField(430, 450, sfx, false);
-        }
-        if (mfgOrder) fillField(374, 429, mfgOrder, true);
-        fillField(72, 118, sigDate, false);
-
-        await renderSignatureBox(page, pdfDoc, 320, 112, 220, 30, context.signatureBase64, fontBold);
       }
 
       // Draft Watermark
       if (context.isDraft) {
-        page.drawText("DRAFT / PREVIEW", {
-          x: 100,
-          y: 280,
-          size: 60,
-          font: fontBold,
-          color: rgb(0.88, 0.88, 0.88),
-          rotate: degrees(45),
-          opacity: 0.35,
-        });
+        for (const p of copiedPages) {
+          p.drawText("DRAFT / PREVIEW", {
+            x: 100,
+            y: 280,
+            size: 60,
+            font: fontBold,
+            color: rgb(0.88, 0.88, 0.88),
+            rotate: degrees(45),
+            opacity: 0.35,
+          });
+        }
       }
 
       return await pdfDoc.save();

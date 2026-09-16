@@ -16,6 +16,7 @@ const CreateUserSchema = z.object({
   role: z.enum(ROLES),
   password: z.string().min(4, "Password must be at least 4 characters").optional(),
   active: z.boolean().optional(),
+  allowed_companies: z.array(z.string()).optional(),
 });
 
 export const POST = route(async (req) => {

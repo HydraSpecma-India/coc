@@ -58,6 +58,7 @@ export interface D365SalesOrderLine {
   Quantity: number;
   UnitOfMeasure?: string;
   DeliveryDate?: string;
+  LineStatus?: string;
   dataAreaId?: string;
   // COC Allocation Fields
   assignedQuantity?: number;

@@ -132,6 +132,11 @@ export const POST = route(async (req) => {
   const cocNumber = doc.coc_number || "COC-" + doc.id.slice(0, 8);
 
   try {
+    const resolvedCustomerName =
+      parsed.customerName ||
+      parsed.manualValues?.["CustomerName"] ||
+      (parsed.customerAccount === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
+
     // Step 1: D365 Fetch & Context verification
     await logProcessStep(doc.id, "D365_FETCH", "OK", { productionOrder: prodOrder });
 
@@ -144,7 +149,7 @@ export const POST = route(async (req) => {
       productionOrder: prodOrder,
       itemNumber: itemNum,
       itemDescription: itemDesc,
-      customerName: parsed.customerName || "HydraSpecma India Pvt Ltd",
+      customerName: resolvedCustomerName,
       customerPO: parsed.customerPO || parsed.manualValues?.["CustomerPO"] || "4509008214",
       customerPartNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
       salesOrder: parsed.salesOrder || "",
@@ -171,7 +176,35 @@ export const POST = route(async (req) => {
       storagePath = `${new Date().getFullYear()}/${cocNumber}.pdf`;
     }
 
-    // Step 5: D365 Update
+    // Step 5: Teams Webhook Notification
+    try {
+      await logProcessStep(doc.id, "TEAMS_WEBHOOK", "STARTED");
+      const teamsRes = await TeamsService.sendCocToTeams({
+        cocId: doc.id,
+        cocNumber,
+        productionOrder: prodOrder,
+        itemNumber: itemNum,
+        itemDescription: itemDesc,
+        customerPO: parsed.customerPO,
+        customerName: resolvedCustomerName,
+        customerPartNumber: parsed.customerPartNumber,
+        salesOrder: parsed.salesOrder,
+        serialNumber: parsed.serialNumber,
+        batchNumber: parsed.batchNumber,
+        quantity: parsed.quantity,
+        unitOfMeasure: parsed.unitOfMeasure,
+        issuedBy: session.user.email || "System",
+        issueDate: new Date().toISOString(),
+        pdfBytes,
+        storagePath,
+      });
+      await logProcessStep(doc.id, "TEAMS_WEBHOOK", "OK", { status: teamsRes.status });
+    } catch (teamsErr) {
+      logger.warn("Teams webhook notification error", { error: (teamsErr as Error).message });
+      await logProcessStep(doc.id, "TEAMS_WEBHOOK", "FAILED", {}, (teamsErr as Error).message);
+    }
+
+    // Step 6: D365 Registration
     try {
       await D365Service.registerCOCDocument({
         COCDocumentNumber: cocNumber,
@@ -188,34 +221,6 @@ export const POST = route(async (req) => {
       await logProcessStep(doc.id, "D365_UPDATE", "OK");
     } catch (e) {
       await logProcessStep(doc.id, "D365_UPDATE", "FAILED", {}, (e as Error).message);
-    }
-
-    // Step 6: Teams Webhook Notification
-    try {
-      await logProcessStep(doc.id, "TEAMS_WEBHOOK", "STARTED");
-      const teamsRes = await TeamsService.sendCocToTeams({
-        cocId: doc.id,
-        cocNumber,
-        productionOrder: prodOrder,
-        itemNumber: itemNum,
-        itemDescription: itemDesc,
-        customerPO: parsed.customerPO,
-        customerName: parsed.customerName,
-        customerPartNumber: parsed.customerPartNumber,
-        salesOrder: parsed.salesOrder,
-        serialNumber: parsed.serialNumber,
-        batchNumber: parsed.batchNumber,
-        quantity: parsed.quantity,
-        unitOfMeasure: parsed.unitOfMeasure,
-        issuedBy: session.user.email || "System",
-        issueDate: new Date().toISOString(),
-        pdfBytes,
-        storagePath,
-      });
-      await logProcessStep(doc.id, "TEAMS_WEBHOOK", "OK", { status: teamsRes.status });
-    } catch (teamsErr) {
-      logger.warn("Teams webhook notification error", { error: (teamsErr as Error).message });
-      await logProcessStep(doc.id, "TEAMS_WEBHOOK", "FAILED", {}, (teamsErr as Error).message);
     }
 
     // Save manual field values

@@ -14,6 +14,7 @@ export interface UserRow {
   password_hash?: string | null;
   last_login_at: string | null;
   created_at: string;
+  allowed_companies?: string[] | null;
 }
 
 export async function upsertUserOnSignIn(input: {
@@ -83,6 +84,7 @@ export async function createUser(input: {
   role: Role;
   password?: string;
   active?: boolean;
+  allowed_companies?: string[];
 }): Promise<UserRow> {
   const db = supabaseAdmin();
   const email = input.email.trim().toLowerCase();
@@ -103,6 +105,7 @@ export async function createUser(input: {
       active: input.active !== false,
       password_hash: passwordHash,
       last_login_at: null,
+      allowed_companies: input.allowed_companies && input.allowed_companies.length > 0 ? input.allowed_companies : ["ALL"],
     })
     .select("*")
     .single();
@@ -113,7 +116,7 @@ export async function createUser(input: {
 
 export async function updateUser(
   id: string,
-  patch: { displayName?: string; role?: Role; active?: boolean }
+  patch: { displayName?: string; role?: Role; active?: boolean; allowed_companies?: string[] }
 ): Promise<UserRow> {
   const updates: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
@@ -121,6 +124,7 @@ export async function updateUser(
   if (patch.displayName !== undefined) updates.display_name = patch.displayName.trim();
   if (patch.role !== undefined) updates.role = patch.role;
   if (patch.active !== undefined) updates.active = patch.active;
+  if (patch.allowed_companies !== undefined) updates.allowed_companies = patch.allowed_companies;
 
   const { data, error } = await supabaseAdmin().from("coc_users").update(updates).eq("id", id).select("*").single();
   if (error) throw error;

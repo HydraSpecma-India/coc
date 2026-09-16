@@ -13,6 +13,7 @@ export const PATCH = route<{ id: string }>(async (req, { params }) => {
       displayName: z.string().optional(),
       role: z.enum(ROLES).optional(),
       active: z.boolean().optional(),
+      allowed_companies: z.array(z.string()).optional(),
     })
     .parse(await req.json());
 

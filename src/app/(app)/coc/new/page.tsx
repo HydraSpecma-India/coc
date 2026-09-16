@@ -1,5 +1,6 @@
 import { requireCapability, requireSession } from "@/lib/auth/guards";
 import { listTemplates } from "@/lib/db/repositories/templates";
+import { getUserByEmail } from "@/lib/db/repositories/users";
 import { CocWizard } from "./coc-wizard";
 
 export const dynamic = "force-dynamic";
@@ -45,16 +46,17 @@ export default async function NewCocPage() {
   const hasStandard = templateSummaries.some(
     (t) => t.id === standardTemplate.id || t.name.toLowerCase().includes("hydraspecma")
   );
+  const templates = hasStandard ? templateSummaries : [standardTemplate, ...templateSummaries];
 
-  const templates = hasStandard
-    ? templateSummaries.sort((a) => (a.id === standardTemplate.id ? -1 : 1))
-    : [standardTemplate, ...templateSummaries];
+  const user = session.user.email ? await getUserByEmail(session.user.email) : null;
+  const allowedCompanies = user?.allowed_companies && user.allowed_companies.length > 0 ? user.allowed_companies : ["ALL"];
 
   return (
     <CocWizard
       templates={templates}
       userName={session.user.name || "Manigandan Parthasarathi"}
       userEmail={session.user.email || "manigandan.parthasarathi@hydraspecma.com"}
+      allowedCompanies={allowedCompanies}
     />
   );
 }

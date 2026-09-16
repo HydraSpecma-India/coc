@@ -55,14 +55,65 @@ interface TemplateSummary {
   active_version_number: number;
 }
 
+function generateAutoSignature(name: string): string {
+  if (typeof document === "undefined") return "";
+  const canvas = document.createElement("canvas");
+  canvas.width = 480;
+  canvas.height = 140;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+
+  // Clean background
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, 480, 140);
+
+  // Subtle border frame
+  ctx.strokeStyle = "#cbd5e1";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(4, 4, 472, 132);
+
+  // Verified shield badge
+  ctx.fillStyle = "#0284c7";
+  ctx.beginPath();
+  ctx.arc(36, 42, 18, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 16px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("✓", 36, 48);
+
+  // Cursive / Calligraphic signature style
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "italic bold 26px 'Segoe Script', 'Brush Script MT', cursive, sans-serif";
+  ctx.fillText(name || "Authorized Signatory", 68, 46);
+
+  // Subtitle / Legal verification
+  ctx.fillStyle = "#334155";
+  ctx.font = "bold 10px sans-serif";
+  ctx.fillText("DIGITALLY SIGNED & VERIFIED QUALITY INSPECTOR", 68, 70);
+
+  // Metadata line
+  const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  ctx.fillStyle = "#64748b";
+  ctx.font = "9.5px monospace";
+  ctx.fillText(`Signatory: ${name} | Timestamp: ${nowStr}`, 68, 90);
+  ctx.fillText("HydraSpecma Quality Assurance System Certified", 68, 108);
+
+  return canvas.toDataURL("image/png");
+}
+
 export function CocWizard({
   templates,
   userName,
   userEmail,
+  allowedCompanies = ["ALL"],
 }: {
   templates: TemplateSummary[];
   userName: string;
   userEmail: string;
+  allowedCompanies?: string[];
 }) {
   const router = useRouter();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
@@ -147,7 +198,8 @@ export function CocWizard({
   };
 
   // PO Search & Selection
-  const [selectedCompany, setSelectedCompany] = useState<string>("HSIN");
+  const defaultCompany = !allowedCompanies.includes("ALL") && allowedCompanies.length > 0 ? allowedCompanies[0] : "HSIN";
+  const [selectedCompany, setSelectedCompany] = useState<string>(defaultCompany);
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL_ACTIVE");
   const [poQuery, setPoQuery] = useState("");
   const [searchResults, setSearchResults] = useState<D365ProductionOrder[]>([]);
@@ -445,6 +497,7 @@ export function CocWizard({
     InspectionDate: new Date().toISOString().slice(0, 10),
     CustomerPartNo: "160072",
     CustomerPO: "4509008214",
+    CustomerName: "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
     SerialNumber: "",
     CustomerSpec: "0068-7211 / 0069-2093 - Latest version",
     Comments: "All test criteria satisfied. Conforms to ISO 9001:2015 / HydraSpecma requirements.",
@@ -482,11 +535,22 @@ export function CocWizard({
     }
   }, [manualFields.SerialNumber, existingCocs]);
 
-  // Signature canvas state
+  // Signature state: automated user signature (default) or manual draw
+  const [signatureMode, setSignatureMode] = useState<"auto" | "draw">("auto");
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [hasSignature, setHasSignature] = useState(false);
+  const [hasSignature, setHasSignature] = useState(true);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string>("");
+
+  useEffect(() => {
+    if (signatureMode === "auto" && typeof window !== "undefined") {
+      const autoSig = generateAutoSignature(userName);
+      if (autoSig) {
+        setSignatureDataUrl(autoSig);
+        setHasSignature(true);
+      }
+    }
+  }, [userName, signatureMode]);
 
   // Preview & Generating state
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -496,10 +560,14 @@ export function CocWizard({
   const applySelectedPO = (order: D365ProductionOrder) => {
     setSelectedPO(order);
     const initialExtPart = order.CustomerPartNumber || "160072";
+    const custName =
+      order.CustomerName ||
+      (order.dataAreaId === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
     setManualFields((prev) => ({
       ...prev,
       CustomerPartNo: initialExtPart,
       CustomerPO: order.CustomerPO || prev.CustomerPO || "4509008214",
+      CustomerName: custName,
       SerialNumber: order.SerialNumber || `${order.ItemNumber || order.ProductionOrder} - SN001`,
     }));
     fetchSalesOrdersForPO(order.ItemNumber, order.dataAreaId || selectedCompany, order);
@@ -509,7 +577,7 @@ export function CocWizard({
 
   // Initial PO search
   useEffect(() => {
-    searchOrders("", "HSIN", "ALL_ACTIVE");
+    searchOrders("", defaultCompany, "ALL_ACTIVE");
   }, []);
 
   const searchOrders = async (q: string, comp = selectedCompany, st = selectedStatus) => {
@@ -622,7 +690,7 @@ export function CocWizard({
           productionOrder: prodOrder,
           itemNumber: itemNum,
           itemDescription: itemDesc,
-          customerName: selectedPO.CustomerName || "HydraSpecma India Pvt Ltd",
+          customerName: manualFields.CustomerName || selectedPO.CustomerName || "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
           customerPO: manualFields.CustomerPO || selectedPO.CustomerPO || "4509008214",
           customerPartNumber: manualFields.CustomerPartNo || selectedPO.CustomerPartNumber || "160072",
           salesOrder: selectedPO.SalesOrder || "",
@@ -678,7 +746,7 @@ export function CocWizard({
           productionOrder: prodOrder,
           itemNumber: itemNum,
           itemDescription: itemDesc,
-          customerName: selectedPO.CustomerName || "HydraSpecma India Pvt Ltd",
+          customerName: manualFields.CustomerName || selectedPO.CustomerName || "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
           customerPO: manualFields.CustomerPO || selectedPO.CustomerPO || "4509008214",
           customerPartNumber: manualFields.CustomerPartNo || selectedPO.CustomerPartNumber || "160072",
           salesOrder: selectedPO.SalesOrder || "",
@@ -1005,11 +1073,19 @@ export function CocWizard({
                       className="font-medium text-xs bg-slate-50 border-slate-300 h-9"
                       title="D365 Legal Entity (dataAreaId)"
                     >
-                      <option value="HSIN">HSIN - India (HydraSpecma India)</option>
-                      <option value="HGCN">HGCN - China (HydraSpecma China)</option>
-                      <option value="HSDK">HSDK - Denmark (HydraSpecma A/S)</option>
-                      <option value="HSSW">HSSW - Sweden (HydraSpecma AB)</option>
-                      <option value="ALL">ALL - Cross-Company (All Entities)</option>
+                      {[
+                        { code: "HSIN", label: "HSIN - India (HydraSpecma India)" },
+                        { code: "HGCN", label: "HGCN - China (HydraSpecma China)" },
+                        { code: "HSDK", label: "HSDK - Denmark (HydraSpecma A/S)" },
+                        { code: "HSSW", label: "HSSW - Sweden (HydraSpecma AB)" },
+                        { code: "ALL", label: "ALL - Cross-Company (All Entities)" },
+                      ]
+                        .filter((c) => allowedCompanies.includes("ALL") || allowedCompanies.includes(c.code))
+                        .map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.label}
+                          </option>
+                        ))}
                     </Select>
                   </div>
                   <div className="relative flex-1">
@@ -1044,7 +1120,9 @@ export function CocWizard({
                     { code: "HSDK", label: "HSDK (Denmark)" },
                     { code: "HSSW", label: "HSSW (Sweden)" },
                     { code: "ALL", label: "ALL Entities" },
-                  ].map((ent) => (
+                  ]
+                    .filter((c) => allowedCompanies.includes("ALL") || allowedCompanies.includes(c.code))
+                    .map((ent) => (
                     <button
                       key={ent.code}
                       type="button"
@@ -1799,9 +1877,9 @@ export function CocWizard({
 
                 <Field label="Customer Name">
                   <Input
-                    value={selectedPO?.CustomerName || "VESTAS WIND TECHNOLOGYS INDIA PVT LTD"}
-                    readOnly
-                    className="bg-ink-50 text-ink-700"
+                    value={manualFields.CustomerName || selectedPO?.CustomerName || "VESTAS WIND TECHNOLOGYS INDIA PVT LTD"}
+                    onChange={(e) => setManualFields({ ...manualFields, CustomerName: e.target.value })}
+                    className="bg-white font-medium text-ink-900"
                   />
                 </Field>
 
@@ -1921,32 +1999,93 @@ export function CocWizard({
         <Card>
           <CardHeader
             title="Authorized Digital Signature"
-            description="Sign on the canvas pad below using your mouse or touchscreen to sign off on quality verification."
+            description="Sign off on quality verification using your authorized user credentials or draw manually."
             actions={
-              <Button variant="outline" size="sm" onClick={clearSignature}>
-                <RotateCcw className="h-3.5 w-3.5" /> Clear Signature
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={signatureMode === "auto" ? "primary" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setSignatureMode("auto");
+                    const autoSig = generateAutoSignature(userName);
+                    if (autoSig) {
+                      setSignatureDataUrl(autoSig);
+                      setHasSignature(true);
+                    }
+                  }}
+                  className="gap-1.5 text-xs font-semibold"
+                >
+                  <Sparkles className="h-3.5 w-3.5" /> Auto-Sign ({userName.split(" ")[0]})
+                </Button>
+                <Button
+                  variant={signatureMode === "draw" ? "primary" : "outline"}
+                  size="sm"
+                  onClick={() => setSignatureMode("draw")}
+                  className="gap-1.5 text-xs font-semibold"
+                >
+                  <PenTool className="h-3.5 w-3.5" /> Draw Manually
+                </Button>
+                {signatureMode === "draw" && (
+                  <Button variant="outline" size="sm" onClick={clearSignature}>
+                    <RotateCcw className="h-3.5 w-3.5" /> Clear
+                  </Button>
+                )}
+              </div>
             }
           />
           <CardBody className="space-y-4">
-            <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-ink-300 bg-ink-50/50 p-6">
-              <canvas
-                ref={canvasRef}
-                width={480}
-                height={160}
-                onMouseDown={startDrawing}
-                onMouseMove={draw}
-                onMouseUp={stopDrawing}
-                onMouseLeave={stopDrawing}
-                onTouchStart={startDrawing}
-                onTouchMove={draw}
-                onTouchEnd={stopDrawing}
-                className="rounded border border-ink-200 bg-white shadow-inner cursor-crosshair touch-none"
-              />
-              <div className="mt-2 text-xs text-ink-500">
-                Sign inside the box above with your mouse, pen, or finger.
+            {signatureMode === "auto" ? (
+              <div className="rounded-xl border-2 border-brand-300 bg-gradient-to-br from-brand-50/60 to-sky-50/40 p-6">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="space-y-1.5 text-left">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                      <span className="font-bold text-sm text-ink-900">Authorized Digital Signature Ready</span>
+                      <Badge tone="success">Verified User</Badge>
+                    </div>
+                    <p className="text-xs text-ink-600">
+                      Signatory: <strong className="text-ink-900">{userName}</strong> ({userEmail})
+                    </p>
+                    <p className="text-[11px] text-ink-500">
+                      Timestamp: {new Date().toISOString().slice(0, 10)} • Quality Assurance Authorized Signatory
+                    </p>
+                  </div>
+                  <Badge tone="brand" className="text-xs px-3 py-1 font-bold">
+                    ✓ Auto-Applied to Certificate
+                  </Badge>
+                </div>
+
+                {signatureDataUrl && (
+                  <div className="mt-4 flex justify-center rounded-lg border border-brand-200 bg-white p-3 shadow-inner">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={signatureDataUrl}
+                      alt="Digital Signature Preview"
+                      className="max-h-28 object-contain"
+                    />
+                  </div>
+                )}
               </div>
-            </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-ink-300 bg-ink-50/50 p-6">
+                <canvas
+                  ref={canvasRef}
+                  width={480}
+                  height={160}
+                  onMouseDown={startDrawing}
+                  onMouseMove={draw}
+                  onMouseUp={stopDrawing}
+                  onMouseLeave={stopDrawing}
+                  onTouchStart={startDrawing}
+                  onTouchMove={draw}
+                  onTouchEnd={stopDrawing}
+                  className="rounded border border-ink-200 bg-white shadow-inner cursor-crosshair touch-none"
+                />
+                <div className="mt-2 text-xs text-ink-500">
+                  Sign inside the box above with your mouse, pen, or finger.
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-between pt-4 border-t border-ink-200">
               <Button variant="outline" onClick={() => setStep(2)} className="gap-2">
@@ -1957,7 +2096,7 @@ export function CocWizard({
                   generatePreview();
                   setStep(4);
                 }}
-                className="gap-2"
+                className="gap-2 bg-brand-500 hover:bg-brand-600 text-ink-900 font-semibold"
               >
                 Next: Preview & Issue <ArrowRight className="h-4 w-4" />
               </Button>

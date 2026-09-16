@@ -37,12 +37,14 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
     role: Role;
     password: string;
     active: boolean;
+    allowedCompany: string;
   }>({
     displayName: "",
     email: "",
     role: "Production",
     password: "User@123",
     active: true,
+    allowedCompany: "ALL",
   });
   const [createLoading, setCreateLoading] = useState(false);
 
@@ -56,8 +58,11 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
   const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // Patch role or active state
-  const patchUser = async (id: string, body: { role?: string; active?: boolean; displayName?: string }) => {
+  // Patch role, active state, or company access
+  const patchUser = async (
+    id: string,
+    body: { role?: string; active?: boolean; displayName?: string; allowed_companies?: string[] }
+  ) => {
     try {
       await api(`/api/users/${id}`, { method: "PATCH", json: body });
       toast.success("User updated successfully");
@@ -86,6 +91,7 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
           role: createForm.role,
           password: createForm.password.trim() || undefined,
           active: createForm.active,
+          allowed_companies: [createForm.allowedCompany],
         },
       });
       toast.success("User created", `${createForm.email} has been added.`);
@@ -96,6 +102,7 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
         role: "Production",
         password: "User@123",
         active: true,
+        allowedCompany: "ALL",
       });
       startTransition(() => {
         router.refresh();
@@ -238,6 +245,7 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
             <Th>User</Th>
             <Th>Email Address</Th>
             <Th>Assigned Role</Th>
+            <Th>Company Access</Th>
             <Th>Status</Th>
             <Th>Last Sign-in</Th>
             <Th className="text-right">Actions</Th>
@@ -246,7 +254,7 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
         <tbody>
           {filteredUsers.length === 0 ? (
             <tr>
-              <td colSpan={6} className="px-4 py-8 text-center text-ink-400 border-b border-ink-100">
+              <td colSpan={7} className="px-4 py-8 text-center text-ink-400 border-b border-ink-100">
                 No user accounts found matching &quot;{searchTerm}&quot;
               </td>
             </tr>
@@ -283,6 +291,19 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
                           {r}
                         </option>
                       ))}
+                    </Select>
+                  </Td>
+
+                  <Td>
+                    <Select
+                      value={u.allowed_companies?.[0] || "ALL"}
+                      onChange={(e) => patchUser(u.id, { allowed_companies: [e.target.value] })}
+                      className="w-32 h-8 text-xs font-medium"
+                    >
+                      <option value="ALL">All Companies</option>
+                      <option value="HSIN">HSIN (India)</option>
+                      <option value="HGCN">HGCN (China)</option>
+                      <option value="HSDK">HSDK (Denmark)</option>
                     </Select>
                   </Td>
 
@@ -402,6 +423,18 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
                   {r}
                 </option>
               ))}
+            </Select>
+          </Field>
+
+          <Field label="Company Access">
+            <Select
+              value={createForm.allowedCompany}
+              onChange={(e) => setCreateForm({ ...createForm, allowedCompany: e.target.value })}
+            >
+              <option value="ALL">All Companies (Global)</option>
+              <option value="HSIN">HSIN (India)</option>
+              <option value="HGCN">HGCN (China)</option>
+              <option value="HSDK">HSDK (Denmark)</option>
             </Select>
           </Field>
 

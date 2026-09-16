@@ -86,6 +86,7 @@ export class D365Service {
           (po) =>
             po.ProductionOrder.toLowerCase().includes(q) ||
             po.ItemNumber.toLowerCase().includes(q) ||
+            po.ItemDescription?.toLowerCase().includes(q) ||
             po.CustomerPartNumber?.toLowerCase().includes(q) ||
             po.CustomerName.toLowerCase().includes(q) ||
             po.CustomerPO.toLowerCase().includes(q) ||
@@ -139,13 +140,25 @@ export class D365Service {
           res = await tryODataFetch(companyClause, false);
         }
       } else {
-        // Query provided: Product Number (ItemNumber) or ProductionOrderNumber
-        // Candidate 1: ItemNumber eq cleanQ or ProductionOrderNumber eq cleanQ
-        const qCandidate1 = `(ItemNumber eq '${cleanQ}' or ProductionOrderNumber eq '${cleanQ}')`;
-        const filter1 = companyClause ? `${companyClause} and ${qCandidate1}` : qCandidate1;
-        res = await tryODataFetch(filter1, true);
+        // Query provided: Candidate 1: Substring search with contains (matches partial digits like 0049 or 8613)
+        const qContains = `(contains(ProductionOrderNumber, '${cleanQ}') or contains(ItemNumber, '${cleanQ}') or contains(ProductionOrderName, '${cleanQ}'))`;
+        const filterContains = companyClause ? `${companyClause} and ${qContains}` : qContains;
+        res = await tryODataFetch(filterContains, true);
 
-        // If candidate 1 failed or returned 0 items, try Candidate 2: ItemNumber eq cleanQ alone
+        // If Candidate 1 failed or returned 0, try Candidate 2: exact match eq
+        if (!res.ok || (await res.clone().json().then((j) => (j.value || []).length === 0).catch(() => true))) {
+          const qCandidate1 = `(ItemNumber eq '${cleanQ}' or ProductionOrderNumber eq '${cleanQ}')`;
+          const filter1 = companyClause ? `${companyClause} and ${qCandidate1}` : qCandidate1;
+          const res1 = await tryODataFetch(filter1, true);
+          if (res1.ok) {
+            const j1 = await res1.clone().json().catch(() => ({ value: [] }));
+            if ((j1.value || []).length > 0) {
+              res = res1;
+            }
+          }
+        }
+
+        // If Candidate 2 also didn't match, try Candidate 3: ItemNumber eq cleanQ alone
         if (!res.ok || (await res.clone().json().then((j) => (j.value || []).length === 0).catch(() => true))) {
           const qCandidate2 = `ItemNumber eq '${cleanQ}'`;
           const filter2 = companyClause ? `${companyClause} and ${qCandidate2}` : qCandidate2;
@@ -366,7 +379,8 @@ export class D365Service {
 
   static async getSalesOrdersByItem(
     itemNumber: string,
-    company = ""
+    company = "",
+    statusFilter = "Open"
   ): Promise<{ mode: "mock" | "live"; salesOrders: D365SalesOrderLine[]; error?: string }> {
     const config = (await getActiveConfig()).d365;
     const cleanItem = (itemNumber || "").trim();
@@ -378,7 +392,12 @@ export class D365Service {
     }
 
     if (config.mode === "mock") {
-      const salesOrders = getMockSalesOrders(cleanItem, targetCompany);
+      let salesOrders = getMockSalesOrders(cleanItem, targetCompany);
+      if (statusFilter.toLowerCase() === "open") {
+        salesOrders = salesOrders.filter(
+          (so) => !so.LineStatus || !/invoiced|canceled|cancelled/i.test(so.LineStatus)
+        );
+      }
       return { mode: "mock", salesOrders };
     }
 
@@ -458,6 +477,7 @@ export class D365Service {
           item.CustAccount ||
           targetCompany
         ).trim();
+        const lineStatus = String(item.SalesLineStatus || item.LineStatus || item.Status || "Backorder");
 
         return {
           SalesOrder: soNum || `SO-${cleanItem}`,
@@ -471,11 +491,19 @@ export class D365Service {
           Quantity: Number(item.OrderedSalesQuantity || item.SalesQuantity || item.Quantity || 1) || 1,
           UnitOfMeasure: String(item.SalesUnit || item.UnitOfMeasure || "Pcs"),
           DeliveryDate: String(item.ConfirmedDeliveryDate || item.RequestedDeliveryDate || item.DeliveryDate || ""),
+          LineStatus: lineStatus,
           dataAreaId: String(item.dataAreaId || targetCompany).toUpperCase(),
         };
       });
 
-      if (normalized.length === 0) {
+      let filteredList = normalized;
+      if (statusFilter.toLowerCase() === "open") {
+        filteredList = filteredList.filter(
+          (so) => !so.LineStatus || !/invoiced|canceled|cancelled/i.test(so.LineStatus)
+        );
+      }
+
+      if (filteredList.length === 0) {
         const fallback = getMockSalesOrders(cleanItem, targetCompany);
         return {
           mode: "live",
@@ -483,7 +511,7 @@ export class D365Service {
         };
       }
 
-      return { mode: "live", salesOrders: normalized };
+      return { mode: "live", salesOrders: filteredList };
     } catch (err) {
       logger.error("D365 getSalesOrdersByItem failed", { itemNumber: cleanItem, error: (err as Error).message });
       const fallback = getMockSalesOrders(cleanItem, targetCompany);
