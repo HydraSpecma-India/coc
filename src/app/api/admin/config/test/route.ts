@@ -106,5 +106,21 @@ export async function POST(req: Request) {
     }
   }
 
+  if (target === "teams") {
+    try {
+      const { TeamsService } = await import("@/lib/integrations/teams/service");
+      const result = await TeamsService.testConnection();
+      return NextResponse.json({
+        ok: true,
+        message: result.message,
+      });
+    } catch (e) {
+      return NextResponse.json({
+        ok: false,
+        error: `Teams webhook test failed: ${(e as Error).message}`,
+      }, { status: 400 });
+    }
+  }
+
   return NextResponse.json({ ok: false, error: "Invalid target" }, { status: 400 });
 }

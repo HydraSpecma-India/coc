@@ -41,7 +41,14 @@ export interface IntegrationConfig {
     enforceRemainingQty: boolean;
     signatureRequired: boolean;
   };
+  teams: {
+    enabled: boolean;
+    webhookUrl: string;
+  };
 }
+
+export const DEFAULT_TEAMS_WEBHOOK_URL =
+  "https://defaultd5ae8a953d8445d29b1ee2bb4b68d2.cc.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/24/workflows/fe076f3ab8584e988d6d2090e36dca66/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=2HGkgeI08qAjtOYDbVLiKoct6PLGeEHa3iPYFu_1AS8";
 
 let cachedSettings: Record<string, unknown> | null = null;
 let lastFetch = 0;
@@ -147,6 +154,10 @@ export async function getActiveConfig(): Promise<IntegrationConfig> {
       numberAuthority: (str("coc.numberAuthority", "app") as "app" | "d365") || "app",
       enforceRemainingQty: bool("coc.enforceRemainingQty", true),
       signatureRequired: bool("signature.required", true),
+    },
+    teams: {
+      enabled: bool("teams.enabled", true),
+      webhookUrl: str("teams.webhookUrl", (process.env.TEAMS_WEBHOOK_URL || DEFAULT_TEAMS_WEBHOOK_URL)),
     },
   };
 }

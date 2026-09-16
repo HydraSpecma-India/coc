@@ -22,6 +22,7 @@ import {
   XCircle,
   Clock,
   RotateCw,
+  Send,
 } from "lucide-react";
 
 export function CocDetailClient({
@@ -35,6 +36,7 @@ export function CocDetailClient({
 }) {
   const [steps, setSteps] = useState<COCProcessStepRow[]>(initialSteps);
   const [retrying, setRetrying] = useState(false);
+  const [sendingTeams, setSendingTeams] = useState(false);
 
   const retryFailedStep = async () => {
     setRetrying(true);
@@ -52,6 +54,24 @@ export function CocDetailClient({
       toast.error("Retry failed", (e as Error).message);
     } finally {
       setRetrying(false);
+    }
+  };
+
+  const sendToTeams = async () => {
+    setSendingTeams(true);
+    try {
+      const res = await api<{ ok: boolean; message: string }>(`/api/coc/${doc.id}/send-teams`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        toast.success(res.message);
+        const refreshed = await api<{ ok: boolean; steps: COCProcessStepRow[] }>(`/api/coc/${doc.id}`);
+        if (refreshed.steps) setSteps(refreshed.steps);
+      }
+    } catch (e) {
+      toast.error("Send to Teams failed", (e as Error).message);
+    } finally {
+      setSendingTeams(false);
     }
   };
 
@@ -82,6 +102,16 @@ export function CocDetailClient({
                 Retry Failed Step
               </Button>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              loading={sendingTeams}
+              onClick={sendToTeams}
+              className="inline-flex items-center gap-1.5 text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+            >
+              <Send className="h-4 w-4 text-indigo-600" />
+              Send to Teams
+            </Button>
             {doc.generated_pdf_path && (
               <a
                 href={`/api/coc/${doc.id}/pdf`}
@@ -101,13 +131,14 @@ export function CocDetailClient({
       <Card className="mb-6">
         <CardHeader title="Automated Processing Pipeline" description="Real-time execution steps recorded for this certificate." />
         <CardBody>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             {[
               { id: "D365_FETCH", title: "1. D365 ERP Fetch" },
               { id: "VALIDATE", title: "2. Rules Validation" },
               { id: "RENDER", title: "3. PDF Rendering" },
               { id: "SP_UPLOAD", title: "4. Storage Upload" },
               { id: "D365_UPDATE", title: "5. D365 Registration" },
+              { id: "TEAMS_WEBHOOK", title: "6. Teams Notification" },
             ].map((p) => {
               const match = steps.find((s) => s.step === p.id);
               const status = match ? match.status : "PENDING";

@@ -36,7 +36,7 @@ export interface COCDocumentRow {
 export interface COCProcessStepRow {
   id: string;
   coc_document_id: string;
-  step: "D365_FETCH" | "VALIDATE" | "RENDER" | "SP_UPLOAD" | "D365_UPDATE";
+  step: "D365_FETCH" | "VALIDATE" | "RENDER" | "SP_UPLOAD" | "D365_UPDATE" | "TEAMS_WEBHOOK";
   status: "STARTED" | "OK" | "FAILED";
   attempt: number;
   started_at: string;

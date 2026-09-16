@@ -3,6 +3,7 @@ import { requireCapability, requireSession } from "@/lib/auth/guards";
 import { createCocDocument, listCocDocuments, logProcessStep, uploadGeneratedPdf } from "@/lib/db/repositories/coc";
 import { renderCOCPdf } from "@/lib/render/pdf-renderer";
 import { D365Service } from "@/lib/integrations/d365/service";
+import { TeamsService } from "@/lib/integrations/teams/service";
 import { supabaseAdmin } from "@/lib/db/supabase-admin";
 import { logger } from "@/lib/logging/logger";
 import { Errors } from "@/lib/errors";
@@ -187,6 +188,33 @@ export const POST = route(async (req) => {
       await logProcessStep(doc.id, "D365_UPDATE", "OK");
     } catch (e) {
       await logProcessStep(doc.id, "D365_UPDATE", "FAILED", {}, (e as Error).message);
+    }
+
+    // Step 6: Teams Webhook Notification
+    try {
+      await logProcessStep(doc.id, "TEAMS_WEBHOOK", "STARTED");
+      const teamsRes = await TeamsService.sendCocToTeams({
+        cocNumber,
+        productionOrder: prodOrder,
+        itemNumber: itemNum,
+        itemDescription: itemDesc,
+        customerPO: parsed.customerPO,
+        customerName: parsed.customerName,
+        customerPartNumber: parsed.customerPartNumber,
+        salesOrder: parsed.salesOrder,
+        serialNumber: parsed.serialNumber,
+        batchNumber: parsed.batchNumber,
+        quantity: parsed.quantity,
+        unitOfMeasure: parsed.unitOfMeasure,
+        issuedBy: session.user.email || "System",
+        issueDate: new Date().toISOString(),
+        pdfBytes,
+        storagePath,
+      });
+      await logProcessStep(doc.id, "TEAMS_WEBHOOK", "OK", { status: teamsRes.status });
+    } catch (teamsErr) {
+      logger.warn("Teams webhook notification error", { error: (teamsErr as Error).message });
+      await logProcessStep(doc.id, "TEAMS_WEBHOOK", "FAILED", {}, (teamsErr as Error).message);
     }
 
     // Save manual field values

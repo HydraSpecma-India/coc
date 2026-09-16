@@ -15,7 +15,7 @@ import {
 } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
-import { KeyRound, Database, Share2, Cog, RefreshCw, CheckCircle2, AlertCircle, Hash } from "lucide-react";
+import { KeyRound, Database, Share2, Cog, RefreshCw, CheckCircle2, AlertCircle, Hash, Send } from "lucide-react";
 import { NumberSequencesPanel } from "./number-sequences-panel";
 
 interface ConfigState {
@@ -61,16 +61,20 @@ interface ConfigState {
     enforceRemainingQty: boolean;
     signatureRequired: boolean;
   };
+  teams?: {
+    enabled: boolean;
+    webhookUrl: string;
+  };
 }
 
 export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }) {
   const [config, setConfig] = useState<ConfigState>(initialConfig);
-  const [activeTab, setActiveTab] = useState<"entra" | "d365" | "sharepoint" | "app" | "sequences">("d365");
+  const [activeTab, setActiveTab] = useState<"entra" | "d365" | "sharepoint" | "app" | "sequences" | "teams">("d365");
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
-  const saveConfig = async (section: "entra" | "d365" | "sharepoint" | "app") => {
+  const saveConfig = async (section: "entra" | "d365" | "sharepoint" | "app" | "teams") => {
     setSaving(true);
     setTestResult(null);
     try {
@@ -92,13 +96,13 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
     }
   };
 
-  const testConnection = async (target: "d365" | "sharepoint") => {
+  const testConnection = async (target: "d365" | "sharepoint" | "teams") => {
     setTesting(target);
     setTestResult(null);
     try {
       const res = await api<{ ok: boolean; message?: string; error?: string }>("/api/admin/config/test", {
         method: "POST",
-        json: { target },
+        json: { target, webhookUrl: target === "teams" ? config.teams?.webhookUrl : undefined },
       });
       if (res.ok) {
         setTestResult({ ok: true, message: res.message || "Connection succeeded!" });
@@ -183,6 +187,18 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
         >
           <Hash className="h-4 w-4" />
           Number Sequences
+        </button>
+
+        <button
+          onClick={() => { setActiveTab("teams"); setTestResult(null); }}
+          className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            activeTab === "teams"
+              ? "border-brand-500 text-brand-700"
+              : "border-transparent text-ink-600 hover:text-ink-900"
+          }`}
+        >
+          <Send className="h-4 w-4" />
+          Teams Webhook
         </button>
       </div>
 
@@ -616,6 +632,89 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
       )}
 
       {activeTab === "sequences" && <NumberSequencesPanel />}
+
+      {activeTab === "teams" && (
+        <Card>
+          <CardHeader
+            title="Microsoft Teams Webhook Integration"
+            description="Automatically post completed Certificates of Conformance (COC) with PDF file content to a Microsoft Teams channel via Power Automate webhook."
+            actions={
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  loading={testing === "teams"}
+                  onClick={() => testConnection("teams")}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Test Connection
+                </Button>
+                <Button size="sm" loading={saving} onClick={() => saveConfig("teams")}>
+                  Save Teams Settings
+                </Button>
+              </div>
+            }
+          />
+          <CardBody className="space-y-6">
+            <div className="rounded-lg border border-ink-200 bg-ink-50 p-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={config.teams?.enabled ?? true}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      teams: {
+                        enabled: e.target.checked,
+                        webhookUrl: config.teams?.webhookUrl ?? "",
+                      },
+                    })
+                  }
+                  className="h-4 w-4 rounded border-ink-300 accent-ink-900"
+                />
+                <div>
+                  <span className="text-sm font-medium text-ink-900">Enable Automated Teams Notification</span>
+                  <p className="text-xs text-ink-500">
+                    When enabled, generating a COC will automatically trigger the Power Automate workflow to post the COC details and PDF to your Teams channel.
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            <div className="space-y-4">
+              <Field
+                label="Power Automate / Teams Webhook URL"
+                hint="HTTP POST trigger URL from Power Automate or Teams Incoming Webhook"
+              >
+                <Input
+                  type="url"
+                  value={config.teams?.webhookUrl ?? ""}
+                  placeholder="https://...powerautomate.com/.../triggers/manual/paths/invoke?..."
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      teams: {
+                        enabled: config.teams?.enabled ?? true,
+                        webhookUrl: e.target.value,
+                      },
+                    })
+                  }
+                />
+              </Field>
+
+              <div className="rounded-lg border border-brand-100 bg-brand-50 p-4 text-xs text-brand-800 space-y-2">
+                <p className="font-semibold text-brand-900">Payload Details Sent to Webhook:</p>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li><strong>Metadata:</strong> <code>cocNumber</code>, <code>productionOrder</code>, <code>itemNumber</code>, <code>itemDescription</code>, <code>customer</code>, <code>customerName</code>, <code>salesOrder</code>, <code>quantity</code>, <code>status</code>, <code>createdBy</code>, <code>createdAt</code>.</li>
+                  <li><strong>Direct File:</strong> <code>fileName</code>, <code>fileContent</code> (Base64-encoded PDF), and <code>fileContentBase64</code>.</li>
+                  <li><strong>Power Automate File Object:</strong> <code>file: {"{"} name, contentBytes, "$content-type": "application/pdf" {"}"}</code>.</li>
+                  <li><strong>Formatted Notification:</strong> <code>text</code> (Markdown message) and <code>summary</code>.</li>
+                </ul>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      )}
     </div>
   );
 }

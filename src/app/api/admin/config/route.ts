@@ -60,6 +60,10 @@ export async function GET() {
         enforceRemainingQty: config.app.enforceRemainingQty,
         signatureRequired: config.app.signatureRequired,
       },
+      teams: {
+        enabled: config.teams.enabled,
+        webhookUrl: config.teams.webhookUrl,
+      },
     },
   });
 }
@@ -69,7 +73,7 @@ export async function PUT(req: Request) {
   requireRole(session, ["Admin"]);
 
   const body = await req.json();
-  const { entra, d365, sharepoint, app } = body;
+  const { entra, d365, sharepoint, app, teams } = body;
 
   const updates: Array<{ key: string; value: unknown; description?: string }> = [];
 
@@ -117,6 +121,11 @@ export async function PUT(req: Request) {
     if (app.numberAuthority !== undefined) updates.push({ key: "coc.numberAuthority", value: app.numberAuthority });
     if (app.enforceRemainingQty !== undefined) updates.push({ key: "coc.enforceRemainingQty", value: Boolean(app.enforceRemainingQty) });
     if (app.signatureRequired !== undefined) updates.push({ key: "signature.required", value: Boolean(app.signatureRequired) });
+  }
+
+  if (teams) {
+    if (teams.enabled !== undefined) updates.push({ key: "teams.enabled", value: Boolean(teams.enabled) });
+    if (teams.webhookUrl !== undefined) updates.push({ key: "teams.webhookUrl", value: teams.webhookUrl.trim() });
   }
 
   const sb = supabaseAdmin();

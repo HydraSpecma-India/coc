@@ -57,6 +57,10 @@ export default async function SettingsPage() {
       enforceRemainingQty: config.app.enforceRemainingQty,
       signatureRequired: config.app.signatureRequired,
     },
+    teams: {
+      enabled: config.teams.enabled,
+      webhookUrl: config.teams.webhookUrl,
+    },
   };
 
   return <SettingsClient initialConfig={clientConfig} />;
