@@ -8,6 +8,8 @@ export interface D365ProductionOrder {
   SalesOrder: string;
   SalesLine: string;
   BatchNumber: string;
+  CustomerPartNumber?: string;
+  dataAreaId?: string;
   SerialNumber?: string;
   DrawingNumber?: string;
   Revision?: string;

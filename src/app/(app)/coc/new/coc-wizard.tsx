@@ -10,6 +10,7 @@ import {
   CardBody,
   Button,
   Input,
+  Select,
   Badge,
   Field,
   Label,
@@ -33,6 +34,9 @@ import {
   AlertCircle,
   Info,
   Edit3,
+  Building2,
+  ShieldCheck,
+  Check,
 } from "lucide-react";
 
 interface TemplateSummary {
@@ -62,6 +66,7 @@ export function CocWizard({
   );
 
   // PO Search & Selection
+  const [selectedCompany, setSelectedCompany] = useState<string>("HSIN");
   const [poQuery, setPoQuery] = useState("");
   const [searchResults, setSearchResults] = useState<D365ProductionOrder[]>([]);
   const [selectedPO, setSelectedPO] = useState<D365ProductionOrder | null>(null);
@@ -75,9 +80,11 @@ export function CocWizard({
     ProductionOrder: "",
     ItemNumber: "",
     ItemDescription: "",
-    CustomerAccount: "CUST-HSIN",
+    CustomerAccount: "HSIN",
     CustomerName: "HydraSpecma India Pvt Ltd",
-    CustomerPO: "",
+    CustomerPO: "4509008214",
+    CustomerPartNumber: "160072",
+    dataAreaId: "HSIN",
     SalesOrder: "",
     SalesLine: "1.0",
     BatchNumber: "",
@@ -93,59 +100,85 @@ export function CocWizard({
   const openManualOrder = (defaultQuery = "") => {
     const q = defaultQuery.trim();
     setManualOrder({
-      ProductionOrder: q || "PO-" + new Date().getFullYear() + "-001",
-      ItemNumber: q || "1071.0747",
-      ItemDescription: q ? `HydraSpecma Assembly (${q})` : "Hydraulic Hose Assembly DN16",
-      CustomerAccount: "CUST-HSIN",
-      CustomerName: "HydraSpecma India Pvt Ltd",
-      CustomerPO: "PO-HSIN-74721",
-      SalesOrder: "SO-74721",
+      ProductionOrder: q || "HSIN-000011",
+      ItemNumber: q || "29110478R05",
+      ItemDescription: q ? `HydraSpecma Assembly (${q})` : "Main tank assembly V112",
+      CustomerAccount: selectedCompany !== "ALL" ? selectedCompany : "HSIN",
+      CustomerName: "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
+      CustomerPO: "4509008214",
+      CustomerPartNumber: "160072",
+      dataAreaId: selectedCompany !== "ALL" ? selectedCompany : "HSIN",
+      SalesOrder: "SO-002859",
       SalesLine: "1.0",
-      BatchNumber: "HS-B24-0747",
-      SerialNumber: "SN-0747-01",
-      DrawingNumber: q ? `DWG-${q}` : "DWG-1071-0747",
-      Revision: "Rev 01",
-      Quantity: 100,
-      UnitOfMeasure: "Pcs",
-      RemainingQuantity: 100,
-      Specification: "ISO 9001:2015 / EN 853 2SN, Max WP 350 bar",
+      BatchNumber: "HS-B24-0011",
+      SerialNumber: "SN-HSIN-000011",
+      DrawingNumber: q ? `DWG-${q}` : "DWG-29110478",
+      Revision: "Rev 05",
+      Quantity: 1,
+      UnitOfMeasure: "pcs",
+      RemainingQuantity: 1,
+      Specification: "0068-7211 / 0069-2093 Latest version",
     });
     setShowManualModal(true);
   };
 
-  // Quality & Manual Form Fields
+  // Quality & Official Checklist Fields (Aligned with 1 COC-1070.0049-Rev.02-merged 1.pdf)
   const [manualFields, setManualFields] = useState({
     InspectorName: userName || userEmail || "Quality Inspector",
     InspectionDate: new Date().toISOString().slice(0, 10),
+    CustomerPartNo: "160072",
+    CustomerPO: "4509008214",
+    SerialNumber: "",
+    CustomerSpec: "0068-7211 / 0069-2093 - Latest version",
+    Comments: "All test criteria satisfied. Conforms to ISO 9001:2015 / HydraSpecma requirements.",
+    Step1_Assembled: "Passed",
+    Step2_AirLeakTest: "Passed",
+    Step3_AirFanTest: "Passed",
+    Step4_InterfaceDimension: "Passed",
+    Step5_FlatnessBaseframe: "Passed",
+    Step6_PipeSystemLeak: "Passed",
+    Step7_PartTraceability: "Passed",
+    Step8_CompleteInspection: "Passed",
+    Step9_Packing: "Passed",
     TestPressureBar: "275 bar",
     VisualInspection: "Passed - No surface defects or cracks",
     DimensionalCheck: "Conforms to engineering drawing tolerances",
     TorqueCheck: "45 Nm verified per assembly specification",
-    Comments: "All test criteria satisfied. Conforms to ISO 9001:2015 / HydraSpecma requirements.",
   });
 
-  // Signature canvas
+  // Signature canvas state
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string>("");
 
-  // Preview & Generating
+  // Preview & Generating state
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  const applySelectedPO = (order: D365ProductionOrder) => {
+    setSelectedPO(order);
+    setManualFields((prev) => ({
+      ...prev,
+      CustomerPartNo: order.CustomerPartNumber || prev.CustomerPartNo || "160072",
+      CustomerPO: order.CustomerPO || prev.CustomerPO || "4509008214",
+      SerialNumber: order.SerialNumber || `${order.ItemNumber || order.ProductionOrder} - SN001`,
+    }));
+  };
+
   // Initial PO search
   useEffect(() => {
-    searchOrders("");
+    searchOrders("", "HSIN");
   }, []);
 
-  const searchOrders = async (q: string) => {
+  const searchOrders = async (q: string, comp = selectedCompany) => {
     setSearching(true);
     setD365Error(null);
     try {
+      const compParam = comp ? `&company=${encodeURIComponent(comp)}` : "";
       const res = await api<{ ok: boolean; mode?: "mock" | "live"; orders: D365ProductionOrder[]; error?: string }>(
-        `/api/d365/production-orders?q=${encodeURIComponent(q)}`
+        `/api/d365/production-orders?q=${encodeURIComponent(q)}${compParam}`
       );
       if (res.mode) setD365Mode(res.mode);
       if (res.error) setD365Error(res.error);
@@ -154,7 +187,7 @@ export function CocWizard({
       setSearchResults(orders);
       if (orders.length > 0) {
         if (!selectedPO || !orders.some((o) => o.ProductionOrder === selectedPO.ProductionOrder)) {
-          setSelectedPO(orders[0]);
+          applySelectedPO(orders[0]);
         }
       }
     } catch (e) {
@@ -164,6 +197,11 @@ export function CocWizard({
     } finally {
       setSearching(false);
     }
+  };
+
+  const handleCompanyChange = (newCompany: string) => {
+    setSelectedCompany(newCompany);
+    searchOrders(poQuery, newCompany);
   };
 
   // Canvas drawing handlers
@@ -235,10 +273,11 @@ export function CocWizard({
           itemNumber: itemNum,
           itemDescription: itemDesc,
           customerName: selectedPO.CustomerName || "HydraSpecma India Pvt Ltd",
-          customerPO: selectedPO.CustomerPO || "",
+          customerPO: manualFields.CustomerPO || selectedPO.CustomerPO || "4509008214",
+          customerPartNumber: manualFields.CustomerPartNo || selectedPO.CustomerPartNumber || "160072",
           salesOrder: selectedPO.SalesOrder || "",
           batchNumber: selectedPO.BatchNumber || "HS-B24-0747",
-          serialNumber: selectedPO.SerialNumber || "",
+          serialNumber: manualFields.SerialNumber || selectedPO.SerialNumber || "",
           quantity: selectedPO.Quantity || 1,
           unitOfMeasure: selectedPO.UnitOfMeasure || "Pcs",
           manualValues: manualFields,
@@ -285,14 +324,15 @@ export function CocWizard({
           itemNumber: itemNum,
           itemDescription: itemDesc,
           customerName: selectedPO.CustomerName || "HydraSpecma India Pvt Ltd",
-          customerPO: selectedPO.CustomerPO || "",
+          customerPO: manualFields.CustomerPO || selectedPO.CustomerPO || "4509008214",
+          customerPartNumber: manualFields.CustomerPartNo || selectedPO.CustomerPartNumber || "160072",
           salesOrder: selectedPO.SalesOrder || "",
           salesLine: selectedPO.SalesLine || "1.0",
-          customerAccount: selectedPO.CustomerAccount || "HSIN",
+          customerAccount: selectedPO.CustomerAccount || selectedCompany || "HSIN",
           quantity: selectedPO.Quantity || 1,
           unitOfMeasure: selectedPO.UnitOfMeasure || "Pcs",
           batchNumber: selectedPO.BatchNumber || "HS-B24-0747",
-          serialNumber: selectedPO.SerialNumber || "",
+          serialNumber: manualFields.SerialNumber || selectedPO.SerialNumber || "",
           manualValues: manualFields,
           signatureBase64: signatureDataUrl,
         },
@@ -447,29 +487,73 @@ export function CocWizard({
                 </Alert>
               )}
 
-              {/* Search Bar */}
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-ink-400" />
-                  <Input
-                    value={poQuery}
-                    onChange={(e) => setPoQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && searchOrders(poQuery)}
-                    placeholder="Search production order or item number (e.g. 1071.0747, PO-2026-10710747, Hose)..."
-                    className="pl-9"
-                  />
+              {/* Search Bar with Legal Entity (dataAreaId) Switcher */}
+              <div className="space-y-2">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="sm:w-56 shrink-0">
+                    <Select
+                      value={selectedCompany}
+                      onChange={(e) => handleCompanyChange(e.target.value)}
+                      className="font-medium text-xs bg-slate-50 border-slate-300 h-9"
+                      title="D365 Legal Entity (dataAreaId)"
+                    >
+                      <option value="HSIN">HSIN - India (HydraSpecma India)</option>
+                      <option value="HGCN">HGCN - China (HydraSpecma China)</option>
+                      <option value="HSDK">HSDK - Denmark (HydraSpecma A/S)</option>
+                      <option value="HSSW">HSSW - Sweden (HydraSpecma AB)</option>
+                      <option value="ALL">ALL - Cross-Company (All Entities)</option>
+                    </Select>
+                  </div>
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-ink-400" />
+                    <Input
+                      value={poQuery}
+                      onChange={(e) => setPoQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && searchOrders(poQuery, selectedCompany)}
+                      placeholder={`Search in ${selectedCompany === "ALL" ? "all entities" : selectedCompany} (e.g. HSIN-000011, 29110478R05)...`}
+                      className="pl-9"
+                    />
+                  </div>
+                  <Button loading={searching} onClick={() => searchOrders(poQuery, selectedCompany)}>
+                    Search D365
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => openManualOrder(poQuery)}
+                    className="gap-1.5 shrink-0"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Custom Order
+                  </Button>
                 </div>
-                <Button loading={searching} onClick={() => searchOrders(poQuery)}>
-                  Search D365
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => openManualOrder(poQuery)}
-                  className="gap-1.5"
-                >
-                  <Plus className="h-4 w-4" />
-                  Custom Order
-                </Button>
+
+                {/* Quick Entity Switcher Tabs */}
+                <div className="flex items-center gap-1.5 text-xs text-ink-500 pt-1">
+                  <span className="text-[11px] font-medium text-ink-400">Legal Entity:</span>
+                  {[
+                    { code: "HSIN", label: "HSIN (India)" },
+                    { code: "HGCN", label: "HGCN (China)" },
+                    { code: "HSDK", label: "HSDK (Denmark)" },
+                    { code: "HSSW", label: "HSSW (Sweden)" },
+                    { code: "ALL", label: "ALL Entities" },
+                  ].map((ent) => (
+                    <button
+                      key={ent.code}
+                      type="button"
+                      onClick={() => handleCompanyChange(ent.code)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                        selectedCompany === ent.code
+                          ? "bg-brand-500 text-ink-900 border-brand-500 font-bold shadow-xs"
+                          : "bg-white text-ink-600 border-ink-200 hover:bg-ink-100"
+                      }`}
+                    >
+                      {ent.label}
+                    </button>
+                  ))}
+                  <span className="ml-auto text-[11px] font-mono text-ink-400">
+                    OData dataAreaId: <strong>{selectedCompany === "ALL" ? "cross-company" : selectedCompany.toLowerCase()}</strong>
+                  </span>
+                </div>
               </div>
 
               {/* Manual Order Entry Form */}
@@ -616,10 +700,11 @@ export function CocWizard({
                 <div className="grid gap-3 sm:grid-cols-2">
                   {searchResults.map((order) => {
                     const isSelected = selectedPO?.ProductionOrder === order.ProductionOrder;
+                    const entityBadge = order.dataAreaId || (order.CustomerAccount ? order.CustomerAccount.toUpperCase() : selectedCompany);
                     return (
                       <div
                         key={order.ProductionOrder}
-                        onClick={() => setSelectedPO(order)}
+                        onClick={() => applySelectedPO(order)}
                         className={`cursor-pointer rounded-lg border p-4 transition-all ${
                           isSelected
                             ? "border-brand-500 bg-brand-50/30 ring-2 ring-brand-400 shadow-sm"
@@ -627,9 +712,16 @@ export function CocWizard({
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="font-mono text-xs font-bold text-brand-700">
-                            {order.ProductionOrder}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-xs font-bold text-brand-700">
+                              {order.ProductionOrder}
+                            </span>
+                            {entityBadge && (
+                              <Badge tone="brand" className="text-[10px] font-mono font-bold px-1.5 py-0.5">
+                                {entityBadge}
+                              </Badge>
+                            )}
+                          </div>
                           <Badge tone="info">{order.CustomerName}</Badge>
                         </div>
                         <div className="mt-1 font-semibold text-sm text-ink-900 line-clamp-1">
@@ -637,8 +729,8 @@ export function CocWizard({
                         </div>
                         <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-ink-600">
                           <div>Part: <span className="font-mono font-medium text-ink-900">{order.ItemNumber}</span></div>
-                          <div>PO: <span className="font-medium">{order.CustomerPO || "—"}</span></div>
-                          <div>Batch: <span className="font-mono">{order.BatchNumber || "—"}</span></div>
+                          <div>Customer Part: <span className="font-mono font-medium text-brand-800">{order.CustomerPartNumber || "160072"}</span></div>
+                          <div>Cust PO: <span className="font-medium">{order.CustomerPO || "—"}</span></div>
                           <div>Qty: <span className="font-semibold text-ink-900">{order.Quantity} {order.UnitOfMeasure}</span></div>
                         </div>
                       </div>
@@ -692,80 +784,174 @@ export function CocWizard({
         </div>
       )}
 
-      {/* Step 2: Quality Inspection Data */}
+      {/* Step 2: Quality Inspection Data & Official Workflow Checklist */}
       {step === 2 && (
-        <Card>
-          <CardHeader
-            title="Quality Verification & Inspection Parameters"
-            description="Verify physical measurements, hydraulic pressure testing, and inspector details."
-          />
-          <CardBody className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label="Inspector Name">
-                <Input
-                  value={manualFields.InspectorName}
-                  onChange={(e) => setManualFields({ ...manualFields, InspectorName: e.target.value })}
-                  required
-                />
-              </Field>
-
-              <Field label="Inspection Date">
-                <Input
-                  type="date"
-                  value={manualFields.InspectionDate}
-                  onChange={(e) => setManualFields({ ...manualFields, InspectionDate: e.target.value })}
-                  required
-                />
-              </Field>
-
-              <Field label="Hydraulic Test Pressure" hint="e.g. 275 bar / 4000 psi">
-                <Input
-                  value={manualFields.TestPressureBar}
-                  onChange={(e) => setManualFields({ ...manualFields, TestPressureBar: e.target.value })}
-                />
-              </Field>
-
-              <Field label="Torque / Assembly Check">
-                <Input
-                  value={manualFields.TorqueCheck}
-                  onChange={(e) => setManualFields({ ...manualFields, TorqueCheck: e.target.value })}
-                />
-              </Field>
-
-              <Field label="Dimensional Verification Status">
-                <Input
-                  value={manualFields.DimensionalCheck}
-                  onChange={(e) => setManualFields({ ...manualFields, DimensionalCheck: e.target.value })}
-                />
-              </Field>
-
-              <Field label="Visual & Surface Finish Check">
-                <Input
-                  value={manualFields.VisualInspection}
-                  onChange={(e) => setManualFields({ ...manualFields, VisualInspection: e.target.value })}
-                />
-              </Field>
-
-              <div className="md:col-span-2">
-                <Field label="Compliance Remarks & Notes">
+        <div className="space-y-6">
+          {/* Part & Order References Box */}
+          <Card>
+            <CardHeader
+              title="1. Order & Customer Part Identification"
+              description="Verify customer part mapping and purchase order reference details as printed on the official COC."
+            />
+            <CardBody className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+                <Field label="Customer Part No. *" hint="e.g. 160072">
                   <Input
-                    value={manualFields.Comments}
-                    onChange={(e) => setManualFields({ ...manualFields, Comments: e.target.value })}
+                    value={manualFields.CustomerPartNo}
+                    onChange={(e) => setManualFields({ ...manualFields, CustomerPartNo: e.target.value })}
+                    required
                   />
                 </Field>
-              </div>
-            </div>
 
-            <div className="flex justify-between pt-6 border-t border-ink-200">
-              <Button variant="outline" onClick={() => setStep(1)} className="gap-2">
-                <ArrowLeft className="h-4 w-4" /> Back
-              </Button>
-              <Button onClick={() => setStep(3)} className="gap-2">
-                Next: Digital Signature <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </CardBody>
-        </Card>
+                <Field label="Customer Purchase Order *" hint="e.g. 4509008214">
+                  <Input
+                    value={manualFields.CustomerPO}
+                    onChange={(e) => setManualFields({ ...manualFields, CustomerPO: e.target.value })}
+                    required
+                  />
+                </Field>
+
+                <Field label="Top Level Serial Number *" hint="e.g. SN-HSIN-000011">
+                  <Input
+                    value={manualFields.SerialNumber}
+                    onChange={(e) => setManualFields({ ...manualFields, SerialNumber: e.target.value })}
+                    required
+                  />
+                </Field>
+
+                <Field label="HydraSpecma (HSRE) Part No.">
+                  <Input
+                    value={selectedPO?.ItemNumber || ""}
+                    readOnly
+                    className="bg-ink-50 font-mono text-ink-700"
+                  />
+                </Field>
+
+                <Field label="Manufacturing Order Number (PO)">
+                  <Input
+                    value={selectedPO?.ProductionOrder || ""}
+                    readOnly
+                    className="bg-ink-50 font-mono font-bold text-brand-700"
+                  />
+                </Field>
+
+                <Field label="Customer Name">
+                  <Input
+                    value={selectedPO?.CustomerName || "VESTAS WIND TECHNOLOGYS INDIA PVT LTD"}
+                    readOnly
+                    className="bg-ink-50 text-ink-700"
+                  />
+                </Field>
+
+                <div className="sm:col-span-2 md:col-span-3">
+                  <Field label="Customer Technical Purchase Specification & Revision">
+                    <Input
+                      value={manualFields.CustomerSpec}
+                      onChange={(e) => setManualFields({ ...manualFields, CustomerSpec: e.target.value })}
+                    />
+                  </Field>
+                </div>
+              </div>
+            </CardBody>
+          </Card>
+
+          {/* Official 9-Step Workflow Verification Card */}
+          <Card>
+            <CardHeader
+              title="2. HydraSpecma Official 9-Step Quality Workflow Checklist"
+              description="Verify conformity to engineering and inspection standards from official template COC-1070.0049-Rev.02."
+              actions={
+                <Badge tone="success" className="gap-1 font-semibold">
+                  <ShieldCheck className="h-3.5 w-3.5" /> 9 of 9 Steps Verified
+                </Badge>
+              }
+            />
+            <CardBody className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-ink-200 bg-ink-50/70 text-ink-700 font-semibold">
+                      <th className="py-2.5 px-4 w-12 text-center">#</th>
+                      <th className="py-2.5 px-4 w-64">Work Flow Step</th>
+                      <th className="py-2.5 px-4">Inspection Standard / Technical Specification</th>
+                      <th className="py-2.5 px-4 w-36 text-right">Verification Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100">
+                    {[
+                      { step: 1, name: "Assembled.", spec: "According to AI-1071.0512 and AI-1070.0049, Latest revision." },
+                      { step: 2, name: "Air leak test.", spec: "According to TI-1071.0512-1, Latest revision." },
+                      { step: 3, name: "Air fan test", spec: "According to TI-1071.0512-2, Latest revision." },
+                      { step: 4, name: "Interface dimension for cabinet.", spec: "According to TI-1071.0512-3, Latest revision." },
+                      { step: 5, name: "Flatness of Baseframe.", spec: "According to TI-1071.0512-4, Latest revision." },
+                      { step: 6, name: "Pipe system Air leak test or Helium leak test.", spec: "According to TI-1071.0267 / TI-1071.0267-1, Latest revision." },
+                      { step: 7, name: "Part traceability.", spec: "According to SN-1070.0049, Latest revision." },
+                      { step: 8, name: "Complete inspection.", spec: "Visual inspection of complete unit before packed." },
+                      { step: 9, name: "Packing.", spec: "According to PI-1070.0049, Latest revision." },
+                    ].map((item) => (
+                      <tr key={item.step} className="hover:bg-ink-50/50 transition-colors">
+                        <td className="py-2.5 px-4 font-mono font-bold text-ink-500 text-center">{item.step}</td>
+                        <td className="py-2.5 px-4 font-semibold text-ink-900">{item.name}</td>
+                        <td className="py-2.5 px-4 text-ink-600 font-mono text-[11px]">{item.spec}</td>
+                        <td className="py-2.5 px-4 text-right">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                            <Check className="h-3 w-3 text-emerald-600 stroke-[3]" /> Conforms
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardBody>
+          </Card>
+
+          {/* Inspector Signoff Card */}
+          <Card>
+            <CardHeader
+              title="3. Quality Inspector Details & Declaration"
+              description="Confirm the authorizing quality assurance inspector and certificate date."
+            />
+            <CardBody className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Inspector Name *">
+                  <Input
+                    value={manualFields.InspectorName}
+                    onChange={(e) => setManualFields({ ...manualFields, InspectorName: e.target.value })}
+                    required
+                  />
+                </Field>
+
+                <Field label="Date of Signature *">
+                  <Input
+                    type="date"
+                    value={manualFields.InspectionDate}
+                    onChange={(e) => setManualFields({ ...manualFields, InspectionDate: e.target.value })}
+                    required
+                  />
+                </Field>
+
+                <div className="sm:col-span-2">
+                  <Field label="Compliance Declaration & Remarks">
+                    <Input
+                      value={manualFields.Comments}
+                      onChange={(e) => setManualFields({ ...manualFields, Comments: e.target.value })}
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              <div className="flex justify-between pt-6 border-t border-ink-200">
+                <Button variant="outline" onClick={() => setStep(1)} className="gap-2">
+                  <ArrowLeft className="h-4 w-4" /> Back to Order Lookup
+                </Button>
+                <Button onClick={() => setStep(3)} className="gap-2">
+                  Next: Digital Signature <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardBody>
+          </Card>
+        </div>
       )}
 
       {/* Step 3: Digital Signature */}

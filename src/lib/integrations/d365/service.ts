@@ -33,13 +33,22 @@ export class D365Service {
     return data.access_token;
   }
 
-  static async searchProductionOrders(query = ""): Promise<D365SearchResult> {
+  static async searchProductionOrders(query = "", company = ""): Promise<D365SearchResult> {
     const config = (await getActiveConfig()).d365;
+    const targetCompany = (company || config.company || "HSIN").trim();
+    const isAllCompanies = targetCompany.toUpperCase() === "ALL";
 
     if (config.mode === "mock") {
       const q = query.trim().toLowerCase();
-      if (!q) return { mode: "mock", orders: MOCK_PRODUCTION_ORDERS };
-      const filtered = MOCK_PRODUCTION_ORDERS.filter(
+      let list = MOCK_PRODUCTION_ORDERS;
+      if (!isAllCompanies) {
+        list = list.filter((p) => {
+          const area = (p.dataAreaId || p.CustomerAccount || "").toLowerCase();
+          return area.includes(targetCompany.toLowerCase());
+        });
+      }
+      if (!q) return { mode: "mock", orders: list };
+      const filtered = list.filter(
         (po) =>
           po.ProductionOrder.toLowerCase().includes(q) ||
           po.ItemNumber.toLowerCase().includes(q) ||
@@ -66,6 +75,8 @@ export class D365Service {
       const entity = (config.productionEntity || "ProductionOrderHeaders").trim();
       const isHeaders = /productionorderheader/i.test(entity);
 
+      const companyClause = !isAllCompanies ? `dataAreaId eq '${targetCompany.toLowerCase()}'` : "";
+
       const tryODataFetch = async (filterString: string) => {
         const filterClause = filterString ? `&$filter=${filterString}` : "";
         const url = `${config.baseUrl.replace(/\/+$/, "")}/data/${entity}?cross-company=true&$top=50${filterClause}`;
@@ -82,27 +93,29 @@ export class D365Service {
       let res: Response;
 
       if (!cleanQ) {
-        // No query: fetch top 50
-        res = await tryODataFetch("");
+        // No query: filter by company if specified
+        res = await tryODataFetch(companyClause);
       } else {
-        // Query provided: try smart candidate filter for D365FO
-        const candidate1 = isHeaders
+        // Query provided: combine company filter with item / order query
+        const qPart1 = isHeaders
           ? `(ProductionOrderNumber eq '${cleanQ}' or ItemNumber eq '${cleanQ}' or startswith(ProductionOrderNumber,'${cleanQ}') or startswith(ItemNumber,'${cleanQ}'))`
           : `(ProductionOrder eq '${cleanQ}' or ItemNumber eq '${cleanQ}' or startswith(ProductionOrder,'${cleanQ}') or startswith(ItemNumber,'${cleanQ}'))`;
 
-        res = await tryODataFetch(candidate1);
+        const filter1 = companyClause ? `${companyClause} and ${qPart1}` : qPart1;
+        res = await tryODataFetch(filter1);
 
         // If candidate 1 failed (e.g. unknown property), try alternative candidate
         if (!res.ok) {
-          const candidate2 = isHeaders
+          const qPart2 = isHeaders
             ? `(ProductionOrder eq '${cleanQ}' or ItemNumber eq '${cleanQ}')`
             : `(ProductionOrderNumber eq '${cleanQ}' or ItemNumber eq '${cleanQ}')`;
-          const altRes = await tryODataFetch(candidate2);
+          const filter2 = companyClause ? `${companyClause} and ${qPart2}` : qPart2;
+          const altRes = await tryODataFetch(filter2);
           if (altRes.ok) {
             res = altRes;
           } else {
-            // If both filters were rejected by D365, fetch top 50 without filter and filter in memory
-            const unFilteredRes = await tryODataFetch("");
+            // If both filters failed with 400, fetch company-filtered top 50 and filter in memory
+            const unFilteredRes = await tryODataFetch(companyClause);
             if (unFilteredRes.ok) {
               res = unFilteredRes;
             }
@@ -150,16 +163,18 @@ export class D365Service {
           ProductionOrder: finalOrder,
           ItemNumber: finalItem,
           ItemDescription: finalDesc,
-          CustomerAccount: String(item.CustomerAccount || item.CustAccount || "HSIN"),
-          CustomerName: String(item.CustomerName || item.CustName || item.Name || "HydraSpecma India Pvt Ltd"),
-          CustomerPO: String(item.CustomerPO || item.PurchOrderFormNum || item.CustomerRef || "PO-HSIN"),
+          CustomerAccount: String(item.CustomerAccount || item.CustAccount || item.dataAreaId || "HSIN"),
+          CustomerName: String(item.DeliveryAddressName || item.CustomerName || item.CustName || item.Name || "HydraSpecma India Pvt Ltd"),
+          CustomerPO: String(item.CustomerRequisitionNumber || item.CustomerPO || item.PurchOrderFormNum || item.CustomerRef || "PO-HSIN"),
+          CustomerPartNumber: String(item.ExternalItemNumber || item.CustomerPartNumber || item.CustomerItemNumber || ""),
+          dataAreaId: String(item.dataAreaId || "").toUpperCase(),
           SalesOrder: String(item.SalesOrder || item.SalesId || ""),
           SalesLine: String(item.SalesLine || item.SalesLineNumber || item.LineNum || "1.0"),
           BatchNumber: String(item.BatchNumber || item.InventBatchId || "HS-B24-0747"),
           SerialNumber: String(item.SerialNumber || item.InventSerialId || item.TopLevelSerialNumber || ""),
           DrawingNumber: String(item.DrawingNumber || `DWG-${finalItem}`),
           Revision: String(item.Revision || "Rev 01"),
-          Quantity: Number(item.ProductionOrderQuantity || item.ProductionQuantity || item.Quantity || item.QtySched || 1) || 1,
+          Quantity: Number(item.ProductionOrderQuantity || item.ProductionQuantity || item.ScheduledQuantity || item.Quantity || item.QtySched || 1) || 1,
           UnitOfMeasure: String(item.UnitOfMeasure || item.UnitId || "Pcs"),
           RemainingQuantity: Number(item.RemainingQuantity || item.ProductionOrderQuantity || item.Quantity || 1) || 1,
           Specification: String(item.Specification || "ISO 9001:2015 / HydraSpecma Technical Standard"),
