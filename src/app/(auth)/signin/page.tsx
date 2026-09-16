@@ -11,14 +11,15 @@ export default async function SignInPage({
   const session = await auth();
   const { callbackUrl = "/", error } = await searchParams;
   if (session?.user?.email && session.user.id) redirect(callbackUrl);
-  const entra = hasEntraProvider();
 
   let errorMessage: string | null = null;
   if (error) {
     if (error === "InvalidCredentials" || error === "CredentialsSignin") {
       errorMessage = "Invalid email or password. Please check your credentials and try again.";
     } else if (error === "AccessDenied") {
-      errorMessage = "Your account does not have permission to access the platform or is deactivated.";
+      errorMessage = "Your account does not have permission to access the platform or has been deactivated.";
+    } else if (error === "SSOUnavailable") {
+      errorMessage = "Microsoft 365 SSO is not currently active. Please sign in with your email and password.";
     } else {
       errorMessage = `Sign-in failed (${error}). Please try again.`;
     }
@@ -75,7 +76,6 @@ export default async function SignInPage({
               name="email"
               type="email"
               autoComplete="email"
-              defaultValue="manigandan.parthasarathi@hydraspecma.com"
               className="h-10 w-full rounded-md border border-ink-300 bg-white px-3 text-sm text-ink-900 focus:border-brand-500 focus:ring-1 focus:ring-brand-400 font-medium"
               placeholder="name@hydraspecma.com"
               required
@@ -90,7 +90,6 @@ export default async function SignInPage({
               name="password"
               type="password"
               autoComplete="current-password"
-              defaultValue="Admin@123"
               className="h-10 w-full rounded-md border border-ink-300 bg-white px-3 text-sm text-ink-900 focus:border-brand-500 focus:ring-1 focus:ring-brand-400 font-medium"
               placeholder="••••••••"
               required
@@ -101,44 +100,46 @@ export default async function SignInPage({
             type="submit"
             className="mt-2 flex h-11 w-full items-center justify-center rounded-md bg-brand-500 text-sm font-bold text-ink-900 hover:bg-brand-600 transition-colors shadow-sm cursor-pointer"
           >
-            Sign In with Password
+            Sign In
           </button>
         </form>
 
-        <div className="mt-4 rounded-md border border-ink-200 bg-ink-50 p-3 text-xs text-ink-600 space-y-1">
-          <p className="font-semibold text-ink-800">Admin Account Credentials:</p>
-          <p className="text-[11px] font-mono text-ink-700 break-all">User: manigandan.parthasarathi@hydraspecma.com</p>
-          <p className="text-[11px] font-mono text-ink-700">Initial Password: Admin@123</p>
+        {/* Live Microsoft 365 SSO Section */}
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-ink-200" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-white px-2 text-ink-400 font-medium">Or continue with</span>
+          </div>
         </div>
 
-        {/* Entra ID SSO Section */}
-        <div className="mt-6 border-t border-ink-200 pt-5">
-          {entra ? (
-            <form
-              action={async () => {
-                "use server";
-                await signIn("microsoft-entra-id", { redirectTo: callbackUrl });
-              }}
-            >
-              <button
-                type="submit"
-                className="flex h-10 w-full items-center justify-center gap-2 rounded-md border border-ink-300 bg-white text-xs font-medium text-ink-800 hover:bg-ink-50 transition-colors cursor-pointer"
-              >
-                <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden>
-                  <rect x="1" y="1" width="9" height="9" fill="#f25022" />
-                  <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-                  <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-                  <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
-                </svg>
-                Sign in with Microsoft 365 (SSO)
-              </button>
-            </form>
-          ) : (
-            <div className="rounded-md bg-ink-50 p-3 text-center text-[11px] text-ink-500">
-              <span className="font-semibold text-ink-700">Company SSO Setup:</span> You can configure Microsoft Entra ID (SSO) in{" "}
-              <span className="font-medium text-ink-800">System Settings &gt; Entra ID</span> after logging in.
-            </div>
-          )}
+        <form
+          action={async () => {
+            "use server";
+            if (hasEntraProvider()) {
+              await signIn("microsoft-entra-id", { redirectTo: callbackUrl });
+            } else {
+              redirect(`/signin?error=SSOUnavailable`);
+            }
+          }}
+        >
+          <button
+            type="submit"
+            className="flex h-11 w-full items-center justify-center gap-2.5 rounded-md border border-ink-300 bg-white text-xs font-semibold text-ink-800 hover:bg-ink-50 transition-colors cursor-pointer shadow-xs"
+          >
+            <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden>
+              <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+              <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+              <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+              <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+            </svg>
+            Sign in with Microsoft 365 (SSO)
+          </button>
+        </form>
+
+        <div className="mt-6 text-center text-[11px] text-ink-400">
+          Authorized HydraSpecma personnel only &bull; ISO 9001:2015 Compliant
         </div>
       </div>
     </div>
