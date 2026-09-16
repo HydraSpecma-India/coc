@@ -5,6 +5,7 @@ import { renderCOCPdf } from "@/lib/render/pdf-renderer";
 import { D365Service } from "@/lib/integrations/d365/service";
 import { supabaseAdmin } from "@/lib/db/supabase-admin";
 import { logger } from "@/lib/logging/logger";
+import { Errors } from "@/lib/errors";
 import { z } from "zod";
 
 const createCocSchema = z.object({
@@ -31,7 +32,8 @@ const createCocSchema = z.object({
 export const GET = route(async (req) => {
   await requireSession();
   const q = req.nextUrl.searchParams.get("q") || "";
-  const docs = await listCocDocuments({ query: q, limit: 50 });
+  const productionOrder = req.nextUrl.searchParams.get("productionOrder") || "";
+  const docs = await listCocDocuments({ query: q, productionOrder, limit: 50 });
   return json({ ok: true, documents: docs });
 });
 
@@ -53,29 +55,51 @@ export const POST = route(async (req) => {
 
   const isUuid = (val?: string) => Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
 
-  if (!isUuid(tplId) || !isUuid(tplVerId) || tplId === "00000000-0000-0000-0000-000000000001") {
+  if (!isUuid(tplId)) {
     const { data: dbTpl } = await sb
       .from("coc_templates")
       .select("id, active_version_id, name")
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (dbTpl) {
       tplId = dbTpl.id;
       tplVerId = dbTpl.active_version_id;
-      if (!tplVerId) {
-        const { data: dbVer } = await sb
-          .from("coc_template_versions")
-          .select("id, version_number")
-          .eq("template_id", dbTpl.id)
-          .order("version_number", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (dbVer) {
-          tplVerId = dbVer.id;
-          tplVerNum = dbVer.version_number;
-        }
-      }
+    }
+  }
+
+  if (tplId && !isUuid(tplVerId)) {
+    const { data: dbVer } = await sb
+      .from("coc_template_versions")
+      .select("id, version_number")
+      .eq("template_id", tplId)
+      .eq("status", "published")
+      .order("version_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (dbVer) {
+      tplVerId = dbVer.id;
+      tplVerNum = dbVer.version_number;
+    }
+  }
+
+  // Pre-validate uniqueness of Production Order + Serial Number before insertion
+  if (parsed.serialNumber && prodOrder) {
+    const cleanSerial = parsed.serialNumber.trim();
+    const { data: existingDoc } = await sb
+      .from("coc_documents")
+      .select("id, coc_number, status, serial_number")
+      .eq("production_order", prodOrder)
+      .eq("serial_number", cleanSerial)
+      .neq("status", "CANCELLED")
+      .maybeSingle();
+
+    if (existingDoc) {
+      throw Errors.conflict(
+        `A Certificate of Conformity (${existingDoc.coc_number || "Certificate"}) has already been issued for Production Order "${prodOrder}" with Serial Number "${cleanSerial}". Please change the Serial Number (e.g. SN002) in Step 2 to issue a certificate for the next unit.`
+      );
     }
   }
 
@@ -203,6 +227,9 @@ export const POST = route(async (req) => {
   } catch (err) {
     logger.error("COC generation error", { error: (err as Error).message, id: doc.id });
     await sb.from("coc_documents").update({ status: "UPLOAD_FAILED", last_error: (err as Error).message }).eq("id", doc.id);
-    return json({ ok: false, error: (err as Error).message, documentId: doc.id }, { status: 500 });
+    return json(
+      { ok: false, error: { code: "GENERATION_FAILED", message: (err as Error).message }, documentId: doc.id },
+      { status: 500 },
+    );
   }
 });

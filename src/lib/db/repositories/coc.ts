@@ -175,11 +175,16 @@ export async function getGeneratedPdfBytes(storagePath: string): Promise<Uint8Ar
 
 export async function listCocDocuments(opts: {
   query?: string;
+  productionOrder?: string;
   limit?: number;
   offset?: number;
 } = {}): Promise<COCDocumentRow[]> {
   const sb = supabaseAdmin();
   let q = sb.from("coc_documents").select("*").order("created_at", { ascending: false });
+
+  if (opts.productionOrder) {
+    q = q.eq("production_order", opts.productionOrder);
+  }
 
   if (opts.query) {
     q = q.or(

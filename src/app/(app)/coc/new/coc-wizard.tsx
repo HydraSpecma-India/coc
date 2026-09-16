@@ -278,6 +278,57 @@ export function CocWizard({
     }
   };
 
+  // Serial number conflict check & auto-increment state
+  const [existingCocs, setExistingCocs] = useState<Array<{ coc_number: string; serial_number: string | null; status: string }>>([]);
+  const [serialWarning, setSerialWarning] = useState<string | null>(null);
+  const [serialNotice, setSerialNotice] = useState<string | null>(null);
+
+  const fetchExistingCocsForPO = async (productionOrder: string, itemNumber: string) => {
+    const cleanPO = productionOrder?.trim();
+    if (!cleanPO) return;
+    try {
+      const res = await api<{ ok: boolean; documents: Array<{ coc_number: string; serial_number: string | null; status: string }> }>(
+        `/api/coc?productionOrder=${encodeURIComponent(cleanPO)}`
+      );
+      const docs = (res.documents || []).filter((d) => d.status !== "CANCELLED");
+      setExistingCocs(docs);
+
+      const usedSerials = docs.map((d) => d.serial_number?.trim()).filter(Boolean) as string[];
+
+      // Calculate next recommended serial number
+      const basePrefix = `${itemNumber || cleanPO} - SN`;
+      let nextNum = 1;
+      for (const s of usedSerials) {
+        const match = s.match(/SN(\d+)/i);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num >= nextNum) {
+            nextNum = num + 1;
+          }
+        }
+      }
+
+      const nextSerial = `${basePrefix}${String(nextNum).padStart(3, "0")}`;
+
+      if (usedSerials.length > 0) {
+        const lastDoc = docs[0]?.coc_number || "Existing Certificate";
+        setSerialNotice(
+          `Auto-selected next unit: SN${String(nextNum).padStart(3, "0")} (${lastDoc} already issued for earlier unit)`
+        );
+      } else {
+        setSerialNotice(null);
+      }
+
+      setManualFields((prev) => ({
+        ...prev,
+        SerialNumber: nextSerial,
+      }));
+    } catch (e) {
+      console.warn("Could not fetch existing COCs for order", e);
+    }
+  };
+
+
   const handleSelectSalesOrder = (soNumber: string) => {
     if (soNumber === "__custom__") {
       setIsCustomSO(true);
@@ -383,6 +434,25 @@ export function CocWizard({
     TorqueCheck: "45 Nm verified per assembly specification",
   });
 
+  // Real-time conflict warning when user edits serial number
+  useEffect(() => {
+    if (!manualFields.SerialNumber || !existingCocs.length) {
+      setSerialWarning(null);
+      return;
+    }
+    const entered = manualFields.SerialNumber.trim().toLowerCase();
+    const conflict = existingCocs.find(
+      (c) => c.serial_number && c.serial_number.trim().toLowerCase() === entered
+    );
+    if (conflict) {
+      setSerialWarning(
+        `A Certificate (${conflict.coc_number}) has already been issued for this production order with Serial Number "${conflict.serial_number}". Please change the Serial Number (e.g. next unit suffix) to proceed.`
+      );
+    } else {
+      setSerialWarning(null);
+    }
+  }, [manualFields.SerialNumber, existingCocs]);
+
   // Signature canvas state
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -404,6 +474,7 @@ export function CocWizard({
       SerialNumber: order.SerialNumber || `${order.ItemNumber || order.ProductionOrder} - SN001`,
     }));
     fetchSalesOrdersForPO(order.ItemNumber, order.dataAreaId || selectedCompany, order);
+    fetchExistingCocsForPO(order.ProductionOrder, order.ItemNumber);
   };
 
   // Initial PO search
@@ -547,6 +618,11 @@ export function CocWizard({
   const handleCreateCoc = async () => {
     if (!selectedPO) {
       toast.error("Please select a production order");
+      return;
+    }
+
+    if (serialWarning) {
+      toast.error("Duplicate Serial Number", serialWarning);
       return;
     }
 
@@ -1125,6 +1201,7 @@ export function CocWizard({
                         }));
                         setShowManualModal(false);
                         fetchSalesOrdersForPO(finalOrder.ItemNumber, finalOrder.dataAreaId || selectedCompany, finalOrder);
+                        fetchExistingCocsForPO(finalOrder.ProductionOrder, finalOrder.ItemNumber);
                         toast.success(`Applied order: ${manualOrder.ProductionOrder} (Customer Part: ${finalCustPart})`);
                       }}
                     >
@@ -1411,7 +1488,19 @@ export function CocWizard({
                     value={manualFields.SerialNumber}
                     onChange={(e) => setManualFields({ ...manualFields, SerialNumber: e.target.value })}
                     required
+                    className={serialWarning ? "border-red-400 focus:border-red-500 focus:ring-red-300" : ""}
                   />
+                  {serialNotice && !serialWarning && (
+                    <div className="mt-1.5 flex items-center gap-1.5 rounded bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-800 border border-brand-200">
+                      <span>ℹ️</span> {serialNotice}
+                    </div>
+                  )}
+                  {serialWarning && (
+                    <div className="mt-1.5 flex items-start gap-1.5 rounded-md bg-red-50 p-2.5 text-xs font-semibold text-red-700 border border-red-200">
+                      <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                      <span>{serialWarning}</span>
+                    </div>
+                  )}
                 </Field>
 
                 <Field label="HydraSpecma (HSRE) Part No.">
@@ -1610,7 +1699,8 @@ export function CocWizard({
                 size="md"
                 loading={generating}
                 onClick={handleCreateCoc}
-                className="bg-brand-500 hover:bg-brand-600 text-ink-900 font-semibold gap-2 border-brand-500"
+                disabled={Boolean(serialWarning)}
+                className="bg-brand-500 hover:bg-brand-600 text-ink-900 font-semibold gap-2 border-brand-500 disabled:opacity-50"
               >
                 <FileCheck className="h-4 w-4" />
                 Generate & Issue Official COC
@@ -1618,6 +1708,24 @@ export function CocWizard({
             }
           />
           <CardBody className="space-y-4">
+            {serialWarning && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-xs text-red-800 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+                <div className="space-y-1.5">
+                  <p className="font-bold text-sm text-red-900">Duplicate Serial Number Detected</p>
+                  <p>{serialWarning}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setStep(2)}
+                    className="mt-1 text-xs bg-white text-red-700 border-red-300 hover:bg-red-50"
+                  >
+                    Go to Step 2 to Change Serial Number
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {previewLoading ? (
               <div className="flex h-96 items-center justify-center rounded-lg border border-ink-200 bg-ink-50">
                 <div className="text-center">
@@ -1642,7 +1750,8 @@ export function CocWizard({
               <Button
                 loading={generating}
                 onClick={handleCreateCoc}
-                className="bg-brand-500 hover:bg-brand-600 text-ink-900 font-semibold gap-2 border-brand-500"
+                disabled={Boolean(serialWarning)}
+                className="bg-brand-500 hover:bg-brand-600 text-ink-900 font-semibold gap-2 border-brand-500 disabled:opacity-50"
               >
                 <FileCheck className="h-4 w-4" />
                 Confirm & Issue Official Certificate

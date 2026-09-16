@@ -49,14 +49,32 @@ export function errorResponse(err: unknown, requestId: string, log: Logger = log
       { status: 400 },
     );
   }
-  const e = err as Error & { code?: string };
+  const e = err as Error & { code?: string; details?: string };
   log.error("unhandled error", { error: e?.message, code: e?.code, stack: e?.stack });
+
   // Postgres immutability trigger → user friendly
   if (e?.code === "P0001") {
     return NextResponse.json({ error: { code: "IMMUTABLE", message: e.message, requestId } }, { status: 409 });
   }
-  const message = e?.message?.includes("not configured") ? e.message : "Something went wrong. Please try again or contact an administrator.";
+
+  // Postgres unique constraint violation
+  if (e?.code === "23505") {
+    let userMessage = "A duplicate record already exists with these details.";
+    if (e.message?.includes("coc_documents_po_serial_uq") || e.message?.includes("serial_number")) {
+      userMessage =
+        "A Certificate of Conformity has already been issued for this Production Order with this Serial Number. Please use a unique serial number (e.g. SN002) in Step 2 to issue the next unit.";
+    }
+    return NextResponse.json({ error: { code: "CONFLICT", message: userMessage, requestId } }, { status: 409 });
+  }
+
+  const message =
+    e?.message?.includes("not configured")
+      ? e.message
+      : e?.message && !e.message.includes("violates") && !e.message.includes("syntax error") && !e.message.includes("relation")
+      ? e.message
+      : "Something went wrong. Please try again or contact an administrator.";
   return NextResponse.json({ error: { code: "INTERNAL", message, requestId } }, { status: 500 });
 }
 
 export const json = <T>(data: T, init?: ResponseInit) => NextResponse.json(data, init);
+
