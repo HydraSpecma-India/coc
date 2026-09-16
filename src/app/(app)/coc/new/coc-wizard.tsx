@@ -498,7 +498,8 @@ export function CocWizard({
       setSearchResults(orders);
       if (orders.length > 0) {
         if (!selectedPO || !orders.some((o) => o.ProductionOrder === selectedPO.ProductionOrder)) {
-          applySelectedPO(orders[0]);
+          const firstPending = orders.find((o) => !o.isFullyCertified) || orders[0];
+          applySelectedPO(firstPending);
         }
       }
     } catch (e) {
@@ -836,13 +837,35 @@ export function CocWizard({
                           {selectedPO.dataAreaId}
                         </Badge>
                       )}
+                      {/* Qualification Badges */}
+                      {selectedPO.isFullyCertified ? (
+                        <Badge tone="success" className="text-[10px] font-bold">
+                          COC Created ({selectedPO.certifiedQuantity}/{selectedPO.Quantity} Qty)
+                        </Badge>
+                      ) : selectedPO.certifiedQuantity ? (
+                        <Badge tone="warning" className="text-[10px] font-bold">
+                          {selectedPO.certifiedQuantity}/{selectedPO.Quantity} Certified &bull; {selectedPO.pendingCocQuantity} Pending for COC
+                        </Badge>
+                      ) : (
+                        <Badge tone="neutral" className="text-[10px] font-medium">
+                          {selectedPO.Quantity} Qty Pending for COC
+                        </Badge>
+                      )}
                     </div>
                     <div className="text-xs text-emerald-800 mt-1 flex items-center gap-2 flex-wrap">
                       <span>Part: <strong className="font-mono font-bold text-ink-900">{selectedPO.ItemNumber}</strong></span>
                       <span>&bull;</span>
                       <span>Customer: <strong>{selectedPO.CustomerName}</strong></span>
                       <span>&bull;</span>
-                      <span>Qty: <strong>{selectedPO.Quantity} {selectedPO.UnitOfMeasure}</strong></span>
+                      <span>Total Qty: <strong>{selectedPO.Quantity} {selectedPO.UnitOfMeasure}</strong></span>
+                      {selectedPO.certifiedQuantity !== undefined && selectedPO.certifiedQuantity > 0 && (
+                        <>
+                          <span>&bull;</span>
+                          <span>Certified: <strong className="text-emerald-950 font-bold">{selectedPO.certifiedQuantity}</strong></span>
+                          <span>&bull;</span>
+                          <span>Pending: <strong className="text-brand-900 font-bold">{selectedPO.pendingCocQuantity}</strong></span>
+                        </>
+                      )}
                       {selectedPO.CustomerPartNumber && (
                         <>
                           <span>&bull;</span>
@@ -864,21 +887,45 @@ export function CocWizard({
                     </div>
                   </div>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setManualOrder({ ...selectedPO });
-                    setModalIsCustomSO(false);
-                    setShowManualModal(true);
-                    fetchModalSalesOrders(selectedPO.ItemNumber, selectedPO.dataAreaId || selectedCompany);
-                  }}
-                  className="text-xs gap-1.5 bg-white hover:bg-emerald-100 text-emerald-950 border-emerald-300 shrink-0 self-start sm:self-center"
-                >
-                  <Edit3 className="h-3.5 w-3.5" />
-                  Edit Details
-                </Button>
+                <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+                  {selectedPO.isFullyCertified && selectedPO.cocList?.[0] && (
+                    <Link
+                      href={`/coc/${selectedPO.cocList[0].id}`}
+                      target="_blank"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      View COC ({selectedPO.cocList[0].coc_number})
+                    </Link>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setManualOrder({ ...selectedPO });
+                      setModalIsCustomSO(false);
+                      setShowManualModal(true);
+                      fetchModalSalesOrders(selectedPO.ItemNumber, selectedPO.dataAreaId || selectedCompany);
+                    }}
+                    className="text-xs gap-1.5 bg-white hover:bg-emerald-100 text-emerald-950 border-emerald-300"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                    Edit Details
+                  </Button>
+                </div>
               </div>
+
+              {/* Fully Certified Alert Banner */}
+              {selectedPO.isFullyCertified && (
+                <div className="mt-2.5 rounded-lg bg-emerald-100/70 border border-emerald-300 p-2.5 text-xs text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-700 shrink-0" />
+                    <span>
+                      <strong>All {selectedPO.Quantity} unit(s) certified:</strong> A Certificate of Conformity ({selectedPO.cocList?.[0]?.coc_number || "COC"}) has already been created for this production order. It is not qualified for generating another COC.
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1271,6 +1318,10 @@ export function CocWizard({
                         className={`cursor-pointer rounded-lg border p-4 transition-all ${
                           isSelected
                             ? "border-brand-500 bg-brand-50/30 ring-2 ring-brand-400 shadow-sm"
+                            : order.isFullyCertified
+                            ? "border-emerald-300 bg-emerald-50/25 hover:border-emerald-400"
+                            : order.certifiedQuantity
+                            ? "border-amber-300 bg-amber-50/15 hover:border-amber-400"
                             : "border-ink-200 hover:border-ink-300 bg-white"
                         }`}
                       >
@@ -1289,6 +1340,20 @@ export function CocWizard({
                                 {statusLabel}
                               </Badge>
                             )}
+                            {/* Qualification Badge */}
+                            {order.isFullyCertified ? (
+                              <Badge tone="success" className="text-[10px] font-bold px-1.5 py-0.5">
+                                COC Created ({order.certifiedQuantity}/{order.Quantity} Qty)
+                              </Badge>
+                            ) : order.certifiedQuantity ? (
+                              <Badge tone="warning" className="text-[10px] font-bold px-1.5 py-0.5">
+                                {order.certifiedQuantity}/{order.Quantity} Certified &bull; {order.pendingCocQuantity} Pending
+                              </Badge>
+                            ) : (
+                              <Badge tone="neutral" className="text-[10px] font-medium px-1.5 py-0.5">
+                                {order.Quantity} Qty Pending
+                              </Badge>
+                            )}
                           </div>
                           <Badge tone="info" className="truncate max-w-[130px]">{order.CustomerName}</Badge>
                         </div>
@@ -1301,6 +1366,37 @@ export function CocWizard({
                           <div>Cust PO: <span className="font-medium">{order.CustomerPO || "—"}</span></div>
                           <div>Qty: <span className="font-semibold text-ink-900">{order.Quantity} {order.UnitOfMeasure}</span></div>
                         </div>
+
+                        {/* Direct Action / View COC Links */}
+                        {order.isFullyCertified && order.cocList?.[0] ? (
+                          <div className="mt-3 pt-2 border-t border-emerald-200/80 flex items-center justify-between">
+                            <span className="text-[11px] font-semibold text-emerald-800">
+                              Fully Certified &bull; Not Qualified for Another COC
+                            </span>
+                            <Link
+                              href={`/coc/${order.cocList[0].id}`}
+                              target="_blank"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-2.5 py-1 rounded shadow-xs transition-colors"
+                            >
+                              <Eye className="h-3.5 w-3.5" /> View COC ({order.cocList[0].coc_number})
+                            </Link>
+                          </div>
+                        ) : order.certifiedQuantity && order.cocList?.[0] ? (
+                          <div className="mt-3 pt-2 border-t border-amber-200/80 flex items-center justify-between text-[11px]">
+                            <span className="font-semibold text-amber-800">
+                              {order.pendingCocQuantity} unit(s) pending for certification
+                            </span>
+                            <Link
+                              href={`/coc/${order.cocList[0].id}`}
+                              target="_blank"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 font-semibold text-brand-800 hover:underline"
+                            >
+                              View Certified Unit ({order.cocList[0].coc_number}) <ExternalLink className="h-3 w-3" />
+                            </Link>
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -1331,6 +1427,20 @@ export function CocWizard({
                               {selectedPO.ProductionOrderStatus}
                             </Badge>
                           )}
+                          {/* Qualification Badges */}
+                          {selectedPO.isFullyCertified ? (
+                            <Badge tone="success" className="text-[10px] font-bold">
+                              COC Created ({selectedPO.certifiedQuantity}/{selectedPO.Quantity} Qty)
+                            </Badge>
+                          ) : selectedPO.certifiedQuantity ? (
+                            <Badge tone="warning" className="text-[10px] font-bold">
+                              {selectedPO.certifiedQuantity}/{selectedPO.Quantity} Certified &bull; {selectedPO.pendingCocQuantity} Pending for COC
+                            </Badge>
+                          ) : (
+                            <Badge tone="neutral" className="text-[10px] font-medium">
+                              {selectedPO.Quantity} Qty Pending for COC
+                            </Badge>
+                          )}
                         </div>
                         <div className="text-sm font-semibold text-ink-900 mt-0.5">
                           {selectedPO.ItemDescription}
@@ -1338,6 +1448,15 @@ export function CocWizard({
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                      {selectedPO.isFullyCertified && selectedPO.cocList?.[0] && (
+                        <Link
+                          href={`/coc/${selectedPO.cocList[0].id}`}
+                          target="_blank"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors"
+                        >
+                          <Eye className="h-3.5 w-3.5" /> View COC ({selectedPO.cocList[0].coc_number})
+                        </Link>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
@@ -1354,6 +1473,45 @@ export function CocWizard({
                       </Button>
                     </div>
                   </div>
+
+                  {/* Fully Certified Alert Banner in Card 2 */}
+                  {selectedPO.isFullyCertified ? (
+                    <div className="rounded-lg border border-emerald-300 bg-emerald-50/90 p-3 text-xs text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-700 shrink-0" />
+                        <span>
+                          <strong>COC Created ({selectedPO.certifiedQuantity}/{selectedPO.Quantity} Qty):</strong> All {selectedPO.Quantity} unit(s) for this Production Order have already been certified. This order is not qualified for generating another COC.
+                        </span>
+                      </div>
+                      {selectedPO.cocList?.[0] && (
+                        <Link
+                          href={`/coc/${selectedPO.cocList[0].id}`}
+                          target="_blank"
+                          className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800 underline hover:text-emerald-950 shrink-0"
+                        >
+                          Open Certificate <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      )}
+                    </div>
+                  ) : selectedPO.certifiedQuantity ? (
+                    <div className="rounded-lg border border-amber-300 bg-amber-50/90 p-3 text-xs text-amber-950 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Info className="h-4 w-4 text-amber-700 shrink-0" />
+                        <span>
+                          <strong>Partial Certification:</strong> {selectedPO.certifiedQuantity} of {selectedPO.Quantity} unit(s) certified. {selectedPO.pendingCocQuantity} unit(s) pending for certification.
+                        </span>
+                      </div>
+                      {selectedPO.cocList?.[0] && (
+                        <Link
+                          href={`/coc/${selectedPO.cocList[0].id}`}
+                          target="_blank"
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-amber-900 underline hover:text-amber-950 shrink-0"
+                        >
+                          View Certified Unit ({selectedPO.cocList[0].coc_number}) <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      )}
+                    </div>
+                  ) : null}
 
                   {/* Cross-checked Sales Order & External Customer Part Box */}
                   <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 bg-white/80 p-3.5 rounded-lg border border-brand-200/80">
@@ -1397,17 +1555,77 @@ export function CocWizard({
                           onChange={(e) => handleSelectSalesOrder(e.target.value)}
                           className="font-medium text-xs bg-slate-50 border-brand-200 focus:border-brand-500"
                         >
-                          {salesOrders.map((so) => (
-                            <option key={so.SalesOrder} value={so.SalesOrder}>
-                              {so.SalesOrder} &bull; {so.CustomerName?.slice(0, 24)} &bull; Cust Part: {so.ExternalItemNumber || "160072"} &bull; PO: {so.CustomerPO || "N/A"}
-                            </option>
-                          ))}
+                          {salesOrders.map((so) => {
+                            let prefix = "🟢";
+                            let statusText = `${so.Quantity} pcs available`;
+                            if (so.isFullyAssigned) {
+                              prefix = "🔴 FULLY ASSIGNED:";
+                              statusText = `${so.assignedQuantity}/${so.Quantity} pcs used (${so.assignedCocs?.map((c) => c.coc_number).join(", ")})`;
+                            } else if (so.assignedQuantity) {
+                              prefix = "🟡 PARTIAL:";
+                              statusText = `${so.assignedQuantity}/${so.Quantity} assigned, ${so.remainingSalesQty} pending (${so.assignedCocs?.map((c) => c.coc_number).join(", ")})`;
+                            }
+                            return (
+                              <option key={so.SalesOrder} value={so.SalesOrder}>
+                                {prefix} {so.SalesOrder} &bull; {so.CustomerName?.slice(0, 20)} &bull; Cust Part: {so.ExternalItemNumber || "160072"} &bull; [{statusText}]
+                              </option>
+                            );
+                          })}
                           <option value="__custom__">+ Enter Custom Sales Order...</option>
                         </Select>
                       )}
                       <p className="text-[11px] text-ink-500">
                         Cross-referenced between Production Item Number <span className="font-mono font-medium text-ink-700">{selectedPO.ItemNumber}</span> and Sales Order Line items in D365.
                       </p>
+
+                      {/* Active Sales Order Allocation Box */}
+                      {(() => {
+                        const activeSO = salesOrders.find((s) => s.SalesOrder === selectedPO.SalesOrder);
+                        if (!activeSO) return null;
+                        return (
+                          <div className="mt-2.5 rounded-lg border border-brand-200 bg-brand-50/50 p-3 text-xs space-y-2">
+                            <div className="flex items-center justify-between font-bold text-ink-900">
+                              <span className="flex items-center gap-1.5">
+                                <ShoppingCart className="h-3.5 w-3.5 text-brand-600" />
+                                Sales Order Allocation: <span className="font-mono text-brand-900">{activeSO.SalesOrder}</span>
+                              </span>
+                              <Badge tone={activeSO.isFullyAssigned ? "danger" : activeSO.assignedQuantity ? "warning" : "success"}>
+                                {activeSO.isFullyAssigned
+                                  ? "Fully Assigned"
+                                  : activeSO.assignedQuantity
+                                  ? `${activeSO.assignedQuantity}/${activeSO.Quantity} Assigned`
+                                  : "Available for COC"}
+                              </Badge>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2 text-[11px] text-ink-700 bg-white/80 p-2 rounded border border-brand-100">
+                              <div>Total SO Line Qty: <strong className="font-semibold text-ink-900">{activeSO.Quantity} Pcs</strong></div>
+                              <div>Certified / Assigned: <strong className="font-semibold text-emerald-700">{activeSO.assignedQuantity || 0} Pcs</strong></div>
+                              <div>Pending / Available: <strong className="font-semibold text-brand-800">{activeSO.remainingSalesQty !== undefined ? activeSO.remainingSalesQty : activeSO.Quantity} Pcs</strong></div>
+                            </div>
+
+                            {activeSO.assignedCocs && activeSO.assignedCocs.length > 0 && (
+                              <div className="pt-1.5 text-[11px] space-y-1">
+                                <p className="font-semibold text-ink-800">Already assigned & generated to below COC numbers:</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {activeSO.assignedCocs.map((c) => (
+                                    <Link
+                                      key={c.id}
+                                      href={`/coc/${c.id}`}
+                                      target="_blank"
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white border border-brand-300 text-brand-900 font-mono font-bold hover:bg-brand-100/70 shadow-xs transition-colors"
+                                    >
+                                      <span>{c.coc_number}</span>
+                                      <span className="text-[10px] font-normal text-ink-500">({c.production_order}{c.serial_number ? ` &bull; ${c.serial_number}` : ''})</span>
+                                      <ExternalLink className="h-3 w-3 text-brand-600" />
+                                    </Link>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Customer Part Number (External Item Number) */}
@@ -1442,14 +1660,43 @@ export function CocWizard({
                 </div>
               )}
 
-              <div className="flex justify-end pt-4 border-t border-ink-200">
-                <Button
-                  disabled={!selectedPO}
-                  onClick={() => setStep(2)}
-                  className="gap-2"
-                >
-                  Next: Quality Checks <ArrowRight className="h-4 w-4" />
-                </Button>
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-ink-200">
+                {selectedPO?.isFullyCertified ? (
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-950 bg-emerald-100/70 px-3 py-2 rounded-md border border-emerald-300">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-700 shrink-0" />
+                    <span>
+                      Order fully certified ({selectedPO.certifiedQuantity}/{selectedPO.Quantity} units). Not qualified for generating another COC.
+                    </span>
+                  </div>
+                ) : selectedPO?.certifiedQuantity ? (
+                  <div className="flex items-center gap-2 text-xs text-amber-900 bg-amber-50 px-3 py-2 rounded-md border border-amber-200">
+                    <Info className="h-4 w-4 text-amber-600 shrink-0" />
+                    <span>
+                      {selectedPO.pendingCocQuantity} unit(s) pending for certification. Click Next to certify next unit.
+                    </span>
+                  </div>
+                ) : (
+                  <div />
+                )}
+                <div className="flex items-center gap-2">
+                  {selectedPO?.isFullyCertified && selectedPO.cocList?.[0] && (
+                    <Link
+                      href={`/coc/${selectedPO.cocList[0].id}`}
+                      target="_blank"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors"
+                    >
+                      <Eye className="h-4 w-4" />
+                      View Certificate ({selectedPO.cocList[0].coc_number})
+                    </Link>
+                  )}
+                  <Button
+                    disabled={!selectedPO || Boolean(selectedPO.isFullyCertified)}
+                    onClick={() => setStep(2)}
+                    className="gap-2 disabled:opacity-50"
+                  >
+                    Next: Quality Checks <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             </CardBody>
           </Card>

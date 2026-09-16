@@ -19,6 +19,18 @@ export interface D365ProductionOrder {
   RemainingQuantity: number;
   Specification?: string;
   DeliveryDate?: string;
+  // COC Qualification Fields
+  certifiedQuantity?: number;
+  pendingCocQuantity?: number;
+  isFullyCertified?: boolean;
+  cocList?: Array<{
+    id: string;
+    coc_number: string;
+    serial_number: string | null;
+    quantity: number;
+    status: string;
+    created_at?: string;
+  }>;
 }
 
 export interface D365COCDocumentRecord {
@@ -47,5 +59,18 @@ export interface D365SalesOrderLine {
   UnitOfMeasure?: string;
   DeliveryDate?: string;
   dataAreaId?: string;
+  // COC Allocation Fields
+  assignedQuantity?: number;
+  remainingSalesQty?: number;
+  isFullyAssigned?: boolean;
+  assignedCocs?: Array<{
+    id: string;
+    coc_number: string;
+    production_order: string;
+    serial_number: string | null;
+    quantity: number;
+    status: string;
+    created_at?: string;
+  }>;
 }
 
