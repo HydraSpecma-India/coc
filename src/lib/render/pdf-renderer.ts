@@ -20,7 +20,11 @@ export interface RenderContext {
   manualValues?: Record<string, string>;
   signatureBase64?: string;
   isDraft?: boolean;
+  templateId?: string;
+  templateVersionId?: string;
 }
+
+import { supabaseAdmin, Buckets } from "@/lib/db/supabase-admin";
 
 export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
@@ -31,12 +35,57 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
 
   const templatePath = path.join(process.cwd(), "public", "templates", "hydraspecma-coc-template.pdf");
 
-  if (fs.existsSync(templatePath)) {
+  let templateBytes: Buffer | null = null;
+  let templateJson: any = null;
+
+  // 1. Try to load custom background PDF from Supabase storage if template specified
+  if (context.templateVersionId || (context.templateId && context.templateId !== "00000000-0000-0000-0000-000000000001")) {
     try {
-      const templateBytes = fs.readFileSync(templatePath);
+      const sb = supabaseAdmin();
+      let vId = context.templateVersionId;
+      if (!vId && context.templateId) {
+        const { data: t } = await sb.from("coc_templates").select("active_version_id").eq("id", context.templateId).maybeSingle();
+        vId = t?.active_version_id;
+      }
+      if (vId) {
+        const { data: ver } = await sb.from("coc_template_versions").select("background_asset_id, template_json").eq("id", vId).maybeSingle();
+        if (ver) {
+          templateJson = ver.template_json;
+          if (ver.background_asset_id) {
+            const { data: asset } = await sb.from("coc_template_assets").select("storage_path").eq("id", ver.background_asset_id).maybeSingle();
+            if (asset?.storage_path) {
+              const { data: fileBlob } = await sb.storage.from(Buckets.templateAssets).download(asset.storage_path);
+              if (fileBlob) {
+                templateBytes = Buffer.from(await fileBlob.arrayBuffer());
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Could not load custom template asset from storage, falling back:", err);
+    }
+  }
+
+  // 2. Fallback to bundled official HydraSpecma template PDF
+  if (!templateBytes && fs.existsSync(templatePath)) {
+    try {
+      templateBytes = fs.readFileSync(templatePath);
+    } catch (e) {
+      console.warn("Could not read local template PDF:", e);
+    }
+  }
+
+  if (templateBytes) {
+    try {
       const srcDoc = await PDFDocument.load(templateBytes);
-      const [page] = await pdfDoc.copyPages(srcDoc, [0]);
-      pdfDoc.addPage(page);
+      const copyCount = Math.min(srcDoc.getPageCount(), 10);
+      const pageIndices = Array.from({ length: copyCount }, (_, i) => i);
+      const copiedPages = await pdfDoc.copyPages(srcDoc, pageIndices);
+      for (const p of copiedPages) {
+        pdfDoc.addPage(p);
+      }
+      const page = copiedPages[0];
 
       const fillField = (x: number, y: number, w: number, h: number, text: string, isBold = false) => {
         page.drawRectangle({ x, y, width: w, height: h, color: rgb(1, 1, 1) });

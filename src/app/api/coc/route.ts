@@ -127,6 +127,8 @@ export const POST = route(async (req) => {
       manualValues: parsed.manualValues,
       signatureBase64: parsed.signatureBase64,
       isDraft: false,
+      templateId: tplId,
+      templateVersionId: tplVerId,
     });
     await logProcessStep(doc.id, "RENDER", "OK", { byteLength: pdfBytes.length });
 

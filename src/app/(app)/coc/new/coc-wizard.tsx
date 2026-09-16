@@ -15,6 +15,8 @@ import {
   Field,
   Label,
   Alert,
+  Dialog,
+  Textarea,
 } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
@@ -38,6 +40,9 @@ import {
   ShieldCheck,
   Check,
   Filter,
+  Upload,
+  PencilRuler,
+  FileUp,
 } from "lucide-react";
 
 interface TemplateSummary {
@@ -61,10 +66,82 @@ export function CocWizard({
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Template selection
-  const publishedTemplates = templates.filter((t) => t.active_version_id);
+  const [templateList, setTemplateList] = useState<TemplateSummary[]>(templates);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(
-    publishedTemplates[0]?.id || templates[0]?.id || ""
+    templates.find((t) => t.active_version_id)?.id || templates[0]?.id || ""
   );
+  const [showUploadPdfModal, setShowUploadPdfModal] = useState(false);
+  const [uploadPdfFile, setUploadPdfFile] = useState<File | null>(null);
+  const [uploadPdfName, setUploadPdfName] = useState("");
+  const [uploadPdfDesc, setUploadPdfDesc] = useState("");
+  const [uploadPdfRevision, setUploadPdfRevision] = useState("Rev 01");
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [modifyingTemplate, setModifyingTemplate] = useState(false);
+
+  const handleModifyTemplate = async (templateIdToEdit: string) => {
+    setModifyingTemplate(true);
+    try {
+      const res = await api<{ ok: boolean; templateId: string; versionId: string }>("/api/templates/ensure-draft", {
+        method: "POST",
+        json: { templateId: templateIdToEdit },
+      });
+      if (res.ok && res.templateId && res.versionId) {
+        toast.success("Opening template designer...");
+        router.push(`/admin/templates/${res.templateId}/designer/${res.versionId}`);
+      }
+    } catch (e) {
+      toast.error("Could not open template designer", (e as Error).message);
+    } finally {
+      setModifyingTemplate(false);
+    }
+  };
+
+  const handleUploadPdfSubmit = async () => {
+    if (!uploadPdfFile) {
+      toast.error("Please select a PDF file");
+      return;
+    }
+    const name = uploadPdfName.trim() || uploadPdfFile.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
+    setUploadingPdf(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", uploadPdfFile);
+      fd.append("name", name);
+      fd.append("description", uploadPdfDesc.trim() || "Created from uploaded PDF");
+      fd.append("revision", uploadPdfRevision.trim() || "Rev 01");
+      fd.append("publish", "true");
+
+      const res = await api<{
+        ok: boolean;
+        template: { id: string; name: string; template_type: string; active_version_id: string; active_version_number: number };
+        version: { id: string };
+      }>("/api/templates/from-pdf", {
+        method: "POST",
+        body: fd,
+      });
+
+      if (res.ok && res.template) {
+        const newSummary: TemplateSummary = {
+          id: res.template.id,
+          name: res.template.name,
+          template_type: res.template.template_type,
+          active_version_id: res.template.active_version_id,
+          active_version_number: res.template.active_version_number || 1,
+        };
+        setTemplateList((prev) => [newSummary, ...prev]);
+        setSelectedTemplateId(newSummary.id);
+        setShowUploadPdfModal(false);
+        setUploadPdfFile(null);
+        setUploadPdfName("");
+        setUploadPdfDesc("");
+        toast.success(`Template "${newSummary.name}" created from PDF and selected!`);
+      }
+    } catch (e) {
+      toast.error("Failed to upload template PDF", (e as Error).message);
+    } finally {
+      setUploadingPdf(false);
+    }
+  };
 
   // PO Search & Selection
   const [selectedCompany, setSelectedCompany] = useState<string>("HSIN");
@@ -271,12 +348,15 @@ export function CocWizard({
     const prodOrder = selectedPO.ProductionOrder?.trim() || selectedPO.ItemNumber?.trim() || "PO-HSIN-001";
     const itemNum = selectedPO.ItemNumber?.trim() || prodOrder;
     const itemDesc = selectedPO.ItemDescription?.trim() || `HydraSpecma Assembly (${itemNum})`;
+    const tpl = templateList.find((t) => t.id === selectedTemplateId) || templateList[0];
 
     try {
       const res = await fetch("/api/coc/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          templateId: tpl?.id,
+          templateVersionId: tpl?.active_version_id || tpl?.id,
           productionOrder: prodOrder,
           itemNumber: itemNum,
           itemDescription: itemDesc,
@@ -310,7 +390,7 @@ export function CocWizard({
       return;
     }
 
-    const tpl = templates.find((t) => t.id === selectedTemplateId) || templates[0];
+    const tpl = templateList.find((t) => t.id === selectedTemplateId) || templateList[0];
     if (!tpl) {
       toast.error("No template available");
       return;
@@ -487,31 +567,73 @@ export function CocWizard({
           <Card>
             <CardHeader
               title="1. Document Template"
-              description="Choose the approved layout template for this certificate."
+              description="Choose the approved layout template for this certificate, or upload a custom PDF template."
+              actions={
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowUploadPdfModal(true)}
+                    className="gap-1.5 text-xs text-brand-800 border-brand-300 hover:bg-brand-50"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    Upload PDF Template
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleModifyTemplate(selectedTemplateId)}
+                    loading={modifyingTemplate}
+                    className="gap-1.5 text-xs text-ink-800"
+                  >
+                    <PencilRuler className="h-3.5 w-3.5" />
+                    Modify in Designer
+                  </Button>
+                </div>
+              }
             />
             <CardBody>
               <div className="grid gap-3 sm:grid-cols-2">
-                {templates.map((tpl) => (
-                  <div
-                    key={tpl.id}
-                    onClick={() => setSelectedTemplateId(tpl.id)}
-                    className={`cursor-pointer rounded-lg border p-4 transition-all ${
-                      selectedTemplateId === tpl.id
-                        ? "border-brand-500 bg-brand-50/30 ring-2 ring-brand-400"
-                        : "border-ink-200 hover:border-ink-300 bg-white"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="font-semibold text-ink-900">{tpl.name}</div>
-                      <Badge tone={tpl.active_version_id ? "success" : "warning"}>
-                        {tpl.active_version_id ? "Published v" + tpl.active_version_number : "Draft"}
-                      </Badge>
+                {templateList.map((tpl) => {
+                  const isSelected = selectedTemplateId === tpl.id;
+                  return (
+                    <div
+                      key={tpl.id}
+                      onClick={() => setSelectedTemplateId(tpl.id)}
+                      className={`cursor-pointer rounded-lg border p-4 transition-all relative ${
+                        isSelected
+                          ? "border-brand-500 bg-brand-50/30 ring-2 ring-brand-400 shadow-xs"
+                          : "border-ink-200 hover:border-ink-300 bg-white"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-semibold text-ink-900 line-clamp-1">{tpl.name}</div>
+                        <Badge tone={tpl.active_version_id ? "success" : "warning"}>
+                          {tpl.active_version_id ? "Published v" + tpl.active_version_number : "Draft"}
+                        </Badge>
+                      </div>
+                      <div className="mt-1.5 text-xs text-ink-500 flex items-center justify-between">
+                        <span>Standard A4 Portrait Certificate • ISO 9001:2015 Compliant</span>
+                      </div>
+                      <div className="mt-3 pt-2 border-t border-ink-100 flex items-center justify-between text-xs">
+                        <span className="text-[11px] text-ink-500 font-mono">
+                          {isSelected ? "✓ Active Selection" : "Click to select"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleModifyTemplate(tpl.id);
+                          }}
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-700 hover:text-brand-900 underline"
+                        >
+                          <PencilRuler className="h-3 w-3" />
+                          Modify in Designer
+                        </button>
+                      </div>
                     </div>
-                    <div className="mt-1 text-xs text-ink-500">
-                      Standard A4 Portrait Certificate • ISO 9001:2015 Compliant
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </CardBody>
           </Card>
@@ -1195,6 +1317,104 @@ export function CocWizard({
           </CardBody>
         </Card>
       )}
+
+      {/* Upload PDF Template Modal */}
+      <Dialog
+        open={showUploadPdfModal}
+        onClose={() => setShowUploadPdfModal(false)}
+        title="Upload PDF & Make Template"
+        footer={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setShowUploadPdfModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleUploadPdfSubmit}
+              loading={uploadingPdf}
+              disabled={!uploadPdfFile}
+              className="gap-1.5"
+            >
+              <Upload className="h-4 w-4" />
+              Upload & Make Template
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-ink-600">
+            Upload any HydraSpecma or customer PDF certificate to use as a document layout template. Standard COC fields will automatically be mapped and can be fine-tuned in the visual designer.
+          </p>
+
+          <div
+            onClick={() => document.getElementById("template-pdf-input")?.click()}
+            className="cursor-pointer rounded-xl border-2 border-dashed border-brand-300 bg-brand-50/40 p-6 text-center hover:bg-brand-50 transition-colors"
+          >
+            <input
+              id="template-pdf-input"
+              type="file"
+              accept=".pdf,application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) {
+                  setUploadPdfFile(f);
+                  if (!uploadPdfName) {
+                    setUploadPdfName(f.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "));
+                  }
+                }
+              }}
+            />
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-brand-700">
+              <FileUp className="h-5 w-5" />
+            </div>
+            {uploadPdfFile ? (
+              <div className="mt-3">
+                <div className="text-sm font-bold text-ink-900">{uploadPdfFile.name}</div>
+                <div className="text-xs text-ink-500 font-mono mt-0.5">
+                  {(uploadPdfFile.size / 1024).toFixed(1)} KB &bull; Ready to process
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3">
+                <div className="text-sm font-semibold text-ink-900">Click to select a PDF certificate file</div>
+                <div className="text-xs text-ink-500 mt-1">Accepts standard PDF documents up to 20MB</div>
+              </div>
+            )}
+          </div>
+
+          <Field label="Template Name *" hint="Descriptive name shown in template list">
+            <Input
+              value={uploadPdfName}
+              onChange={(e) => setUploadPdfName(e.target.value)}
+              placeholder="e.g. HydraSpecma COC 1070.0049 - Vestas Spec"
+              required
+            />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Revision" hint="e.g. Rev 02">
+              <Input
+                value={uploadPdfRevision}
+                onChange={(e) => setUploadPdfRevision(e.target.value)}
+                placeholder="Rev 01"
+              />
+            </Field>
+            <Field label="Template Type">
+              <Input value="COC" readOnly className="bg-ink-50 text-ink-600" />
+            </Field>
+          </div>
+
+          <Field label="Description (Optional)">
+            <Textarea
+              value={uploadPdfDesc}
+              onChange={(e) => setUploadPdfDesc(e.target.value)}
+              placeholder="e.g. Customer approved COC layout for project..."
+              className="min-h-16"
+            />
+          </Field>
+        </div>
+      </Dialog>
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, Copy, Sparkles, Archive, Trash2, PencilRuler } from "lucide-react";
+import { Plus, Copy, Sparkles, Archive, Trash2, PencilRuler, Upload, FileUp } from "lucide-react";
 import { Button, Badge, Dialog, Field, Input, Select, Textarea, PageHeader, Table, Th, Td, EmptyState } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
@@ -14,10 +14,66 @@ type T = TemplateRow & { versions: TemplateVersionSummary[] };
 export function TemplatesClient({ templates, templateTypes, canManage }: { templates: T[]; templateTypes: string[]; canManage: boolean }) {
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
+  const [uploadPdfOpen, setUploadPdfOpen] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadName, setUploadName] = useState("");
+  const [uploadDesc, setUploadDesc] = useState("");
+  const [uploadRev, setUploadRev] = useState("Rev 01");
   const [dupTarget, setDupTarget] = useState<T | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", description: "", templateType: templateTypes[0] ?? "COC" });
   const [dupName, setDupName] = useState("");
+
+  async function handleModifyTemplate(templateId: string) {
+    setBusy(`edit-${templateId}`);
+    try {
+      const res = await api<{ ok: boolean; templateId: string; versionId: string }>("/api/templates/ensure-draft", {
+        method: "POST",
+        json: { templateId },
+      });
+      if (res.ok && res.templateId && res.versionId) {
+        router.push(`/admin/templates/${res.templateId}/designer/${res.versionId}`);
+      }
+    } catch (e) {
+      toast.error("Could not open designer", (e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleUploadPdf() {
+    if (!uploadFile) {
+      toast.error("Please select a PDF file");
+      return;
+    }
+    setBusy("upload-pdf");
+    try {
+      const fd = new FormData();
+      fd.append("file", uploadFile);
+      fd.append("name", uploadName.trim() || uploadFile.name.replace(/\.[^/.]+$/, ""));
+      fd.append("description", uploadDesc.trim() || "Created from uploaded PDF");
+      fd.append("revision", uploadRev.trim() || "Rev 01");
+      fd.append("publish", "true");
+
+      const res = await api<{ ok: boolean; template: { id: string }; version: { id: string } }>("/api/templates/from-pdf", {
+        method: "POST",
+        body: fd,
+      });
+
+      if (res.ok) {
+        toast.success("Template created from PDF!");
+        setUploadPdfOpen(false);
+        setUploadFile(null);
+        setUploadName("");
+        setUploadDesc("");
+        router.push(`/admin/templates/${res.template.id}/designer/${res.version.id}`);
+      }
+    } catch (e) {
+      toast.error("Failed to create template from PDF", (e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function create() {
     setBusy("create");
@@ -89,6 +145,9 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
         actions={
           canManage && (
             <>
+              <Button variant="outline" onClick={() => setUploadPdfOpen(true)}>
+                <Upload className="h-4 w-4" /> Upload PDF Template
+              </Button>
               <Button variant="outline" onClick={seed} loading={busy === "seed"}>
                 <Sparkles className="h-4 w-4" /> Create sample HydraSpecma COC
               </Button>
@@ -121,7 +180,6 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
           <tbody>
             {templates.map((t) => {
               const active = t.versions.find((v) => v.id === t.active_version_id);
-              const latestDraft = t.versions.find((v) => v.status === "draft");
               return (
                 <tr key={t.id} className="hover:bg-ink-50">
                   <Td>
@@ -139,10 +197,15 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
                   <Td className="text-ink-500">{new Date(t.updated_at).toLocaleString()}</Td>
                   <Td>
                     <div className="flex justify-end gap-1">
-                      {canManage && latestDraft && (
-                        <Link href={`/admin/templates/${t.id}/designer/${latestDraft.id}`}>
-                          <Button size="sm" variant="outline"><PencilRuler className="h-3.5 w-3.5" /> Design</Button>
-                        </Link>
+                      {canManage && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          loading={busy === `edit-${t.id}`}
+                          onClick={() => handleModifyTemplate(t.id)}
+                        >
+                          <PencilRuler className="h-3.5 w-3.5" /> Design
+                        </Button>
                       )}
                       {canManage && (
                         <>
@@ -195,6 +258,86 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
       >
         <Field label="New template name"><Input value={dupName} onChange={(e) => setDupName(e.target.value)} autoFocus /></Field>
         <p className="mt-2 text-xs text-ink-500">The published version (or the latest draft) is copied as version 1 of the new template.</p>
+      </Dialog>
+
+      <Dialog
+        open={uploadPdfOpen}
+        onClose={() => setUploadPdfOpen(false)}
+        title="Upload PDF & Create Template"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setUploadPdfOpen(false)}>Cancel</Button>
+            <Button onClick={handleUploadPdf} loading={busy === "upload-pdf"} disabled={!uploadFile}>
+              <Upload className="h-4 w-4" /> Create & Open Designer
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-ink-600">
+            Upload any HydraSpecma or customer PDF certificate. It will be saved as the background and standard COC fields will be mapped automatically.
+          </p>
+          <div
+            onClick={() => document.getElementById("admin-template-pdf-input")?.click()}
+            className="cursor-pointer rounded-xl border-2 border-dashed border-brand-300 bg-brand-50/40 p-6 text-center hover:bg-brand-50 transition-colors"
+          >
+            <input
+              id="admin-template-pdf-input"
+              type="file"
+              accept=".pdf,application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) {
+                  setUploadFile(f);
+                  if (!uploadName) {
+                    setUploadName(f.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "));
+                  }
+                }
+              }}
+            />
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-brand-700">
+              <FileUp className="h-5 w-5" />
+            </div>
+            {uploadFile ? (
+              <div className="mt-3">
+                <div className="text-sm font-bold text-ink-900">{uploadFile.name}</div>
+                <div className="text-xs text-ink-500 font-mono mt-0.5">
+                  {(uploadFile.size / 1024).toFixed(1)} KB &bull; Ready to convert
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3">
+                <div className="text-sm font-semibold text-ink-900">Click to select a PDF certificate file</div>
+                <div className="text-xs text-ink-500 mt-1">Accepts standard PDF documents up to 20MB</div>
+              </div>
+            )}
+          </div>
+
+          <Field label="Template Name">
+            <Input
+              value={uploadName}
+              onChange={(e) => setUploadName(e.target.value)}
+              placeholder="e.g. HydraSpecma COC 1070.0049"
+            />
+          </Field>
+
+          <Field label="Revision">
+            <Input
+              value={uploadRev}
+              onChange={(e) => setUploadRev(e.target.value)}
+              placeholder="Rev 01"
+            />
+          </Field>
+
+          <Field label="Description (Optional)">
+            <Textarea
+              value={uploadDesc}
+              onChange={(e) => setUploadDesc(e.target.value)}
+              placeholder="e.g. Customer approved COC layout..."
+            />
+          </Field>
+        </div>
       </Dialog>
     </div>
   );

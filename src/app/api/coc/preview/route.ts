@@ -22,6 +22,8 @@ export async function POST(req: Request) {
     manualValues: body.manualValues,
     signatureBase64: body.signatureBase64,
     isDraft: true,
+    templateId: body.templateId,
+    templateVersionId: body.templateVersionId,
   });
 
   return new NextResponse(Buffer.from(pdfBytes), {
