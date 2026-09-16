@@ -204,6 +204,7 @@ export class TeamsService {
       message: markdownMessage,
       text: markdownMessage,
       adaptiveCard,
+      adaptiveCardJson: JSON.stringify(adaptiveCard),
 
       fileName,
       contentType: "application/pdf",
