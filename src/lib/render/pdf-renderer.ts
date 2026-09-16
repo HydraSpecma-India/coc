@@ -26,7 +26,7 @@ export interface RenderContext {
 
 import { supabaseAdmin, Buckets } from "@/lib/db/supabase-admin";
 
-function resolveFieldValue(fieldName: string, context: RenderContext): string {
+function resolveFieldValue(fieldName: string, context: RenderContext, element?: { x: number; y: number }): string {
   const fn = fieldName.toLowerCase().replace(/[^a-z0-9]/g, "");
 
   if (fn === "hsrepartnumber" || fn === "itemnumber") {
@@ -47,7 +47,12 @@ function resolveFieldValue(fieldName: string, context: RenderContext): string {
     return context.customerPO || context.manualValues?.["CustomerPO"] || "";
   }
   if (fn === "toplevelserialnumber" || fn === "serialnumber" || fn === "serialno") {
-    return context.serialNumber || (context.productionOrder ? `SN-${context.productionOrder}` : "");
+    let s = context.serialNumber || (context.productionOrder ? `SN-${context.productionOrder}` : "");
+    // If element is placed after the pre-printed prefix (e.g. x > 410) and serial starts with a prefix, extract suffix
+    if (element && element.x > 410 && s.includes(" - ")) {
+      s = s.split(" - ").slice(1).join(" - ");
+    }
+    return s;
   }
   if (fn === "productionorder" || fn === "manufacturingorder" || fn === "manufacturingordernumber") {
     return context.productionOrder || "";
@@ -256,35 +261,7 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
       const page = copiedPages[0];
       const { height } = page.getSize();
 
-      // 3. Background Sanitization: Cleanly blank out static sample values from the background PDF
-      // Part Info Table row (cells 1, 2, 3): static text lies between y = 512.5 and 523.0
-      // Div dividing line is at 524.5, bottom table border is at 510.5.
-      // y: 511.5, height: 12.0 covers all text without touching the dividing line or the bottom border.
-      page.drawRectangle({ x: 58, y: 511.5, width: 163, height: 12.0, color: rgb(1, 1, 1) });
-      page.drawRectangle({ x: 224, y: 511.5, width: 163, height: 12.0, color: rgb(1, 1, 1) });
-      page.drawRectangle({ x: 390, y: 511.5, width: 162, height: 12.0, color: rgb(1, 1, 1) });
-
-      // Order Reference Table values: blank old sample values without touching borders
-      page.drawRectangle({ x: 366, y: 468, width: 186, height: 16, color: rgb(1, 1, 1) });
-      page.drawRectangle({ x: 366, y: 446, width: 186, height: 16, color: rgb(1, 1, 1) });
-      page.drawRectangle({ x: 366, y: 425, width: 186, height: 16, color: rgb(1, 1, 1) });
-
-      // Top table header values
-      page.drawRectangle({ x: 294, y: 760, width: 75, height: 13, color: rgb(1, 1, 1) });
-      page.drawRectangle({ x: 62, y: 735, width: 220, height: 13, color: rgb(1, 1, 1) });
-      page.drawRectangle({ x: 414, y: 718, width: 138, height: 14, color: rgb(1, 1, 1) });
-
-      // Date and Signature cell interiors (borders at y: 110.54 and 143.18 are 100% preserved)
-      page.drawRectangle({ x: 60, y: 112, width: 244, height: 29.5, color: rgb(1, 1, 1) });
-      page.drawRectangle({ x: 308, y: 112, width: 245, height: 29.5, color: rgb(1, 1, 1) });
-
-      // 4. Render top document title block
-      const partNumberStr = context.cocNumber || `COC-${context.itemNumber}`;
-      const prodDesc = context.itemDescription || "HydraSpecma Production Assembly";
-      page.drawText(partNumberStr.slice(0, 18), { x: 296, y: 764, size: 8, font: fontRegular, color: rgb(0, 0, 0) });
-      page.drawText(prodDesc.slice(0, 45), { x: 64, y: 739, size: 8, font: fontRegular, color: rgb(0, 0, 0) });
-
-      // 5. Dynamic Elements Rendering (only fields in the template are drawn)
+      // 3. Dynamic Elements Rendering (only fields mapped in the active template are drawn)
       const elements = templateJson?.pages?.[0]?.elements;
       if (Array.isArray(elements) && elements.length > 0) {
         let hasSignatureElement = false;
@@ -297,8 +274,17 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
           const fontSize = el.style?.fontSize || 8.5;
 
           if (el.type === "field" && el.fieldName) {
-            const val = resolveFieldValue(el.fieldName, context);
+            const val = resolveFieldValue(el.fieldName, context, el);
             if (val) {
+              if (el.style?.backgroundColor) {
+                page.drawRectangle({
+                  x: el.x,
+                  y: pdfY,
+                  width: el.width,
+                  height: el.height,
+                  color: rgb(1, 1, 1),
+                });
+              }
               const textX = el.x + (el.style?.padding || 2);
               const textY = pdfY + Math.max(2, (el.height - fontSize * 0.85) / 2);
               page.drawText(val, {
@@ -333,16 +319,14 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
           }
         }
 
-        if (!hasSignatureElement) {
+        if (!hasSignatureElement && context.signatureBase64) {
           await renderSignatureBox(page, pdfDoc, 320, 112, 220, 30, context.signatureBase64, fontBold);
         }
       } else {
-        // Fallback default field values if no template elements found
+        // Fallback default field values only if no template elements are configured
         const serialNo = context.serialNumber || (context.productionOrder ? `SN-${context.productionOrder}` : "");
-        const custPartNo = context.customerPartNumber || context.manualValues?.["CustomerPartNo"] || "160072";
-        const custPO = context.customerPO || context.manualValues?.["CustomerPO"] || "4509008214";
-        const topSerial = context.serialNumber || `${context.itemNumber} - SN001`;
-        const mfgOrder = context.productionOrder || "HSIN-000011";
+        const custPO = context.customerPO || context.manualValues?.["CustomerPO"] || "";
+        const mfgOrder = context.productionOrder || "";
         const sigDate = context.date || context.manualValues?.["InspectionDate"] || new Date().toISOString().slice(0, 10);
 
         const fillField = (x: number, y: number, text: string, isBold = false) => {
@@ -357,14 +341,13 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
           }
         };
 
-        fillField(415, 720, serialNo, true);
-        fillField(58, 513, context.itemNumber, false);
-        fillField(228, 513, custPartNo, false);
-        fillField(395, 513, prodDesc.slice(0, 35), false);
-        fillField(370, 473, custPO, false);
-        fillField(370, 451, topSerial, false);
-        fillField(370, 429, mfgOrder, true);
-        fillField(100, 115, sigDate, false);
+        if (custPO) fillField(374, 470, custPO, false);
+        if (serialNo) {
+          const sfx = serialNo.includes(" - ") ? serialNo.split(" - ").slice(1).join(" - ") : serialNo;
+          fillField(430, 450, sfx, false);
+        }
+        if (mfgOrder) fillField(374, 429, mfgOrder, true);
+        fillField(72, 118, sigDate, false);
 
         await renderSignatureBox(page, pdfDoc, 320, 112, 220, 30, context.signatureBase64, fontBold);
       }
