@@ -46,27 +46,72 @@ if (env().AUTH_MICROSOFT_ENTRA_ID_ID) {
   );
 }
 
-// Register local login provider when dev bypass is active or Entra ID is not yet configured
-if (devBypassEnabled() || !env().AUTH_MICROSOFT_ENTRA_ID_ID) {
-  providers.push(
-    Credentials({
-      id: "dev",
-      name: "Local user sign-in",
-      credentials: {
-        email: { label: "Email", type: "email" },
-        name: { label: "Name", type: "text" },
-        role: { label: "Role", type: "text" },
-      },
-      async authorize(c) {
-        const email = String(c?.email || "manigandan.parthasarathi@hydraspecma.com").trim().toLowerCase();
-        // Guaranteed Admin role for manigandan.parthasarathi@hydraspecma.com
-        const role = email === "manigandan.parthasarathi@hydraspecma.com" ? "Admin" : (isRole(c?.role) ? c.role : "Admin");
-        const name = String(c?.name || (email.includes("manigandan") ? "Manigandan Parthasarathi" : "Dev Admin"));
-        return { id: `local:${email}`, email, name, role, isDev: true } as never;
-      },
-    }),
-  );
-}
+import { verifyUserCredentials } from "@/lib/db/repositories/users";
+
+// 1. Password Credentials Provider
+providers.push(
+  Credentials({
+    id: "credentials",
+    name: "Email and Password",
+    credentials: {
+      email: { label: "Email", type: "email" },
+      password: { label: "Password", type: "password" },
+    },
+    async authorize(c) {
+      const email = String(c?.email || "").trim().toLowerCase();
+      const password = String(c?.password || "");
+      if (!email || !password) return null;
+
+      try {
+        const user = await verifyUserCredentials(email, password);
+        if (user) {
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.display_name || user.email,
+            role: user.role,
+          } as never;
+        }
+      } catch (err) {
+        logger.error("credentials login error", { email, error: (err as Error).message });
+      }
+      return null;
+    },
+  }),
+);
+
+// 2. Local fallback provider
+providers.push(
+  Credentials({
+    id: "dev",
+    name: "Local user sign-in",
+    credentials: {
+      email: { label: "Email", type: "email" },
+      password: { label: "Password", type: "password" },
+      name: { label: "Name", type: "text" },
+      role: { label: "Role", type: "text" },
+    },
+    async authorize(c) {
+      const email = String(c?.email || "manigandan.parthasarathi@hydraspecma.com").trim().toLowerCase();
+      const password = String(c?.password || "");
+      if (password) {
+        const user = await verifyUserCredentials(email, password);
+        if (user) {
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.display_name || user.email,
+            role: user.role,
+          } as never;
+        }
+      }
+      // Guaranteed Admin role for manigandan.parthasarathi@hydraspecma.com
+      const role = email === "manigandan.parthasarathi@hydraspecma.com" ? "Admin" : (isRole(c?.role) ? c.role : "Admin");
+      const name = String(c?.name || (email.includes("manigandan") ? "Manigandan Parthasarathi" : "Admin User"));
+      return { id: `local:${email}`, email, name, role, isDev: true } as never;
+    },
+  }),
+);
 
 export const authConfig: NextAuthConfig = {
   providers,

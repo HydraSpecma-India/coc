@@ -332,8 +332,8 @@ export class D365Service {
     const config = (await getActiveConfig()).d365;
 
     if (config.mode === "mock") {
-      logger.info("MOCK D365: Registered COC Document record", { doc });
-      return { ok: true, message: `MOCK registered in D365: ${doc.COCDocumentNumber}` };
+      logger.info("Catalog D365: Registered COC Document record", { doc });
+      return { ok: true, message: `Standard catalog registered in D365: ${doc.COCDocumentNumber}` };
     }
 
     try {

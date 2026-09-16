@@ -1,6 +1,8 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/db/supabase-admin";
 import type { Role } from "@/lib/auth/roles";
+import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { Errors } from "@/lib/errors";
 
 export interface UserRow {
   id: string;
@@ -9,6 +11,7 @@ export interface UserRow {
   display_name: string | null;
   role: Role;
   active: boolean;
+  password_hash?: string | null;
   last_login_at: string | null;
   created_at: string;
 }
@@ -21,16 +24,19 @@ export async function upsertUserOnSignIn(input: {
   bootstrapAdmin: boolean;
 }): Promise<UserRow> {
   const db = supabaseAdmin();
-  const { data: existing } = await db.from("coc_users").select("*").eq("email", input.email).maybeSingle();
+  const email = input.email.trim().toLowerCase();
+  const { data: existing } = await db.from("coc_users").select("*").eq("email", email).maybeSingle();
 
   if (existing) {
-    const patch: Partial<UserRow> = {
+    const patch: Record<string, unknown> = {
       last_login_at: new Date().toISOString(),
       display_name: input.displayName ?? existing.display_name,
       entra_object_id: input.entraObjectId ?? existing.entra_object_id,
     };
-    // An Entra app role always wins over the stored role.
-    if (input.roleHint) patch.role = input.roleHint;
+    // Only update role if Entra gave a specific app role claim and not a local dev fallback
+    if (input.roleHint && input.entraObjectId && !input.entraObjectId.startsWith("local:")) {
+      patch.role = input.roleHint;
+    }
     const { data, error } = await db.from("coc_users").update(patch).eq("id", existing.id).select("*").single();
     if (error) throw error;
     return data as UserRow;
@@ -41,9 +47,10 @@ export async function upsertUserOnSignIn(input: {
     .from("coc_users")
     .insert({
       entra_object_id: input.entraObjectId ?? null,
-      email: input.email,
+      email,
       display_name: input.displayName ?? null,
       role,
+      active: true,
       last_login_at: new Date().toISOString(),
     })
     .select("*")
@@ -53,13 +60,115 @@ export async function upsertUserOnSignIn(input: {
 }
 
 export async function listUsers(): Promise<UserRow[]> {
-  const { data, error } = await supabaseAdmin().from("coc_users").select("*").order("email");
+  const { data, error } = await supabaseAdmin().from("coc_users").select("*").order("created_at", { ascending: false });
   if (error) throw error;
-  return data as UserRow[];
+  return (data as UserRow[]) || [];
 }
 
-export async function updateUser(id: string, patch: { role?: Role; active?: boolean }): Promise<UserRow> {
-  const { data, error } = await supabaseAdmin().from("coc_users").update(patch).eq("id", id).select("*").single();
+export async function getUserById(id: string): Promise<UserRow | null> {
+  const { data, error } = await supabaseAdmin().from("coc_users").select("*").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return (data as UserRow) || null;
+}
+
+export async function getUserByEmail(email: string): Promise<UserRow | null> {
+  const { data, error } = await supabaseAdmin().from("coc_users").select("*").eq("email", email.trim().toLowerCase()).maybeSingle();
+  if (error) throw error;
+  return (data as UserRow) || null;
+}
+
+export async function createUser(input: {
+  email: string;
+  displayName?: string;
+  role: Role;
+  password?: string;
+  active?: boolean;
+}): Promise<UserRow> {
+  const db = supabaseAdmin();
+  const email = input.email.trim().toLowerCase();
+
+  const { data: existing } = await db.from("coc_users").select("id").eq("email", email).maybeSingle();
+  if (existing) {
+    throw Errors.conflict(`A user with email ${email} already exists.`);
+  }
+
+  const passwordHash = input.password ? hashPassword(input.password) : null;
+
+  const { data, error } = await db
+    .from("coc_users")
+    .insert({
+      email,
+      display_name: input.displayName?.trim() || null,
+      role: input.role,
+      active: input.active !== false,
+      password_hash: passwordHash,
+      last_login_at: null,
+    })
+    .select("*")
+    .single();
+
   if (error) throw error;
   return data as UserRow;
+}
+
+export async function updateUser(
+  id: string,
+  patch: { displayName?: string; role?: Role; active?: boolean }
+): Promise<UserRow> {
+  const updates: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (patch.displayName !== undefined) updates.display_name = patch.displayName.trim();
+  if (patch.role !== undefined) updates.role = patch.role;
+  if (patch.active !== undefined) updates.active = patch.active;
+
+  const { data, error } = await supabaseAdmin().from("coc_users").update(updates).eq("id", id).select("*").single();
+  if (error) throw error;
+  return data as UserRow;
+}
+
+export async function resetUserPassword(id: string, newPassword: string): Promise<void> {
+  if (!newPassword || newPassword.length < 4) {
+    throw Errors.validation("Password must be at least 4 characters long.");
+  }
+  const passwordHash = hashPassword(newPassword);
+  const { error } = await supabaseAdmin()
+    .from("coc_users")
+    .update({ password_hash: passwordHash, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  const { error } = await supabaseAdmin().from("coc_users").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function verifyUserCredentials(email: string, password: string): Promise<UserRow | null> {
+  const cleanEmail = email.trim().toLowerCase();
+  const db = supabaseAdmin();
+  const { data: user } = await db.from("coc_users").select("*").eq("email", cleanEmail).maybeSingle();
+
+  if (!user) return null;
+  if (!user.active) {
+    throw new Error("Account is deactivated. Please contact your administrator.");
+  }
+
+  // If user has a password_hash, verify it
+  if (user.password_hash) {
+    const valid = verifyPassword(password, user.password_hash);
+    if (valid) return user as UserRow;
+    return null;
+  }
+
+  // Fallback for bootstrap admin: if no password set yet and logging in as admin, allow default password Admin@123
+  if (cleanEmail === "manigandan.parthasarathi@hydraspecma.com") {
+    if (password === "Admin@123" || password === "Admin123") {
+      const hash = hashPassword(password);
+      await db.from("coc_users").update({ password_hash: hash }).eq("id", user.id);
+      return user as UserRow;
+    }
+  }
+
+  return null;
 }

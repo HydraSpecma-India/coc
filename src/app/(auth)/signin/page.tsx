@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { auth, hasEntraProvider, signIn } from "@/lib/auth/auth";
-import { ROLES } from "@/lib/auth/roles";
 
 export const metadata = { title: "Sign in - COC Platform" };
 
@@ -11,8 +10,19 @@ export default async function SignInPage({
 }) {
   const session = await auth();
   const { callbackUrl = "/", error } = await searchParams;
-  if (session?.user?.email) redirect(callbackUrl);
+  if (session?.user?.email && session.user.id) redirect(callbackUrl);
   const entra = hasEntraProvider();
+
+  let errorMessage: string | null = null;
+  if (error) {
+    if (error === "InvalidCredentials" || error === "CredentialsSignin") {
+      errorMessage = "Invalid email or password. Please check your credentials and try again.";
+    } else if (error === "AccessDenied") {
+      errorMessage = "Your account does not have permission to access the platform or is deactivated.";
+    } else {
+      errorMessage = `Sign-in failed (${error}). Please try again.`;
+    }
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-ink-100 p-6">
@@ -28,70 +38,78 @@ export default async function SignInPage({
           </div>
         </div>
 
-        {error && (
-          <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
-            Sign-in failed ({error}). Please try again.
+        {errorMessage && (
+          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800 leading-relaxed">
+            {errorMessage}
           </div>
         )}
 
-        {/* Primary Local Login Form */}
+        {/* Primary Email & Password Login Form */}
         <form
           action={async (fd: FormData) => {
             "use server";
-            await signIn("dev", {
-              email: String(fd.get("email") || "manigandan.parthasarathi@hydraspecma.com"),
-              name: String(fd.get("name") || "Manigandan Parthasarathi"),
-              role: String(fd.get("role") || "Admin"),
-              redirectTo: callbackUrl,
-            });
-          }}
-          className="space-y-3"
-        >
-          <div>
-            <label className="block text-xs font-semibold text-ink-700 mb-1">User Name</label>
-            <input
-              name="name"
-              defaultValue="Manigandan Parthasarathi"
-              className="h-10 w-full rounded-md border border-ink-300 bg-white px-3 text-sm text-ink-900 focus:border-brand-500 focus:ring-1 focus:ring-brand-400"
-              placeholder="Name"
-              required
-            />
-          </div>
+            const email = String(fd.get("email") || "").trim();
+            const password = String(fd.get("password") || "");
 
+            try {
+              await signIn("credentials", {
+                email,
+                password,
+                redirectTo: callbackUrl,
+              });
+            } catch (err: unknown) {
+              if (
+                (err as { digest?: string })?.digest?.startsWith("NEXT_REDIRECT") ||
+                (err as Error)?.message?.includes("NEXT_REDIRECT")
+              ) {
+                throw err;
+              }
+              redirect(`/signin?error=InvalidCredentials`);
+            }
+          }}
+          className="space-y-4"
+        >
           <div>
             <label className="block text-xs font-semibold text-ink-700 mb-1">Work Email</label>
             <input
               name="email"
               type="email"
+              autoComplete="email"
               defaultValue="manigandan.parthasarathi@hydraspecma.com"
               className="h-10 w-full rounded-md border border-ink-300 bg-white px-3 text-sm text-ink-900 focus:border-brand-500 focus:ring-1 focus:ring-brand-400 font-medium"
-              placeholder="Email"
+              placeholder="name@hydraspecma.com"
               required
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-ink-700 mb-1">Role</label>
-            <select
-              name="role"
-              defaultValue="Admin"
-              className="h-10 w-full rounded-md border border-ink-300 bg-white px-3 text-sm text-ink-900 font-semibold"
-            >
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r} {r === "Admin" ? "(Full Access)" : ""}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-semibold text-ink-700">Password</label>
+            </div>
+            <input
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              defaultValue="Admin@123"
+              className="h-10 w-full rounded-md border border-ink-300 bg-white px-3 text-sm text-ink-900 focus:border-brand-500 focus:ring-1 focus:ring-brand-400 font-medium"
+              placeholder="••••••••"
+              required
+            />
           </div>
 
           <button
             type="submit"
             className="mt-2 flex h-11 w-full items-center justify-center rounded-md bg-brand-500 text-sm font-bold text-ink-900 hover:bg-brand-600 transition-colors shadow-sm cursor-pointer"
           >
-            Sign In to COC Platform
+            Sign In with Password
           </button>
         </form>
+
+        <div className="mt-4 rounded-md border border-ink-200 bg-ink-50 p-3 text-xs text-ink-600 space-y-1">
+          <p className="font-semibold text-ink-800">Admin Account Credentials:</p>
+          <p className="text-[11px] font-mono text-ink-700 break-all">User: manigandan.parthasarathi@hydraspecma.com</p>
+          <p className="text-[11px] font-mono text-ink-700">Initial Password: Admin@123</p>
+        </div>
 
         {/* Entra ID SSO Section */}
         <div className="mt-6 border-t border-ink-200 pt-5">
@@ -104,7 +122,7 @@ export default async function SignInPage({
             >
               <button
                 type="submit"
-                className="flex h-10 w-full items-center justify-center gap-2 rounded-md border border-ink-300 bg-white text-xs font-medium text-ink-800 hover:bg-ink-50 transition-colors"
+                className="flex h-10 w-full items-center justify-center gap-2 rounded-md border border-ink-300 bg-white text-xs font-medium text-ink-800 hover:bg-ink-50 transition-colors cursor-pointer"
               >
                 <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden>
                   <rect x="1" y="1" width="9" height="9" fill="#f25022" />

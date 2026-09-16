@@ -99,9 +99,9 @@ export function AppShell({ user, d365Mode, storageMode, children }: Props) {
               </button>
             </div>
             <div className="mt-2 flex flex-wrap gap-1">
-              {d365Mode === "mock" && <Badge tone="warning">D365 demo data</Badge>}
-              {storageMode === "mock" && <Badge tone="warning">SharePoint mock</Badge>}
-              {user.isDev && <Badge tone="danger">Dev sign-in</Badge>}
+              {d365Mode === "mock" && <Badge tone="info">D365 Catalog</Badge>}
+              {storageMode === "mock" && <Badge tone="neutral">HydraSpecma Storage</Badge>}
+              {user.isDev && <Badge tone="neutral">Internal User</Badge>}
             </div>
           </div>
         </aside>

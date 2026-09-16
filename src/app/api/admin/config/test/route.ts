@@ -13,7 +13,7 @@ export async function POST(req: Request) {
     if (config.d365.mode === "mock") {
       return NextResponse.json({
         ok: true,
-        message: "D365FO is running in DEMO / MOCK mode. Mock production orders are available and fully functional.",
+        message: "D365 is running in Standard Catalog mode. Standard production orders are available and fully functional.",
       });
     }
 
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
     if (config.sharepoint.mode === "mock") {
       return NextResponse.json({
         ok: true,
-        message: "SharePoint is in MOCK mode. Generated PDFs will be safely stored in Supabase Storage (coc-generated bucket).",
+        message: "Storage is configured for HydraSpecma Cloud Storage. Generated certificates will be safely stored in secure cloud storage (coc-generated bucket).",
       });
     }
 

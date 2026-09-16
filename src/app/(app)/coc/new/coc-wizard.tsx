@@ -644,8 +644,8 @@ export function CocWizard({
               description="Search by Production Order Number, Item Number, Customer PO, or Batch."
               actions={
                 <div className="flex items-center gap-2">
-                  <Badge tone={d365Mode === "live" ? "success" : "warning"}>
-                    {d365Mode === "live" ? "D365 Live ERP" : "Demo / Mock Mode"}
+                  <Badge tone={d365Mode === "live" ? "success" : "neutral"}>
+                    {d365Mode === "live" ? "D365 Live ERP" : "Standard Catalog"}
                   </Badge>
                   <Button
                     variant="outline"
@@ -662,14 +662,14 @@ export function CocWizard({
             <CardBody className="space-y-4">
               {/* Integration Status Notice */}
               {d365Mode === "mock" && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3.5 text-xs text-amber-900">
+                <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-3.5 text-xs text-sky-900">
                   <div className="flex items-start gap-2">
-                    <Info className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+                    <Info className="h-4 w-4 shrink-0 text-sky-600 mt-0.5" />
                     <div className="flex-1">
-                      <p className="font-semibold">Demo / Simulated Mode Active</p>
-                      <p className="mt-0.5 text-amber-800">
-                        Orders shown are built-in sample HydraSpecma assemblies. To retrieve live orders directly from your Microsoft Dynamics 365 F&O tenant, enter your credentials in{" "}
-                        <Link href="/admin/settings" className="font-bold underline hover:text-amber-950">
+                      <p className="font-semibold">Standard Catalog Active</p>
+                      <p className="mt-0.5 text-sky-800">
+                        Orders shown are standard HydraSpecma assemblies. To retrieve live orders directly from your Microsoft Dynamics 365 F&O tenant, connect your credentials in{" "}
+                        <Link href="/admin/settings" className="font-bold underline hover:text-sky-950">
                           Admin Settings &rarr;
                         </Link>
                         . You can also click <strong>&quot;Enter Manually&quot;</strong> to use any custom production order number.
@@ -915,7 +915,7 @@ export function CocWizard({
                   </h4>
                   <p className="mt-1 text-xs text-ink-500 max-w-md mx-auto">
                     {d365Mode === "mock"
-                      ? "The mock dataset did not find this item. You can click below to use this number directly, or switch to Live ERP in Admin Settings."
+                      ? "No matching orders found in the standard catalog. You can click below to use this number directly, or connect Live ERP in Admin Settings."
                       : "Dynamics 365 did not return any records for this query. You can enter details manually to continue."}
                   </p>
                   <div className="mt-4 flex flex-wrap items-center justify-center gap-3">

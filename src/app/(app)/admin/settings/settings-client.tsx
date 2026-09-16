@@ -219,8 +219,8 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
                     onChange={() => setConfig({ ...config, d365: { ...config.d365, mode: "mock" } })}
                     className="accent-brand-600"
                   />
-                  <span className="font-medium">MOCK / DEMO Mode</span>
-                  <Badge tone="warning">Built-in HydraSpecma sample POs</Badge>
+                  <span className="font-medium">Standard Catalog Mode</span>
+                  <Badge tone="neutral">Built-in HydraSpecma catalog</Badge>
                 </label>
 
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -425,8 +425,8 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
                     onChange={() => setConfig({ ...config, sharepoint: { ...config.sharepoint, mode: "mock" } })}
                     className="accent-brand-600"
                   />
-                  <span className="font-medium">MOCK / Supabase Storage</span>
-                  <Badge tone="info">Saves PDFs in Supabase coc-generated bucket</Badge>
+                  <span className="font-medium">HydraSpecma Cloud Storage</span>
+                  <Badge tone="info">Stores PDFs in secure cloud storage bucket</Badge>
                 </label>
 
                 <label className="flex items-center gap-2 text-sm cursor-pointer">

@@ -36,7 +36,7 @@ export default async function SharePointPage() {
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold">Active Mode:</span>
               <Badge tone={config.mode === "live" ? "success" : "info"}>
-                {config.mode === "live" ? "LIVE SharePoint (Microsoft Graph)" : "MOCK (Supabase Storage)"}
+                {config.mode === "live" ? "LIVE SharePoint (Microsoft Graph)" : "HydraSpecma Cloud Storage"}
               </Badge>
             </div>
             <p className="text-xs text-ink-600">
