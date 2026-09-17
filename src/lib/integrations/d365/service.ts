@@ -7,7 +7,55 @@ import type { D365ProductionOrder, D365COCDocumentRecord, D365SalesOrderLine } f
 export interface D365SearchResult {
   mode: "mock" | "live";
   orders: D365ProductionOrder[];
+  total?: number;
+  hasMore?: boolean;
+  limit?: number;
+  skip?: number;
   error?: string;
+}
+
+export function matchesSearchQuery(order: D365ProductionOrder, rawQuery: string): boolean {
+  if (!rawQuery) return true;
+  const q = rawQuery.trim().toLowerCase();
+  if (!q) return true;
+
+  // Normalized without spaces/dashes/slashes/dots
+  const cleanQ = q.replace(/[\s\-_/.]+/g, "");
+
+  const fields = [
+    order.ProductionOrder,
+    order.ItemNumber,
+    order.ItemDescription,
+    order.CustomerPartNumber,
+    order.CustomerName,
+    order.CustomerPO,
+    order.SalesOrder,
+    order.BatchNumber,
+    order.SerialNumber,
+    order.DrawingNumber,
+    order.DeliveryDate,
+    order.dataAreaId,
+    order.CustomerAccount,
+  ].filter(Boolean) as string[];
+
+  // 1. Direct substring check on any field (e.g. "4288" matching "29274288R00")
+  if (fields.some((f) => f.toLowerCase().includes(q))) return true;
+
+  // 2. Normalized check (e.g. "maintank" matching "Main tank assembly V112")
+  if (cleanQ.length >= 2) {
+    if (fields.some((f) => f.toLowerCase().replace(/[\s\-_/.]+/g, "").includes(cleanQ))) return true;
+    const allText = fields.join(" ").toLowerCase().replace(/[\s\-_/.]+/g, "");
+    if (allText.includes(cleanQ)) return true;
+  }
+
+  // 3. Multi-word token check (e.g. "tank 4288" or "main tank v112")
+  const tokens = q.split(/\s+/).filter(Boolean);
+  if (tokens.length > 1) {
+    const combined = fields.join(" ").toLowerCase();
+    if (tokens.every((token) => combined.includes(token))) return true;
+  }
+
+  return false;
 }
 
 interface CachedToken {
@@ -82,14 +130,20 @@ export class D365Service {
     return data.access_token;
   }
 
-  static async searchProductionOrders(query = "", company = "", status = ""): Promise<D365SearchResult> {
+  static async searchProductionOrders(
+    query = "",
+    company = "",
+    status = "",
+    limit = 50,
+    skip = 0
+  ): Promise<D365SearchResult> {
     const config = (await getActiveConfig()).d365;
     const targetCompany = (company || config.company || "HSIN").trim();
     const isAllCompanies = targetCompany.toUpperCase() === "ALL";
 
     const targetStatus = status.trim().toLowerCase();
     const cleanQ = query.trim();
-    const cacheKey = `${targetCompany.toUpperCase()}|${targetStatus}|${cleanQ.toLowerCase()}`;
+    const cacheKey = `${targetCompany.toUpperCase()}|${targetStatus}|${cleanQ.toLowerCase()}|${limit}|${skip}`;
     const now = Date.now();
     const cached = poSearchCache.get(cacheKey);
     if (cached && now < cached.expiresAt) {
@@ -125,7 +179,6 @@ export class D365Service {
     };
 
     if (config.mode === "mock") {
-      const q = query.trim().toLowerCase();
       let list = [...MOCK_PRODUCTION_ORDERS];
       if (!isAllCompanies) {
         list = list.filter((p) => {
@@ -137,25 +190,25 @@ export class D365Service {
       // Filter by production status
       list = list.filter((p) => matchesStatus(p.ProductionOrderStatus));
 
-      if (q) {
-        list = list.filter(
-          (po) =>
-            po.ProductionOrder.toLowerCase().includes(q) ||
-            po.ItemNumber.toLowerCase().includes(q) ||
-            po.ItemDescription?.toLowerCase().includes(q) ||
-            po.CustomerPartNumber?.toLowerCase().includes(q) ||
-            po.CustomerName.toLowerCase().includes(q) ||
-            po.CustomerPO.toLowerCase().includes(q) ||
-            (po.DeliveryDate && po.DeliveryDate.toLowerCase().includes(q)) ||
-            (po.BatchNumber && po.BatchNumber.toLowerCase().includes(q)) ||
-            po.DrawingNumber?.toLowerCase().includes(q)
-        );
+      if (cleanQ) {
+        list = list.filter((po) => matchesSearchQuery(po, cleanQ));
       }
 
       // Sort "last to first" (descending order number)
       list.sort((a, b) => b.ProductionOrder.localeCompare(a.ProductionOrder, undefined, { numeric: true, sensitivity: "base" }));
 
-      const resObj: D365SearchResult = { mode: "mock", orders: list };
+      const total = list.length;
+      const sliced = list.slice(skip, skip + limit);
+      const hasMore = skip + limit < total;
+
+      const resObj: D365SearchResult = {
+        mode: "mock",
+        orders: sliced,
+        total,
+        hasMore,
+        limit,
+        skip,
+      };
       setBoundedCache(poSearchCache, cacheKey, { data: resObj, expiresAt: now + 30_000 });
       return resObj;
     }
@@ -171,15 +224,17 @@ export class D365Service {
 
     try {
       const token = await this.getAccessToken(config);
-      const cleanQ = query.trim().replace(/'/g, "''");
+      const cleanODataQ = cleanQ.replace(/'/g, "''");
       const entity = (config.productionEntity || "ProductionOrderHeaders").trim();
 
       const companyClause = !isAllCompanies ? `dataAreaId eq '${targetCompany.toLowerCase()}'` : "";
 
-      const tryODataFetch = async (filterString: string, useOrder = true) => {
+      const fetchPageSize = Math.max(limit, 50);
+      const tryODataFetch = async (filterString: string, useOrder = true, top = fetchPageSize, skipCount = skip) => {
         const filterClause = filterString ? `&$filter=${filterString}` : "";
         const orderClause = useOrder ? `&$orderby=ProductionOrderNumber desc` : "";
-        const url = `${config.baseUrl.replace(/\/+$/, "")}/data/${entity}?cross-company=true&$top=100${orderClause}${filterClause}`;
+        const skipClause = skipCount > 0 ? `&$skip=${skipCount}` : "";
+        const url = `${config.baseUrl.replace(/\/+$/, "")}/data/${entity}?cross-company=true&$top=${top}${skipClause}${orderClause}${filterClause}`;
         return await fetch(url, {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -192,23 +247,36 @@ export class D365Service {
 
       let res: Response | null = null;
 
-      if (!cleanQ) {
+      if (!cleanODataQ) {
         // No search query: fetch by company with orderby desc (last to first)
-        res = await tryODataFetch(companyClause, true);
+        res = await tryODataFetch(companyClause, true, fetchPageSize, skip);
         if (!res.ok) {
-          res = await tryODataFetch(companyClause, false);
+          res = await tryODataFetch(companyClause, false, fetchPageSize, skip);
         }
       } else {
-        // Query provided: Candidate 1: Substring search with contains (matches partial digits like 0049 or 8613)
-        const qContains = `(contains(ProductionOrderNumber, '${cleanQ}') or contains(ItemNumber, '${cleanQ}') or contains(ProductionOrderName, '${cleanQ}'))`;
+        // Query provided: Candidate 1: Substring search with contains (matches partial digits like 0049, 4288)
+        const qContains = `(contains(ProductionOrderNumber, '${cleanODataQ}') or contains(ItemNumber, '${cleanODataQ}'))`;
         const filterContains = companyClause ? `${companyClause} and ${qContains}` : qContains;
-        res = await tryODataFetch(filterContains, true);
+        res = await tryODataFetch(filterContains, true, fetchPageSize, skip);
 
-        // If Candidate 1 failed or returned 0, try Candidate 2: exact match eq
+        // If Candidate 1 failed or returned 0, try Candidate 2: startswith
         if (!res.ok || (await res.clone().json().then((j) => (j.value || []).length === 0).catch(() => true))) {
-          const qCandidate1 = `(ItemNumber eq '${cleanQ}' or ProductionOrderNumber eq '${cleanQ}')`;
+          const qStartsWith = `(startswith(ProductionOrderNumber, '${cleanODataQ}') or startswith(ItemNumber, '${cleanODataQ}'))`;
+          const filterStarts = companyClause ? `${companyClause} and ${qStartsWith}` : qStartsWith;
+          const resStarts = await tryODataFetch(filterStarts, true, fetchPageSize, skip);
+          if (resStarts.ok) {
+            const jStarts = await resStarts.clone().json().catch(() => ({ value: [] }));
+            if ((jStarts.value || []).length > 0) {
+              res = resStarts;
+            }
+          }
+        }
+
+        // If Candidate 2 failed or returned 0, try Candidate 3: exact match eq
+        if (!res.ok || (await res.clone().json().then((j) => (j.value || []).length === 0).catch(() => true))) {
+          const qCandidate1 = `(ItemNumber eq '${cleanODataQ}' or ProductionOrderNumber eq '${cleanODataQ}')`;
           const filter1 = companyClause ? `${companyClause} and ${qCandidate1}` : qCandidate1;
-          const res1 = await tryODataFetch(filter1, true);
+          const res1 = await tryODataFetch(filter1, false, fetchPageSize, skip);
           if (res1.ok) {
             const j1 = await res1.clone().json().catch(() => ({ value: [] }));
             if ((j1.value || []).length > 0) {
@@ -217,34 +285,11 @@ export class D365Service {
           }
         }
 
-        // If Candidate 2 also didn't match, try Candidate 3: ItemNumber eq cleanQ alone
-        if (!res.ok || (await res.clone().json().then((j) => (j.value || []).length === 0).catch(() => true))) {
-          const qCandidate2 = `ItemNumber eq '${cleanQ}'`;
-          const filter2 = companyClause ? `${companyClause} and ${qCandidate2}` : qCandidate2;
-          const res2 = await tryODataFetch(filter2, false);
-          if (res2.ok) {
-            const j2 = await res2.clone().json().catch(() => ({ value: [] }));
-            if ((j2.value || []).length > 0) {
-              res = res2;
-            }
-          }
-        }
-
-        // If candidate 2 also didn't match, try Candidate 3: ProductionOrderNumber eq cleanQ alone
+        // If specific candidate queries failed or returned empty, fetch latest company orders with paging and filter in memory
         if (!res || !res.ok) {
-          const qCandidate3 = `ProductionOrderNumber eq '${cleanQ}'`;
-          const filter3 = companyClause ? `${companyClause} and ${qCandidate3}` : qCandidate3;
-          const res3 = await tryODataFetch(filter3, false);
-          if (res3.ok) {
-            res = res3;
-          }
-        }
-
-        // If specific candidate queries failed with 400 or returned empty, fetch latest company orders and filter in memory
-        if (!res || !res.ok) {
-          res = await tryODataFetch(companyClause, true);
+          res = await tryODataFetch(companyClause, true, Math.max(fetchPageSize * 2, 100), skip);
           if (!res || !res.ok) {
-            res = await tryODataFetch(companyClause, false);
+            res = await tryODataFetch(companyClause, false, Math.max(fetchPageSize * 2, 100), skip);
           }
         }
       }
@@ -256,6 +301,7 @@ export class D365Service {
 
       const json = await res.json();
       const rawList = Array.isArray(json.value) ? json.value : [];
+      const hasODataNext = Boolean(json["@odata.nextLink"]);
       const normalized: D365ProductionOrder[] = rawList.map((item: Record<string, unknown>) => {
         const prodOrder = String(
           item.ProductionOrderNumber ||
@@ -334,27 +380,21 @@ export class D365Service {
       // 1. Filter by production status (Released, Started, Reported as finished, End/Completed)
       let filteredOrders = normalized.filter((po) => matchesStatus(po.ProductionOrderStatus));
 
-      // 2. If user searched, also filter in-memory across all fields (ItemNumber, ProductionOrder, CustomerPartNumber, CustomerPO, Description)
+      // 2. If user searched, also filter in-memory with matchesSearchQuery (space insensitive, partial digits, tokens)
       if (cleanQ) {
-        const qLow = cleanQ.toLowerCase();
-        const inMem = filteredOrders.filter(
-          (po) =>
-            po.ProductionOrder.toLowerCase().includes(qLow) ||
-            po.ItemNumber.toLowerCase().includes(qLow) ||
-            po.CustomerPartNumber?.toLowerCase().includes(qLow) ||
-            po.ItemDescription.toLowerCase().includes(qLow) ||
-            po.CustomerPO.toLowerCase().includes(qLow) ||
-            po.CustomerName.toLowerCase().includes(qLow) ||
-            (po.DeliveryDate && po.DeliveryDate.toLowerCase().includes(qLow)) ||
-            (po.BatchNumber && po.BatchNumber.toLowerCase().includes(qLow))
-        );
-        filteredOrders = inMem;
+        filteredOrders = filteredOrders.filter((po) => matchesSearchQuery(po, cleanQ));
       }
 
       // 3. Sort "last to first" (descending order number)
       filteredOrders.sort((a, b) => b.ProductionOrder.localeCompare(a.ProductionOrder, undefined, { numeric: true, sensitivity: "base" }));
 
-      const resObj: D365SearchResult = { mode: "live", orders: filteredOrders };
+      const resObj: D365SearchResult = {
+        mode: "live",
+        orders: filteredOrders,
+        hasMore: hasODataNext || rawList.length >= fetchPageSize,
+        limit,
+        skip,
+      };
       setBoundedCache(poSearchCache, cacheKey, { data: resObj, expiresAt: now + 30_000 });
       return resObj;
     } catch (err) {

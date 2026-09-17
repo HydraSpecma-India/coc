@@ -45,6 +45,7 @@ import {
   FileUp,
   ShoppingCart,
   Tag,
+  ChevronDown,
 } from "lucide-react";
 
 interface TemplateSummary {
@@ -303,8 +304,18 @@ export function CocWizard({
   const [searchResults, setSearchResults] = useState<D365ProductionOrder[]>([]);
   const [selectedPO, setSelectedPO] = useState<D365ProductionOrder | null>(null);
 
+  // Pagination states for Production Orders
+  const [pageSize] = useState<number>(50);
+  const [hasMoreOrders, setHasMoreOrders] = useState<boolean>(false);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+  const [totalAvailable, setTotalAvailable] = useState<number | undefined>(undefined);
+
+  // When searching for an explicit keyword/number (e.g. 4288 or maintank), do not hide matching orders with showOnlyPending
+  const isSearchingExplicit = Boolean(poQuery && poQuery.trim().length > 0);
   const fullyCertifiedCount = searchResults.filter((o) => o.isFullyCertified).length;
-  const displayedResults = searchResults.filter((order) => !showOnlyPending || !order.isFullyCertified);
+  const displayedResults = searchResults.filter(
+    (order) => !showOnlyPending || !order.isFullyCertified || isSearchingExplicit
+  );
   const [searching, setSearching] = useState(false);
   const [d365Mode, setD365Mode] = useState<"mock" | "live">("mock");
   const [d365Error, setD365Error] = useState<string | null>(null);
@@ -857,28 +868,60 @@ export function CocWizard({
 
   // Initial PO search
   useEffect(() => {
-    searchOrders("", defaultCompany, "ALL_ACTIVE");
+    searchOrders("", defaultCompany, "ALL_ACTIVE", false);
   }, []);
 
-  const searchOrders = async (q: string, comp = selectedCompany, st = selectedStatus) => {
-    setSearching(true);
+  const searchOrders = async (
+    q: string,
+    comp = selectedCompany,
+    st = selectedStatus,
+    isAppend = false
+  ) => {
+    if (isAppend) {
+      setLoadingMore(true);
+    } else {
+      setSearching(true);
+    }
     setD365Error(null);
     try {
+      const skipCount = isAppend ? searchResults.length : 0;
       const compParam = comp ? `&company=${encodeURIComponent(comp)}` : "";
       const statusParam = st ? `&status=${encodeURIComponent(st)}` : "";
-      const res = await api<{ ok: boolean; mode?: "mock" | "live"; orders: D365ProductionOrder[]; error?: string }>(
-        `/api/d365/production-orders?q=${encodeURIComponent(q)}${compParam}${statusParam}`
+      const res = await api<{
+        ok: boolean;
+        mode?: "mock" | "live";
+        orders: D365ProductionOrder[];
+        total?: number;
+        hasMore?: boolean;
+        limit?: number;
+        skip?: number;
+        error?: string;
+      }>(
+        `/api/d365/production-orders?q=${encodeURIComponent(q)}${compParam}${statusParam}&limit=${pageSize}&skip=${skipCount}`
       );
       if (res.mode) setD365Mode(res.mode);
       if (res.error) setD365Error(res.error);
 
-      const orders = res.orders || [];
-      setSearchResults(orders);
-      if (orders.length > 0) {
-        if (!selectedPO || !orders.some((o) => o.ProductionOrder === selectedPO.ProductionOrder)) {
-          const firstPending = orders.find((o) => !o.isFullyCertified) || orders[0];
-          applySelectedPO(firstPending);
+      const incomingOrders = res.orders || [];
+      if (isAppend) {
+        setSearchResults((prev) => {
+          const existingKeys = new Set(prev.map((o) => o.ProductionOrder.toUpperCase()));
+          const newUnique = incomingOrders.filter((o) => !existingKeys.has(o.ProductionOrder.toUpperCase()));
+          return [...prev, ...newUnique];
+        });
+      } else {
+        setSearchResults(incomingOrders);
+        if (incomingOrders.length > 0) {
+          if (!selectedPO || !incomingOrders.some((o) => o.ProductionOrder === selectedPO.ProductionOrder)) {
+            const firstPending = incomingOrders.find((o) => !o.isFullyCertified) || incomingOrders[0];
+            applySelectedPO(firstPending);
+          }
         }
+      }
+
+      setHasMoreOrders(Boolean(res.hasMore ?? (incomingOrders.length === pageSize)));
+      if (res.total !== undefined) {
+        setTotalAvailable(res.total);
       }
     } catch (e) {
       const msg = (e as Error).message;
@@ -886,17 +929,24 @@ export function CocWizard({
       toast.error("Failed to load production orders", msg);
     } finally {
       setSearching(false);
+      setLoadingMore(false);
+    }
+  };
+
+  const handleLoadMore = () => {
+    if (!loadingMore && hasMoreOrders) {
+      searchOrders(poQuery, selectedCompany, selectedStatus, true);
     }
   };
 
   const handleCompanyChange = (newCompany: string) => {
     setSelectedCompany(newCompany);
-    searchOrders(poQuery, newCompany, selectedStatus);
+    searchOrders(poQuery, newCompany, selectedStatus, false);
   };
 
   const handleStatusChange = (newStatus: string) => {
     setSelectedStatus(newStatus);
-    searchOrders(poQuery, selectedCompany, newStatus);
+    searchOrders(poQuery, selectedCompany, newStatus, false);
   };
 
   // Canvas drawing handlers
@@ -1881,6 +1931,29 @@ export function CocWizard({
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {/* Load More Pagination Trigger */}
+              {displayedResults.length > 0 && hasMoreOrders && (
+                <div className="flex flex-col items-center justify-center pt-3 pb-1 gap-1.5 border-t border-ink-100">
+                  <Button
+                    variant="outline"
+                    onClick={handleLoadMore}
+                    loading={loadingMore}
+                    className="gap-2 px-6 py-2.5 text-xs font-semibold shadow-xs hover:bg-brand-50 hover:text-brand-800 hover:border-brand-300 transition-all cursor-pointer"
+                  >
+                    <ChevronDown className="h-4 w-4 text-brand-600" />
+                    Load More Orders ({displayedResults.length} shown)
+                  </Button>
+                  <span className="text-[11px] text-ink-500">
+                    Showing {displayedResults.length} orders. Click to fetch the next {pageSize} orders from Dynamics 365.
+                  </span>
+                </div>
+              )}
+              {displayedResults.length > 0 && !hasMoreOrders && (
+                <div className="text-center pt-2 text-[11px] text-ink-400">
+                  All {displayedResults.length} matching orders loaded
                 </div>
               )}
 
