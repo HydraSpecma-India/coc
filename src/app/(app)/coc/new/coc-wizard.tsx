@@ -50,6 +50,71 @@ import {
   X,
 } from "lucide-react";
 
+export type DatePreset = "ALL" | "CURRENT_MONTH" | "LAST_MONTH" | "LAST_3_MONTHS" | "LAST_6_MONTHS" | "NEXT_MONTH";
+
+function formatDateYMD(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function getPresetDateRange(preset: DatePreset): { fromDate: string; toDate: string; label: string } | null {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+
+  switch (preset) {
+    case "CURRENT_MONTH": {
+      const first = new Date(year, month, 1);
+      const last = new Date(year, month + 1, 0);
+      return {
+        fromDate: formatDateYMD(first),
+        toDate: formatDateYMD(last),
+        label: `Current Month (${first.toLocaleString("default", { month: "short" })} ${year})`,
+      };
+    }
+    case "LAST_MONTH": {
+      const first = new Date(year, month - 1, 1);
+      const last = new Date(year, month, 0);
+      return {
+        fromDate: formatDateYMD(first),
+        toDate: formatDateYMD(last),
+        label: `Last Month (${first.toLocaleString("default", { month: "short" })} ${first.getFullYear()})`,
+      };
+    }
+    case "LAST_3_MONTHS": {
+      const first = new Date(year, month - 2, 1);
+      const last = new Date(year, month + 1, 0);
+      return {
+        fromDate: formatDateYMD(first),
+        toDate: formatDateYMD(last),
+        label: `Last 3 Months (${first.toLocaleString("default", { month: "short" })} – ${last.toLocaleString("default", { month: "short" })} ${year})`,
+      };
+    }
+    case "LAST_6_MONTHS": {
+      const first = new Date(year, month - 5, 1);
+      const last = new Date(year, month + 1, 0);
+      return {
+        fromDate: formatDateYMD(first),
+        toDate: formatDateYMD(last),
+        label: `Last 6 Months (${first.toLocaleString("default", { month: "short" })} – ${last.toLocaleString("default", { month: "short" })} ${year})`,
+      };
+    }
+    case "NEXT_MONTH": {
+      const first = new Date(year, month + 1, 1);
+      const last = new Date(year, month + 2, 0);
+      return {
+        fromDate: formatDateYMD(first),
+        toDate: formatDateYMD(last),
+        label: `Next Month (${first.toLocaleString("default", { month: "short" })} ${first.getFullYear()})`,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 interface TemplateSummary {
   id: string;
   name: string;
@@ -301,7 +366,11 @@ export function CocWizard({
   }, []);
 
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL_ACTIVE");
+  const [datePreset, setDatePreset] = useState<DatePreset>("ALL");
+  const [yearFilter, setYearFilter] = useState<string>("ALL");
   const [deliveryDateFilter, setDeliveryDateFilter] = useState<string>("");
+  const [fromDateFilter, setFromDateFilter] = useState<string>("");
+  const [toDateFilter, setToDateFilter] = useState<string>("");
   const [showOnlyPending, setShowOnlyPending] = useState<boolean>(true);
   const [poQuery, setPoQuery] = useState("");
   const [searchResults, setSearchResults] = useState<D365ProductionOrder[]>([]);
@@ -314,8 +383,11 @@ export function CocWizard({
   const [totalAvailable, setTotalAvailable] = useState<number | undefined>(undefined);
   const rawSkipRef = useRef<number>(0);
 
-  // When searching for an explicit keyword/number or filtering by delivery date, do not hide matching orders with showOnlyPending
-  const isSearchingExplicit = Boolean((poQuery && poQuery.trim().length > 0) || deliveryDateFilter);
+  // When searching for an explicit keyword/number or filtering by date/month/year, do not hide matching orders with showOnlyPending
+  const hasActiveDateFilter = Boolean(
+    datePreset !== "ALL" || (yearFilter && yearFilter !== "ALL") || deliveryDateFilter || fromDateFilter || toDateFilter
+  );
+  const isSearchingExplicit = Boolean((poQuery && poQuery.trim().length > 0) || hasActiveDateFilter);
   const fullyCertifiedCount = searchResults.filter((o) => o.isFullyCertified).length;
   const displayedResults = searchResults.filter(
     (order) => !showOnlyPending || !order.isFullyCertified || isSearchingExplicit
@@ -872,7 +944,7 @@ export function CocWizard({
 
   // Initial PO search
   useEffect(() => {
-    searchOrders("", defaultCompany, "ALL_ACTIVE", "", false);
+    searchOrders("", defaultCompany, "ALL_ACTIVE", "", "", "", "ALL", false);
   }, []);
 
   const searchOrders = async (
@@ -880,6 +952,9 @@ export function CocWizard({
     comp = selectedCompany,
     st = selectedStatus,
     dt = deliveryDateFilter,
+    fromD = fromDateFilter,
+    toD = toDateFilter,
+    yr = yearFilter,
     isAppend = false
   ) => {
     if (isAppend) {
@@ -894,6 +969,9 @@ export function CocWizard({
       const compParam = comp ? `&company=${encodeURIComponent(comp)}` : "";
       const statusParam = st ? `&status=${encodeURIComponent(st)}` : "";
       const dateParam = dt ? `&deliveryDate=${encodeURIComponent(dt)}` : "";
+      const fromParam = fromD ? `&fromDate=${encodeURIComponent(fromD)}` : "";
+      const toParam = toD ? `&toDate=${encodeURIComponent(toD)}` : "";
+      const yearParam = yr && yr !== "ALL" ? `&year=${encodeURIComponent(yr)}` : "";
       const res = await api<{
         ok: boolean;
         mode?: "mock" | "live";
@@ -905,7 +983,7 @@ export function CocWizard({
         nextSkip?: number;
         error?: string;
       }>(
-        `/api/d365/production-orders?q=${encodeURIComponent(q)}${compParam}${statusParam}${dateParam}&limit=${pageSize}&skip=${skipCount}`
+        `/api/d365/production-orders?q=${encodeURIComponent(q)}${compParam}${statusParam}${dateParam}${fromParam}${toParam}${yearParam}&limit=${pageSize}&skip=${skipCount}`
       );
       if (res.mode) setD365Mode(res.mode);
       if (res.error) setD365Error(res.error);
@@ -950,23 +1028,113 @@ export function CocWizard({
 
   const handleLoadMore = () => {
     if (!loadingMore && hasMoreOrders) {
-      searchOrders(poQuery, selectedCompany, selectedStatus, deliveryDateFilter, true);
+      searchOrders(
+        poQuery,
+        selectedCompany,
+        selectedStatus,
+        deliveryDateFilter,
+        fromDateFilter,
+        toDateFilter,
+        yearFilter,
+        true
+      );
     }
   };
 
   const handleCompanyChange = (newCompany: string) => {
     setSelectedCompany(newCompany);
-    searchOrders(poQuery, newCompany, selectedStatus, deliveryDateFilter, false);
+    searchOrders(
+      poQuery,
+      newCompany,
+      selectedStatus,
+      deliveryDateFilter,
+      fromDateFilter,
+      toDateFilter,
+      yearFilter,
+      false
+    );
   };
 
   const handleStatusChange = (newStatus: string) => {
     setSelectedStatus(newStatus);
-    searchOrders(poQuery, selectedCompany, newStatus, deliveryDateFilter, false);
+    searchOrders(
+      poQuery,
+      selectedCompany,
+      newStatus,
+      deliveryDateFilter,
+      fromDateFilter,
+      toDateFilter,
+      yearFilter,
+      false
+    );
+  };
+
+  const handlePresetChange = (newPreset: DatePreset) => {
+    setDatePreset(newPreset);
+    setDeliveryDateFilter("");
+    if (newPreset === "ALL") {
+      setFromDateFilter("");
+      setToDateFilter("");
+      const activeYr = yearFilter !== "ALL" ? yearFilter : "";
+      const yrFrom = activeYr ? `${activeYr}-01-01` : "";
+      const yrTo = activeYr ? `${activeYr}-12-31` : "";
+      setFromDateFilter(yrFrom);
+      setToDateFilter(yrTo);
+      searchOrders(poQuery, selectedCompany, selectedStatus, "", yrFrom, yrTo, yearFilter, false);
+    } else {
+      const range = getPresetDateRange(newPreset);
+      if (range) {
+        setFromDateFilter(range.fromDate);
+        setToDateFilter(range.toDate);
+        searchOrders(poQuery, selectedCompany, selectedStatus, "", range.fromDate, range.toDate, yearFilter, false);
+      }
+    }
+  };
+
+  const handleYearChange = (newYear: string) => {
+    setYearFilter(newYear);
+    setDeliveryDateFilter("");
+    if (newYear === "ALL") {
+      if (datePreset !== "ALL") {
+        const range = getPresetDateRange(datePreset);
+        setFromDateFilter(range?.fromDate || "");
+        setToDateFilter(range?.toDate || "");
+        searchOrders(poQuery, selectedCompany, selectedStatus, "", range?.fromDate || "", range?.toDate || "", "ALL", false);
+      } else {
+        setFromDateFilter("");
+        setToDateFilter("");
+        searchOrders(poQuery, selectedCompany, selectedStatus, "", "", "", "ALL", false);
+      }
+    } else {
+      setDatePreset("ALL");
+      const yrFrom = `${newYear}-01-01`;
+      const yrTo = `${newYear}-12-31`;
+      setFromDateFilter(yrFrom);
+      setToDateFilter(yrTo);
+      searchOrders(poQuery, selectedCompany, selectedStatus, "", yrFrom, yrTo, newYear, false);
+    }
   };
 
   const handleDateChange = (newDate: string) => {
     setDeliveryDateFilter(newDate);
-    searchOrders(poQuery, selectedCompany, selectedStatus, newDate, false);
+    if (newDate) {
+      setDatePreset("ALL");
+      setYearFilter("ALL");
+      setFromDateFilter("");
+      setToDateFilter("");
+      searchOrders(poQuery, selectedCompany, selectedStatus, newDate, "", "", "ALL", false);
+    } else {
+      searchOrders(poQuery, selectedCompany, selectedStatus, "", "", "", "ALL", false);
+    }
+  };
+
+  const handleClearAllDates = () => {
+    setDatePreset("ALL");
+    setYearFilter("ALL");
+    setDeliveryDateFilter("");
+    setFromDateFilter("");
+    setToDateFilter("");
+    searchOrders(poQuery, selectedCompany, selectedStatus, "", "", "", "ALL", false);
   };
 
   // Canvas drawing handlers
@@ -1479,12 +1647,12 @@ export function CocWizard({
                     <Input
                       value={poQuery}
                       onChange={(e) => setPoQuery(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && searchOrders(poQuery, selectedCompany, selectedStatus, deliveryDateFilter, false)}
+                      onKeyDown={(e) => e.key === "Enter" && searchOrders(poQuery, selectedCompany, selectedStatus, deliveryDateFilter, fromDateFilter, toDateFilter, yearFilter, false)}
                       placeholder="Search product number, order, or customer part (e.g. 29110478R05, HSIN-000011, 160072)..."
                       className="pl-9"
                     />
                   </div>
-                  <Button loading={searching} onClick={() => searchOrders(poQuery, selectedCompany, selectedStatus, deliveryDateFilter, false)}>
+                  <Button loading={searching} onClick={() => searchOrders(poQuery, selectedCompany, selectedStatus, deliveryDateFilter, fromDateFilter, toDateFilter, yearFilter, false)}>
                     Search D365
                   </Button>
                   <Button
@@ -1521,7 +1689,7 @@ export function CocWizard({
                   </span>
                 </div>
 
-                {/* Production Order Status & Delivery Date Filters */}
+                {/* Production Order Status Filter */}
                 <div className="flex items-center gap-1.5 text-xs text-ink-600 pt-2 border-t border-ink-100 flex-wrap">
                   <div className="flex items-center gap-1 text-[11px] font-semibold text-ink-700 mr-1">
                     <Filter className="h-3.5 w-3.5 text-brand-600" />
@@ -1539,7 +1707,7 @@ export function CocWizard({
                       key={st.code}
                       type="button"
                       onClick={() => handleStatusChange(st.code)}
-                      className={`px-2.5 py-0.5 rounded text-[11px] font-medium border transition-colors ${
+                      className={`px-2.5 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
                         selectedStatus === st.code
                           ? "bg-ink-900 text-white border-ink-900 font-bold shadow-xs"
                           : "bg-white text-ink-600 border-ink-200 hover:bg-ink-100"
@@ -1549,34 +1717,11 @@ export function CocWizard({
                     </button>
                   ))}
 
-                  {/* Delivery Date Filter (Optional) */}
-                  <div className="flex items-center gap-1.5 pl-2 sm:border-l sm:border-ink-200 my-0.5">
-                    <Calendar className="h-3.5 w-3.5 text-brand-600 shrink-0" />
-                    <span className="text-[11px] font-semibold text-ink-700 whitespace-nowrap">Delivery Date:</span>
-                    <input
-                      type="date"
-                      value={deliveryDateFilter}
-                      onChange={(e) => handleDateChange(e.target.value)}
-                      className="h-6 text-[11px] px-1.5 py-0 rounded border border-ink-300 bg-white text-ink-900 focus:border-brand-500 focus:outline-hidden cursor-pointer"
-                      title="Optional: Filter by Production Delivery Date"
-                    />
-                    {deliveryDateFilter && (
-                      <button
-                        type="button"
-                        onClick={() => handleDateChange("")}
-                        className="h-6 px-1.5 text-[10px] font-medium text-ink-600 hover:text-red-600 bg-ink-100 hover:bg-red-50 rounded border border-ink-200 transition-colors flex items-center gap-0.5 cursor-pointer"
-                        title="Clear delivery date filter"
-                      >
-                        <X className="h-2.5 w-2.5" />
-                        Clear
-                      </button>
-                    )}
-                  </div>
                   <div className="ml-auto flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setShowOnlyPending((prev) => !prev)}
-                      className={`px-2.5 py-0.5 rounded text-[11px] font-medium border transition-colors flex items-center gap-1.5 ${
+                      className={`px-2.5 py-0.5 rounded text-[11px] font-medium border transition-colors flex items-center gap-1.5 cursor-pointer ${
                         showOnlyPending
                           ? "bg-emerald-50 text-emerald-800 border-emerald-300 font-bold shadow-2xs"
                           : "bg-white text-ink-600 border-ink-200 hover:bg-ink-100"
@@ -1595,6 +1740,95 @@ export function CocWizard({
                       Sorted: Last to First &darr;
                     </span>
                   </div>
+                </div>
+
+                {/* Production Order Month, Period & Year Filters */}
+                <div className="flex items-center gap-1.5 text-xs text-ink-600 pt-2 border-t border-ink-100 flex-wrap">
+                  <div className="flex items-center gap-1 text-[11px] font-semibold text-ink-700 mr-1">
+                    <Calendar className="h-3.5 w-3.5 text-brand-600" />
+                    <span>Month Filter:</span>
+                  </div>
+                  {[
+                    { code: "ALL", label: "All Months" },
+                    { code: "CURRENT_MONTH", label: "Current Month" },
+                    { code: "LAST_MONTH", label: "Last Month" },
+                    { code: "LAST_3_MONTHS", label: "Last 3 Months" },
+                    { code: "LAST_6_MONTHS", label: "Last 6 Months" },
+                    { code: "NEXT_MONTH", label: "Next Month" },
+                  ].map((p) => (
+                    <button
+                      key={p.code}
+                      type="button"
+                      onClick={() => handlePresetChange(p.code as DatePreset)}
+                      className={`px-2.5 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                        datePreset === p.code && !deliveryDateFilter
+                          ? "bg-brand-600 text-white border-brand-600 font-bold shadow-xs"
+                          : "bg-white text-ink-600 border-ink-200 hover:bg-ink-100"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+
+                  {/* Year Filter */}
+                  <div className="flex items-center gap-1.5 pl-2 sm:border-l sm:border-ink-200 my-0.5">
+                    <span className="text-[11px] font-semibold text-ink-700 whitespace-nowrap">Year:</span>
+                    <select
+                      value={yearFilter}
+                      onChange={(e) => handleYearChange(e.target.value)}
+                      className={`h-6 text-[11px] px-2 py-0 rounded border cursor-pointer font-semibold ${
+                        yearFilter !== "ALL"
+                          ? "bg-brand-50 border-brand-400 text-brand-900"
+                          : "bg-white border-ink-300 text-ink-800"
+                      } focus:border-brand-500 focus:outline-hidden`}
+                      title="Filter by Production Order Delivery Year"
+                    >
+                      <option value="ALL">All Years</option>
+                      <option value="2026">2026</option>
+                      <option value="2025">2025</option>
+                      <option value="2024">2024</option>
+                      <option value="2023">2023</option>
+                      <option value="2022">2022</option>
+                    </select>
+                  </div>
+
+                  {/* Exact Date Picker (Optional) */}
+                  <div className="flex items-center gap-1.5 pl-2 sm:border-l sm:border-ink-200 my-0.5">
+                    <span className="text-[11px] font-semibold text-ink-700 whitespace-nowrap">Exact Date:</span>
+                    <input
+                      type="date"
+                      value={deliveryDateFilter}
+                      onChange={(e) => handleDateChange(e.target.value)}
+                      className={`h-6 text-[11px] px-1.5 py-0 rounded border cursor-pointer ${
+                        deliveryDateFilter
+                          ? "bg-brand-50 border-brand-400 text-brand-900 font-bold"
+                          : "bg-white border-ink-300 text-ink-900"
+                      } focus:border-brand-500 focus:outline-hidden`}
+                      title="Optional: Filter by exact delivery date"
+                    />
+                  </div>
+
+                  {/* Active Period / Year Label & Reset Button */}
+                  {hasActiveDateFilter && (
+                    <div className="ml-auto flex items-center gap-1.5">
+                      <span className="text-[10.5px] font-medium text-brand-900 bg-brand-50 border border-brand-300 rounded px-2 py-0.5">
+                        {deliveryDateFilter
+                          ? `📅 Exact: ${deliveryDateFilter}`
+                          : datePreset !== "ALL"
+                          ? `📅 ${getPresetDateRange(datePreset)?.label}`
+                          : `📅 Year: ${yearFilter}`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleClearAllDates}
+                        className="h-6 px-2 text-[10px] font-semibold text-red-700 hover:text-red-800 bg-red-50 hover:bg-red-100 rounded border border-red-200 transition-colors flex items-center gap-1 cursor-pointer"
+                        title="Clear all date, month, and year filters"
+                      >
+                        <X className="h-3 w-3" />
+                        Reset Dates
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 

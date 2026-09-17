@@ -137,7 +137,10 @@ export class D365Service {
     status = "",
     limit = 50,
     skip = 0,
-    deliveryDate = ""
+    deliveryDate = "",
+    fromDate = "",
+    toDate = "",
+    year = ""
   ): Promise<D365SearchResult> {
     const config = (await getActiveConfig()).d365;
     const targetCompany = (company || config.company || "HSIN").trim();
@@ -146,7 +149,10 @@ export class D365Service {
     const targetStatus = status.trim().toLowerCase();
     const cleanQ = query.trim();
     const cleanDate = deliveryDate.trim();
-    const cacheKey = `${targetCompany.toUpperCase()}|${targetStatus}|${cleanQ.toLowerCase()}|${cleanDate.toLowerCase()}|${limit}|${skip}`;
+    const cleanFromDate = fromDate.trim();
+    const cleanToDate = toDate.trim();
+    const cleanYear = year.trim();
+    const cacheKey = `${targetCompany.toUpperCase()}|${targetStatus}|${cleanQ.toLowerCase()}|${cleanDate.toLowerCase()}|${cleanFromDate}|${cleanToDate}|${cleanYear}|${limit}|${skip}`;
     const now = Date.now();
     const cached = poSearchCache.get(cacheKey);
     if (cached && now < cached.expiresAt) {
@@ -181,6 +187,31 @@ export class D365Service {
       return ALLOWED_STATUS_SET.has(s);
     };
 
+    const matchesDate = (poDateStr?: string) => {
+      const hasDateFilter = Boolean(cleanDate || cleanFromDate || cleanToDate || (cleanYear && cleanYear !== "ALL"));
+      if (!hasDateFilter) return true;
+      if (!poDateStr) return false;
+
+      const poDate = poDateStr.slice(0, 10).toLowerCase();
+
+      // Specific single delivery date (exact or prefix match)
+      if (cleanDate) {
+        const dLow = cleanDate.toLowerCase();
+        if (!poDate.startsWith(dLow) && !poDate.includes(dLow)) return false;
+      }
+
+      // Year filter (e.g. 2024, 2026)
+      if (cleanYear && cleanYear !== "ALL") {
+        if (!poDate.startsWith(cleanYear.toLowerCase())) return false;
+      }
+
+      // Date range fromDate / toDate
+      if (cleanFromDate && poDate < cleanFromDate.toLowerCase()) return false;
+      if (cleanToDate && poDate > cleanToDate.toLowerCase()) return false;
+
+      return true;
+    };
+
     if (config.mode === "mock") {
       let list = [...MOCK_PRODUCTION_ORDERS];
       if (!isAllCompanies) {
@@ -193,11 +224,8 @@ export class D365Service {
       // Filter by production status
       list = list.filter((p) => matchesStatus(p.ProductionOrderStatus));
 
-      // Filter by delivery date if provided
-      if (cleanDate) {
-        const dLow = cleanDate.toLowerCase();
-        list = list.filter((po) => po.DeliveryDate && (po.DeliveryDate.toLowerCase().startsWith(dLow) || po.DeliveryDate.toLowerCase().includes(dLow)));
-      }
+      // Filter by delivery date / month range / year
+      list = list.filter((po) => matchesDate(po.DeliveryDate));
 
       if (cleanQ) {
         list = list.filter((po) => matchesSearchQuery(po, cleanQ));
@@ -255,7 +283,15 @@ export class D365Service {
       }
 
       let dateODataClause = "";
-      if (cleanDate) {
+      if (cleanFromDate && cleanToDate) {
+        dateODataClause = `DeliveryDate ge ${cleanFromDate}T00:00:00Z and DeliveryDate le ${cleanToDate}T23:59:59Z`;
+      } else if (cleanFromDate) {
+        dateODataClause = `DeliveryDate ge ${cleanFromDate}T00:00:00Z`;
+      } else if (cleanToDate) {
+        dateODataClause = `DeliveryDate le ${cleanToDate}T23:59:59Z`;
+      } else if (cleanYear && cleanYear !== "ALL") {
+        dateODataClause = `startswith(DeliveryDate, '${cleanYear}')`;
+      } else if (cleanDate) {
         dateODataClause = `startswith(DeliveryDate, '${cleanDate}')`;
       }
 
@@ -421,13 +457,8 @@ export class D365Service {
       // 1. Filter by production status (Released, Started, Reported as finished, End/Completed)
       let filteredOrders = normalized.filter((po) => matchesStatus(po.ProductionOrderStatus));
 
-      // 2. Filter by delivery date if specified
-      if (cleanDate) {
-        const dLow = cleanDate.toLowerCase();
-        filteredOrders = filteredOrders.filter(
-          (po) => po.DeliveryDate && (po.DeliveryDate.toLowerCase().startsWith(dLow) || po.DeliveryDate.toLowerCase().includes(dLow))
-        );
-      }
+      // 2. Filter by delivery date / month range / year
+      filteredOrders = filteredOrders.filter((po) => matchesDate(po.DeliveryDate));
 
       // 3. Filter by search query with matchesSearchQuery (space insensitive, partial digits, tokens)
       if (cleanQ) {
