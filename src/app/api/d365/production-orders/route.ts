@@ -8,10 +8,11 @@ export const GET = route(async (req) => {
   const q = req.nextUrl.searchParams.get("q") || "";
   const company = req.nextUrl.searchParams.get("company") || "";
   const status = req.nextUrl.searchParams.get("status") || "";
+  const deliveryDate = req.nextUrl.searchParams.get("deliveryDate") || "";
   const limitParam = Number(req.nextUrl.searchParams.get("limit") || "50");
   const limit = Math.min(Math.max(1, limitParam), 100);
   const skip = Math.max(0, Number(req.nextUrl.searchParams.get("skip") || "0"));
-  const result = await D365Service.searchProductionOrders(q, company, status, limit, skip);
+  const result = await D365Service.searchProductionOrders(q, company, status, limit, skip, deliveryDate);
 
   const orders = result.orders || [];
   if (orders.length > 0) {
@@ -70,11 +71,13 @@ export const GET = route(async (req) => {
     mode: result.mode,
     company: company || "HSIN",
     status,
+    deliveryDate,
     orders,
     total: result.total,
     hasMore: result.hasMore,
     limit,
     skip,
+    nextSkip: result.nextSkip,
     error: result.error,
   });
 });

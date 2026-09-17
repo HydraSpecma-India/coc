@@ -46,6 +46,8 @@ import {
   ShoppingCart,
   Tag,
   ChevronDown,
+  Calendar,
+  X,
 } from "lucide-react";
 
 interface TemplateSummary {
@@ -299,6 +301,7 @@ export function CocWizard({
   }, []);
 
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL_ACTIVE");
+  const [deliveryDateFilter, setDeliveryDateFilter] = useState<string>("");
   const [showOnlyPending, setShowOnlyPending] = useState<boolean>(true);
   const [poQuery, setPoQuery] = useState("");
   const [searchResults, setSearchResults] = useState<D365ProductionOrder[]>([]);
@@ -309,9 +312,10 @@ export function CocWizard({
   const [hasMoreOrders, setHasMoreOrders] = useState<boolean>(false);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [totalAvailable, setTotalAvailable] = useState<number | undefined>(undefined);
+  const rawSkipRef = useRef<number>(0);
 
-  // When searching for an explicit keyword/number (e.g. 4288 or maintank), do not hide matching orders with showOnlyPending
-  const isSearchingExplicit = Boolean(poQuery && poQuery.trim().length > 0);
+  // When searching for an explicit keyword/number or filtering by delivery date, do not hide matching orders with showOnlyPending
+  const isSearchingExplicit = Boolean((poQuery && poQuery.trim().length > 0) || deliveryDateFilter);
   const fullyCertifiedCount = searchResults.filter((o) => o.isFullyCertified).length;
   const displayedResults = searchResults.filter(
     (order) => !showOnlyPending || !order.isFullyCertified || isSearchingExplicit
@@ -868,25 +872,28 @@ export function CocWizard({
 
   // Initial PO search
   useEffect(() => {
-    searchOrders("", defaultCompany, "ALL_ACTIVE", false);
+    searchOrders("", defaultCompany, "ALL_ACTIVE", "", false);
   }, []);
 
   const searchOrders = async (
     q: string,
     comp = selectedCompany,
     st = selectedStatus,
+    dt = deliveryDateFilter,
     isAppend = false
   ) => {
     if (isAppend) {
       setLoadingMore(true);
     } else {
       setSearching(true);
+      rawSkipRef.current = 0;
     }
     setD365Error(null);
     try {
-      const skipCount = isAppend ? searchResults.length : 0;
+      const skipCount = isAppend ? rawSkipRef.current : 0;
       const compParam = comp ? `&company=${encodeURIComponent(comp)}` : "";
       const statusParam = st ? `&status=${encodeURIComponent(st)}` : "";
+      const dateParam = dt ? `&deliveryDate=${encodeURIComponent(dt)}` : "";
       const res = await api<{
         ok: boolean;
         mode?: "mock" | "live";
@@ -895,12 +902,20 @@ export function CocWizard({
         hasMore?: boolean;
         limit?: number;
         skip?: number;
+        nextSkip?: number;
         error?: string;
       }>(
-        `/api/d365/production-orders?q=${encodeURIComponent(q)}${compParam}${statusParam}&limit=${pageSize}&skip=${skipCount}`
+        `/api/d365/production-orders?q=${encodeURIComponent(q)}${compParam}${statusParam}${dateParam}&limit=${pageSize}&skip=${skipCount}`
       );
       if (res.mode) setD365Mode(res.mode);
       if (res.error) setD365Error(res.error);
+
+      // Track next skip position in raw D365 dataset
+      if (typeof res.nextSkip === "number") {
+        rawSkipRef.current = res.nextSkip;
+      } else {
+        rawSkipRef.current = skipCount + (res.orders?.length || 0);
+      }
 
       const incomingOrders = res.orders || [];
       if (isAppend) {
@@ -919,7 +934,7 @@ export function CocWizard({
         }
       }
 
-      setHasMoreOrders(Boolean(res.hasMore ?? (incomingOrders.length === pageSize)));
+      setHasMoreOrders(Boolean(res.hasMore ?? (incomingOrders.length >= pageSize)));
       if (res.total !== undefined) {
         setTotalAvailable(res.total);
       }
@@ -935,18 +950,23 @@ export function CocWizard({
 
   const handleLoadMore = () => {
     if (!loadingMore && hasMoreOrders) {
-      searchOrders(poQuery, selectedCompany, selectedStatus, true);
+      searchOrders(poQuery, selectedCompany, selectedStatus, deliveryDateFilter, true);
     }
   };
 
   const handleCompanyChange = (newCompany: string) => {
     setSelectedCompany(newCompany);
-    searchOrders(poQuery, newCompany, selectedStatus, false);
+    searchOrders(poQuery, newCompany, selectedStatus, deliveryDateFilter, false);
   };
 
   const handleStatusChange = (newStatus: string) => {
     setSelectedStatus(newStatus);
-    searchOrders(poQuery, selectedCompany, newStatus, false);
+    searchOrders(poQuery, selectedCompany, newStatus, deliveryDateFilter, false);
+  };
+
+  const handleDateChange = (newDate: string) => {
+    setDeliveryDateFilter(newDate);
+    searchOrders(poQuery, selectedCompany, selectedStatus, newDate, false);
   };
 
   // Canvas drawing handlers
@@ -1459,12 +1479,12 @@ export function CocWizard({
                     <Input
                       value={poQuery}
                       onChange={(e) => setPoQuery(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && searchOrders(poQuery, selectedCompany, selectedStatus)}
+                      onKeyDown={(e) => e.key === "Enter" && searchOrders(poQuery, selectedCompany, selectedStatus, deliveryDateFilter, false)}
                       placeholder="Search product number, order, or customer part (e.g. 29110478R05, HSIN-000011, 160072)..."
                       className="pl-9"
                     />
                   </div>
-                  <Button loading={searching} onClick={() => searchOrders(poQuery, selectedCompany, selectedStatus)}>
+                  <Button loading={searching} onClick={() => searchOrders(poQuery, selectedCompany, selectedStatus, deliveryDateFilter, false)}>
                     Search D365
                   </Button>
                   <Button
@@ -1501,7 +1521,7 @@ export function CocWizard({
                   </span>
                 </div>
 
-                {/* Production Order Status Filter (Released, Started, Reported as finished, End only - sorted last to first) */}
+                {/* Production Order Status & Delivery Date Filters */}
                 <div className="flex items-center gap-1.5 text-xs text-ink-600 pt-2 border-t border-ink-100 flex-wrap">
                   <div className="flex items-center gap-1 text-[11px] font-semibold text-ink-700 mr-1">
                     <Filter className="h-3.5 w-3.5 text-brand-600" />
@@ -1528,6 +1548,30 @@ export function CocWizard({
                       {st.label}
                     </button>
                   ))}
+
+                  {/* Delivery Date Filter (Optional) */}
+                  <div className="flex items-center gap-1.5 pl-2 sm:border-l sm:border-ink-200 my-0.5">
+                    <Calendar className="h-3.5 w-3.5 text-brand-600 shrink-0" />
+                    <span className="text-[11px] font-semibold text-ink-700 whitespace-nowrap">Delivery Date:</span>
+                    <input
+                      type="date"
+                      value={deliveryDateFilter}
+                      onChange={(e) => handleDateChange(e.target.value)}
+                      className="h-6 text-[11px] px-1.5 py-0 rounded border border-ink-300 bg-white text-ink-900 focus:border-brand-500 focus:outline-hidden cursor-pointer"
+                      title="Optional: Filter by Production Delivery Date"
+                    />
+                    {deliveryDateFilter && (
+                      <button
+                        type="button"
+                        onClick={() => handleDateChange("")}
+                        className="h-6 px-1.5 text-[10px] font-medium text-ink-600 hover:text-red-600 bg-ink-100 hover:bg-red-50 rounded border border-ink-200 transition-colors flex items-center gap-0.5 cursor-pointer"
+                        title="Clear delivery date filter"
+                      >
+                        <X className="h-2.5 w-2.5" />
+                        Clear
+                      </button>
+                    )}
+                  </div>
                   <div className="ml-auto flex items-center gap-2">
                     <button
                       type="button"
@@ -1895,6 +1939,12 @@ export function CocWizard({
                             <div className="truncate">
                               Qty: <span className="font-bold text-ink-900">{order.Quantity} {order.UnitOfMeasure || "Pcs"}</span>
                             </div>
+                            {order.DeliveryDate && (
+                              <div className="truncate col-span-2 text-ink-500 flex items-center gap-1">
+                                <Calendar className="h-2.5 w-2.5 text-ink-400 shrink-0" />
+                                <span>Del: <strong className="text-ink-800">{order.DeliveryDate.slice(0, 10)}</strong></span>
+                              </div>
+                            )}
                           </div>
                         </div>
 

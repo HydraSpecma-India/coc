@@ -11,6 +11,7 @@ export interface D365SearchResult {
   hasMore?: boolean;
   limit?: number;
   skip?: number;
+  nextSkip?: number;
   error?: string;
 }
 
@@ -135,7 +136,8 @@ export class D365Service {
     company = "",
     status = "",
     limit = 50,
-    skip = 0
+    skip = 0,
+    deliveryDate = ""
   ): Promise<D365SearchResult> {
     const config = (await getActiveConfig()).d365;
     const targetCompany = (company || config.company || "HSIN").trim();
@@ -143,7 +145,8 @@ export class D365Service {
 
     const targetStatus = status.trim().toLowerCase();
     const cleanQ = query.trim();
-    const cacheKey = `${targetCompany.toUpperCase()}|${targetStatus}|${cleanQ.toLowerCase()}|${limit}|${skip}`;
+    const cleanDate = deliveryDate.trim();
+    const cacheKey = `${targetCompany.toUpperCase()}|${targetStatus}|${cleanQ.toLowerCase()}|${cleanDate.toLowerCase()}|${limit}|${skip}`;
     const now = Date.now();
     const cached = poSearchCache.get(cacheKey);
     if (cached && now < cached.expiresAt) {
@@ -190,6 +193,12 @@ export class D365Service {
       // Filter by production status
       list = list.filter((p) => matchesStatus(p.ProductionOrderStatus));
 
+      // Filter by delivery date if provided
+      if (cleanDate) {
+        const dLow = cleanDate.toLowerCase();
+        list = list.filter((po) => po.DeliveryDate && (po.DeliveryDate.toLowerCase().startsWith(dLow) || po.DeliveryDate.toLowerCase().includes(dLow)));
+      }
+
       if (cleanQ) {
         list = list.filter((po) => matchesSearchQuery(po, cleanQ));
       }
@@ -200,6 +209,7 @@ export class D365Service {
       const total = list.length;
       const sliced = list.slice(skip, skip + limit);
       const hasMore = skip + limit < total;
+      const nextSkip = skip + sliced.length;
 
       const resObj: D365SearchResult = {
         mode: "mock",
@@ -208,6 +218,7 @@ export class D365Service {
         hasMore,
         limit,
         skip,
+        nextSkip,
       };
       setBoundedCache(poSearchCache, cacheKey, { data: resObj, expiresAt: now + 30_000 });
       return resObj;
@@ -229,7 +240,28 @@ export class D365Service {
 
       const companyClause = !isAllCompanies ? `dataAreaId eq '${targetCompany.toLowerCase()}'` : "";
 
-      const fetchPageSize = Math.max(limit, 50);
+      // Construct OData status filter clause when applicable
+      let statusODataClause = "";
+      if (targetStatus && targetStatus !== "all" && targetStatus !== "all_active") {
+        if (targetStatus === "released") {
+          statusODataClause = "ProductionOrderStatus eq 'Released'";
+        } else if (targetStatus === "started") {
+          statusODataClause = "ProductionOrderStatus eq 'Started'";
+        } else if (targetStatus === "reportedfinished" || targetStatus === "reported as finished") {
+          statusODataClause = "ProductionOrderStatus eq 'ReportedFinished'";
+        } else if (targetStatus === "completed" || targetStatus === "end" || targetStatus === "ended") {
+          statusODataClause = "(ProductionOrderStatus eq 'Completed' or ProductionOrderStatus eq 'Ended')";
+        }
+      }
+
+      let dateODataClause = "";
+      if (cleanDate) {
+        dateODataClause = `startswith(DeliveryDate, '${cleanDate}')`;
+      }
+
+      const baseFilters = [companyClause, statusODataClause, dateODataClause].filter(Boolean).join(" and ");
+
+      const fetchPageSize = Math.max(limit, 100);
       const tryODataFetch = async (filterString: string, useOrder = true, top = fetchPageSize, skipCount = skip) => {
         const filterClause = filterString ? `&$filter=${filterString}` : "";
         const orderClause = useOrder ? `&$orderby=ProductionOrderNumber desc` : "";
@@ -248,21 +280,30 @@ export class D365Service {
       let res: Response | null = null;
 
       if (!cleanODataQ) {
-        // No search query: fetch by company with orderby desc (last to first)
-        res = await tryODataFetch(companyClause, true, fetchPageSize, skip);
-        if (!res.ok) {
-          res = await tryODataFetch(companyClause, false, fetchPageSize, skip);
+        // No search query: try with company + status + date clauses
+        if (baseFilters) {
+          res = await tryODataFetch(baseFilters, true, fetchPageSize, skip);
+          if (!res.ok) {
+            res = await tryODataFetch(baseFilters, false, fetchPageSize, skip);
+          }
+        }
+        // If specific clauses returned 400 or failed, fall back to companyClause alone
+        if (!res || !res.ok) {
+          res = await tryODataFetch(companyClause, true, fetchPageSize, skip);
+          if (!res || !res.ok) {
+            res = await tryODataFetch(companyClause, false, fetchPageSize, skip);
+          }
         }
       } else {
         // Query provided: Candidate 1: Substring search with contains (matches partial digits like 0049, 4288)
         const qContains = `(contains(ProductionOrderNumber, '${cleanODataQ}') or contains(ItemNumber, '${cleanODataQ}'))`;
-        const filterContains = companyClause ? `${companyClause} and ${qContains}` : qContains;
+        const filterContains = [baseFilters, qContains].filter(Boolean).join(" and ");
         res = await tryODataFetch(filterContains, true, fetchPageSize, skip);
 
         // If Candidate 1 failed or returned 0, try Candidate 2: startswith
         if (!res.ok || (await res.clone().json().then((j) => (j.value || []).length === 0).catch(() => true))) {
           const qStartsWith = `(startswith(ProductionOrderNumber, '${cleanODataQ}') or startswith(ItemNumber, '${cleanODataQ}'))`;
-          const filterStarts = companyClause ? `${companyClause} and ${qStartsWith}` : qStartsWith;
+          const filterStarts = [baseFilters, qStartsWith].filter(Boolean).join(" and ");
           const resStarts = await tryODataFetch(filterStarts, true, fetchPageSize, skip);
           if (resStarts.ok) {
             const jStarts = await resStarts.clone().json().catch(() => ({ value: [] }));
@@ -275,7 +316,7 @@ export class D365Service {
         // If Candidate 2 failed or returned 0, try Candidate 3: exact match eq
         if (!res.ok || (await res.clone().json().then((j) => (j.value || []).length === 0).catch(() => true))) {
           const qCandidate1 = `(ItemNumber eq '${cleanODataQ}' or ProductionOrderNumber eq '${cleanODataQ}')`;
-          const filter1 = companyClause ? `${companyClause} and ${qCandidate1}` : qCandidate1;
+          const filter1 = [baseFilters, qCandidate1].filter(Boolean).join(" and ");
           const res1 = await tryODataFetch(filter1, false, fetchPageSize, skip);
           if (res1.ok) {
             const j1 = await res1.clone().json().catch(() => ({ value: [] }));
@@ -380,13 +421,23 @@ export class D365Service {
       // 1. Filter by production status (Released, Started, Reported as finished, End/Completed)
       let filteredOrders = normalized.filter((po) => matchesStatus(po.ProductionOrderStatus));
 
-      // 2. If user searched, also filter in-memory with matchesSearchQuery (space insensitive, partial digits, tokens)
+      // 2. Filter by delivery date if specified
+      if (cleanDate) {
+        const dLow = cleanDate.toLowerCase();
+        filteredOrders = filteredOrders.filter(
+          (po) => po.DeliveryDate && (po.DeliveryDate.toLowerCase().startsWith(dLow) || po.DeliveryDate.toLowerCase().includes(dLow))
+        );
+      }
+
+      // 3. Filter by search query with matchesSearchQuery (space insensitive, partial digits, tokens)
       if (cleanQ) {
         filteredOrders = filteredOrders.filter((po) => matchesSearchQuery(po, cleanQ));
       }
 
-      // 3. Sort "last to first" (descending order number)
+      // 4. Sort "last to first" (descending order number)
       filteredOrders.sort((a, b) => b.ProductionOrder.localeCompare(a.ProductionOrder, undefined, { numeric: true, sensitivity: "base" }));
+
+      const nextSkip = skip + rawList.length;
 
       const resObj: D365SearchResult = {
         mode: "live",
@@ -394,6 +445,7 @@ export class D365Service {
         hasMore: hasODataNext || rawList.length >= fetchPageSize,
         limit,
         skip,
+        nextSkip,
       };
       setBoundedCache(poSearchCache, cacheKey, { data: resObj, expiresAt: now + 30_000 });
       return resObj;
