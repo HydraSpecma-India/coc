@@ -282,20 +282,65 @@ export function CocWizard({
     if (!cleanItem) return;
     setLoadingSalesOrders(true);
     setIsCustomSO(false);
+    const targetOrder = currentPO || selectedPO;
+    const refSO = (targetOrder?.SalesOrder || "").trim();
+
     try {
       const compParam = company && company !== "ALL" ? `&company=${encodeURIComponent(company)}` : "";
+      const soParam = refSO ? `&salesOrder=${encodeURIComponent(refSO)}` : "";
       const res = await api<{
         ok: boolean;
         mode?: "mock" | "live";
         salesOrders: D365SalesOrderLine[];
         error?: string;
-      }>(`/api/d365/sales-orders?itemNumber=${encodeURIComponent(cleanItem)}${compParam}`);
+      }>(`/api/d365/sales-orders?itemNumber=${encodeURIComponent(cleanItem)}${compParam}${soParam}`);
 
-      const list = res.salesOrders || [];
+      let list = res.salesOrders || [];
+
+      // If reference sales order is specified on the production order, show ONLY the reference order line(s) matching the same item
+      if (refSO) {
+        const matchingRef = list.filter(
+          (so) =>
+            so.SalesOrder.toLowerCase() === refSO.toLowerCase() &&
+            so.ItemNumber.toLowerCase() === cleanItem.toLowerCase()
+        );
+        if (matchingRef.length > 0) {
+          list = matchingRef;
+        } else {
+          // If backend didn't return the exact line, construct the reference sales order line using the production order's context
+          const rawCust = targetOrder?.DeliveryAddressName || targetOrder?.CustomerName || "";
+          const custName =
+            rawCust && !rawCust.toLowerCase().includes("hydraspecma")
+              ? rawCust
+              : company === "HGCN"
+              ? "VESTAS WIND TECHNOLOGY CHINA CO LTD"
+              : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD";
+          list = [
+            {
+              SalesOrder: refSO,
+              LineNumber: targetOrder?.SalesLine || "1.0",
+              ItemNumber: cleanItem,
+              ItemDescription: targetOrder?.ItemDescription || `HydraSpecma Assembly (${cleanItem})`,
+              CustomerAccount: targetOrder?.CustomerAccount || company,
+              CustomerName: custName,
+              DeliveryAddressName: targetOrder?.DeliveryAddressName || custName,
+              CustomerPO: targetOrder?.CustomerPO || "4509008214",
+              ExternalItemNumber: targetOrder?.CustomerPartNumber || "160072",
+              Quantity: targetOrder?.Quantity || 1,
+              UnitOfMeasure: targetOrder?.UnitOfMeasure || "Pcs",
+              DeliveryDate: targetOrder?.DeliveryDate || "",
+              dataAreaId: targetOrder?.dataAreaId || company,
+            },
+          ];
+        }
+      } else {
+        // Must strictly match the same item number
+        list = list.filter((so) => so.ItemNumber.toLowerCase() === cleanItem.toLowerCase());
+      }
+
       setSalesOrders(list);
 
-      const targetOrder = currentPO || selectedPO;
-      const targetSO = targetOrder?.SalesOrder?.trim().toLowerCase();
+      const targetSO = refSO.toLowerCase();
       const matched = (targetSO ? list.find((so) => so.SalesOrder.toLowerCase() === targetSO) : null) || list[0];
 
       if (matched) {
@@ -313,6 +358,7 @@ export function CocWizard({
           return {
             ...prev,
             SalesOrder: matched.SalesOrder,
+            SalesLine: matched.LineNumber || prev.SalesLine || "1.0",
             CustomerPartNumber: extPart,
             CustomerPO: poNum,
             CustomerName: custName,
@@ -334,24 +380,38 @@ export function CocWizard({
     }
   };
 
-  const fetchModalSalesOrders = async (itemNumber: string, company = selectedCompany) => {
+  const fetchModalSalesOrders = async (itemNumber: string, company = selectedCompany, targetSO?: string) => {
     const cleanItem = itemNumber?.trim();
     if (!cleanItem) return;
     setLoadingModalSO(true);
     try {
+      const refSO = (targetSO || manualOrder.SalesOrder || "").trim();
       const compParam = company && company !== "ALL" ? `&company=${encodeURIComponent(company)}` : "";
+      const soParam = refSO ? `&salesOrder=${encodeURIComponent(refSO)}` : "";
       const res = await api<{
         ok: boolean;
         mode?: "mock" | "live";
         salesOrders: D365SalesOrderLine[];
         error?: string;
-      }>(`/api/d365/sales-orders?itemNumber=${encodeURIComponent(cleanItem)}${compParam}`);
+      }>(`/api/d365/sales-orders?itemNumber=${encodeURIComponent(cleanItem)}${compParam}${soParam}`);
 
-      const list = res.salesOrders || [];
+      let list = res.salesOrders || [];
+      if (refSO) {
+        const matchingRef = list.filter(
+          (so) =>
+            so.SalesOrder.toLowerCase() === refSO.toLowerCase() &&
+            so.ItemNumber.toLowerCase() === cleanItem.toLowerCase()
+        );
+        if (matchingRef.length > 0) {
+          list = matchingRef;
+        }
+      } else {
+        list = list.filter((so) => so.ItemNumber.toLowerCase() === cleanItem.toLowerCase());
+      }
       setModalSalesOrders(list);
 
       if (list.length > 0) {
-        const matched = list.find((so) => so.SalesOrder.toLowerCase() === manualOrder.SalesOrder?.toLowerCase()) || list[0];
+        const matched = list.find((so) => so.SalesOrder.toLowerCase() === (refSO || manualOrder.SalesOrder)?.toLowerCase()) || list[0];
         if (matched) {
           const rawCust = matched.DeliveryAddressName || matched.CustomerName || "";
           const custName = (rawCust && !rawCust.toLowerCase().includes("hydraspecma"))
@@ -361,6 +421,7 @@ export function CocWizard({
           setManualOrder((prev) => ({
             ...prev,
             SalesOrder: matched.SalesOrder,
+            SalesLine: matched.LineNumber || prev.SalesLine || "1.0",
             CustomerPartNumber: matched.ExternalItemNumber || prev.CustomerPartNumber || "160072",
             CustomerPO: matched.CustomerPO || prev.CustomerPO,
             CustomerName: custName,
@@ -1744,10 +1805,10 @@ export function CocWizard({
                       <div className="flex items-center justify-between">
                         <label className="text-xs font-bold text-ink-800 flex items-center gap-1.5">
                           <ShoppingCart className="h-3.5 w-3.5 text-brand-600" />
-                          Sales Order Number (Cross-checked by Item: {selectedPO.ItemNumber})
+                          Sales Order Reference (Item: {selectedPO.ItemNumber})
                         </label>
                         <span className="text-[11px] text-brand-700 font-medium">
-                          {loadingSalesOrders ? "Querying D365..." : `${salesOrders.length} matching order(s)`}
+                          {loadingSalesOrders ? "Querying D365..." : `${salesOrders.length} reference line(s)`}
                         </span>
                       </div>
 
@@ -1770,7 +1831,7 @@ export function CocWizard({
                             onClick={() => setIsCustomSO(false)}
                             className="text-xs px-2.5 shrink-0"
                           >
-                            Back to List
+                            Back to Reference List
                           </Button>
                         </div>
                       ) : (
@@ -1791,7 +1852,7 @@ export function CocWizard({
                             }
                             return (
                               <option key={so.SalesOrder} value={so.SalesOrder}>
-                                {prefix} {so.SalesOrder} &bull; {(so.DeliveryAddressName || so.CustomerName)?.slice(0, 20)} &bull; Cust Part: {so.ExternalItemNumber || "160072"} &bull; [{statusText}]
+                                {prefix} Ref SO: {so.SalesOrder} &bull; Item: {so.ItemNumber} &bull; {(so.DeliveryAddressName || so.CustomerName)?.slice(0, 20)} &bull; Cust Part: {so.ExternalItemNumber || "160072"} &bull; [{statusText}]
                               </option>
                             );
                           })}
@@ -1799,7 +1860,7 @@ export function CocWizard({
                         </Select>
                       )}
                       <p className="text-[11px] text-ink-500">
-                        Cross-referenced between Production Item Number <span className="font-mono font-medium text-ink-700">{selectedPO.ItemNumber}</span> and Sales Order Line items in D365.
+                        Showing sales order reference line matching production order Item Number <span className="font-mono font-medium text-ink-700">{selectedPO.ItemNumber}</span>.
                       </p>
 
                       {/* Active Sales Order Allocation Box */}
@@ -2447,14 +2508,14 @@ export function CocWizard({
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-ink-800 flex items-center gap-1.5">
                       <ShoppingCart className="h-3.5 w-3.5 text-brand-600" />
-                      Sales Order Number
+                      Sales Order Reference
                     </label>
                     <span className="text-[11px] text-brand-700 font-medium">
-                      {loadingSalesOrders ? "Querying D365..." : `${salesOrders.length} matching order(s)`}
+                      {loadingSalesOrders ? "Querying D365..." : `${salesOrders.length} reference line(s)`}
                     </span>
                   </div>
                   <div className="text-[10px] text-ink-400 font-mono">
-                    Cross-checked by Item: {selectedPO.ItemNumber}
+                    Item: {selectedPO.ItemNumber} &bull; Ref: {selectedPO.SalesOrder || "None"}
                   </div>
 
                   {isCustomSO ? (
@@ -2497,7 +2558,7 @@ export function CocWizard({
                         }
                         return (
                           <option key={so.SalesOrder} value={so.SalesOrder}>
-                            {prefix} {so.SalesOrder} • {(so.DeliveryAddressName || so.CustomerName)?.slice(0, 16)} • Cust Part: {so.ExternalItemNumber || "160072"} • [{statusText}]
+                            {prefix} Ref SO: {so.SalesOrder} • Item: {so.ItemNumber} • {(so.DeliveryAddressName || so.CustomerName)?.slice(0, 16)} • Cust Part: {so.ExternalItemNumber || "160072"} • [{statusText}]
                           </option>
                         );
                       })}
@@ -2506,7 +2567,7 @@ export function CocWizard({
                   )}
 
                   <p className="text-[10px] text-ink-500 leading-tight">
-                    Cross-referenced between Production Item Number <span className="font-mono font-medium text-ink-700">{selectedPO.ItemNumber}</span> and Sales Order Line items in D365.
+                    Showing reference sales order line matching production order Item Number <span className="font-mono font-medium text-ink-700">{selectedPO.ItemNumber}</span>.
                   </p>
 
                   {/* Active Sales Order Allocation Box */}

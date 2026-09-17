@@ -244,8 +244,23 @@ export class D365Service {
           CustomerPartNumber: String(item.ExternalItemNumber || item.CustomerPartNumber || item.CustomerItemNumber || ""),
           dataAreaId: String(item.dataAreaId || "").toUpperCase(),
           ProductionOrderStatus: String(item.ProductionOrderStatus || item.Status || item.ProdStatus || "Completed"),
-          SalesOrder: String(item.SalesOrder || item.SalesId || ""),
-          SalesLine: String(item.SalesLine || item.SalesLineNumber || item.LineNum || "1.0"),
+          SalesOrder: String(
+            item.InventRefId ||
+            item.ReferenceNumber ||
+            item.SalesOrderNumber ||
+            item.SalesOrder ||
+            item.SalesId ||
+            item.OriginatingSalesOrderNumber ||
+            item.ReferenceSalesOrderNumber ||
+            ""
+          ).trim(),
+          SalesLine: String(
+            item.SalesLineNumber ||
+            item.SalesLine ||
+            item.LineNum ||
+            item.InventRefTransId ||
+            "1.0"
+          ).trim(),
           BatchNumber: String(item.BatchNumber || item.InventBatchId || "HS-B24-0747"),
           SerialNumber: String(item.SerialNumber || item.InventSerialId || item.TopLevelSerialNumber || ""),
           DrawingNumber: String(item.DrawingNumber || `DWG-${finalItem}`),
@@ -332,8 +347,23 @@ export class D365Service {
         CustomerAccount: String(item.CustomerAccount || item.CustAccount || "HSIN"),
         CustomerName: String(item.CustomerName || item.CustName || "HydraSpecma India Pvt Ltd"),
         CustomerPO: String(item.CustomerPO || item.PurchOrderFormNum || ""),
-        SalesOrder: String(item.SalesOrder || item.SalesId || ""),
-        SalesLine: String(item.SalesLine || "1.0"),
+        SalesOrder: String(
+          item.InventRefId ||
+          item.ReferenceNumber ||
+          item.SalesOrderNumber ||
+          item.SalesOrder ||
+          item.SalesId ||
+          item.OriginatingSalesOrderNumber ||
+          item.ReferenceSalesOrderNumber ||
+          ""
+        ).trim(),
+        SalesLine: String(
+          item.SalesLineNumber ||
+          item.SalesLine ||
+          item.LineNum ||
+          item.InventRefTransId ||
+          "1.0"
+        ).trim(),
         BatchNumber: String(item.BatchNumber || item.InventBatchId || ""),
         SerialNumber: String(item.SerialNumber || ""),
         DrawingNumber: String(item.DrawingNumber || ""),
@@ -389,7 +419,8 @@ export class D365Service {
   static async getSalesOrdersByItem(
     itemNumber: string,
     company = "",
-    statusFilter = "Open"
+    statusFilter = "Open",
+    salesOrder = ""
   ): Promise<{ mode: "mock" | "live"; salesOrders: D365SalesOrderLine[]; error?: string }> {
     const config = (await getActiveConfig()).d365;
     const cleanItem = (itemNumber || "").trim();
@@ -401,7 +432,7 @@ export class D365Service {
     }
 
     if (config.mode === "mock") {
-      let salesOrders = getMockSalesOrders(cleanItem, targetCompany);
+      let salesOrders = getMockSalesOrders(cleanItem, targetCompany, salesOrder);
       if (statusFilter.toLowerCase() === "open") {
         salesOrders = salesOrders.filter(
           (so) => !so.LineStatus || !/invoiced|canceled|cancelled/i.test(so.LineStatus)
@@ -412,7 +443,7 @@ export class D365Service {
 
     // Live D365FO OData query
     if (!config.baseUrl || !config.clientId || !config.tenantId) {
-      const fallback = getMockSalesOrders(cleanItem, targetCompany);
+      const fallback = getMockSalesOrders(cleanItem, targetCompany, salesOrder);
       return {
         mode: "live",
         salesOrders: fallback,
@@ -423,11 +454,14 @@ export class D365Service {
     try {
       const token = await this.getAccessToken(config);
       const safeItem = cleanItem.replace(/'/g, "''");
+      const safeSO = (salesOrder || "").trim().replace(/'/g, "''");
       const entity = (config.salesOrderEntity || "SalesOrderLines").trim();
 
       const companyClause = !isAllCompanies ? `dataAreaId eq '${targetCompany.toLowerCase()}'` : "";
       const itemClause = `ItemNumber eq '${safeItem}'`;
-      const combinedFilter = companyClause ? `${companyClause} and ${itemClause}` : itemClause;
+      const soClause = safeSO ? `(SalesOrderNumber eq '${safeSO}' or SalesOrder eq '${safeSO}' or SalesId eq '${safeSO}')` : "";
+      const filterParts = [companyClause, itemClause, soClause].filter(Boolean);
+      const combinedFilter = filterParts.join(" and ");
 
       const tryFetchLines = async (filterString: string, entName = entity) => {
         const url = `${config.baseUrl.replace(/\/+$/, "")}/data/${entName}?cross-company=true&$top=50&$filter=${encodeURIComponent(filterString)}`;
@@ -445,7 +479,8 @@ export class D365Service {
 
       // If failed or empty and was filtered by company, try cross-company item query
       if (!res.ok || (await res.clone().json().then((j) => (j.value || []).length === 0).catch(() => true))) {
-        const resCross = await tryFetchLines(itemClause);
+        const itemWithSO = [itemClause, soClause].filter(Boolean).join(" and ");
+        const resCross = await tryFetchLines(itemWithSO || itemClause);
         if (resCross.ok) {
           res = resCross;
         }
@@ -462,7 +497,7 @@ export class D365Service {
       if (!res.ok) {
         const errText = await res.text();
         logger.warn("D365 SalesOrderLines OData query failed, using catalog fallback", { status: res.status, errText });
-        const fallback = getMockSalesOrders(cleanItem, targetCompany);
+        const fallback = getMockSalesOrders(cleanItem, targetCompany, salesOrder);
         return {
           mode: "live",
           salesOrders: fallback,
@@ -531,8 +566,23 @@ export class D365Service {
         );
       }
 
+      // Filter strictly by same item number
+      filteredList = filteredList.filter(
+        (so) => so.ItemNumber.toLowerCase() === cleanItem.toLowerCase()
+      );
+
+      // If reference sales order is specified, filter strictly to that sales order
+      if (salesOrder) {
+        const matchingSO = filteredList.filter(
+          (so) => so.SalesOrder.toLowerCase() === salesOrder.toLowerCase().trim()
+        );
+        if (matchingSO.length > 0) {
+          filteredList = matchingSO;
+        }
+      }
+
       if (filteredList.length === 0) {
-        const fallback = getMockSalesOrders(cleanItem, targetCompany);
+        const fallback = getMockSalesOrders(cleanItem, targetCompany, salesOrder);
         return {
           mode: "live",
           salesOrders: fallback,
@@ -542,7 +592,7 @@ export class D365Service {
       return { mode: "live", salesOrders: filteredList };
     } catch (err) {
       logger.error("D365 getSalesOrdersByItem failed", { itemNumber: cleanItem, error: (err as Error).message });
-      const fallback = getMockSalesOrders(cleanItem, targetCompany);
+      const fallback = getMockSalesOrders(cleanItem, targetCompany, salesOrder);
       return {
         mode: "live",
         salesOrders: fallback,

@@ -8,7 +8,8 @@ export const GET = route(async (req) => {
   const itemNumber = req.nextUrl.searchParams.get("itemNumber") || "";
   const company = req.nextUrl.searchParams.get("company") || "";
   const status = req.nextUrl.searchParams.get("status") || "Open";
-  const result = await D365Service.getSalesOrdersByItem(itemNumber, company, status);
+  const salesOrder = req.nextUrl.searchParams.get("salesOrder") || req.nextUrl.searchParams.get("referenceOrder") || "";
+  const result = await D365Service.getSalesOrdersByItem(itemNumber, company, status, salesOrder);
 
   const salesOrders = result.salesOrders || [];
   if (salesOrders.length > 0) {

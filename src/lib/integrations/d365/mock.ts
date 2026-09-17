@@ -468,17 +468,61 @@ export const MOCK_SALES_ORDER_LINES: D365SalesOrderLine[] = [
   },
 ];
 
-export function getMockSalesOrders(itemNumber: string, company?: string): D365SalesOrderLine[] {
+export function getMockSalesOrders(itemNumber: string, company?: string, salesOrder?: string): D365SalesOrderLine[] {
   const cleanItem = (itemNumber || "").trim().toLowerCase();
   const cleanComp = (company || "").trim().toLowerCase();
+  const cleanSO = (salesOrder || "").trim().toLowerCase();
   const isAllComp = !cleanComp || cleanComp === "all";
 
+  // First priority: exact match on ItemNumber (and SalesOrder if provided)
   let matched = MOCK_SALES_ORDER_LINES.filter((so) => {
     const soItem = so.ItemNumber.toLowerCase();
-    const itemMatch = soItem === cleanItem || cleanItem.includes(soItem) || soItem.includes(cleanItem);
+    const itemMatch = soItem === cleanItem;
     const compMatch = isAllComp || (so.dataAreaId?.toLowerCase() === cleanComp) || (so.CustomerAccount?.toLowerCase().includes(cleanComp));
-    return itemMatch && compMatch;
+    const soMatch = !cleanSO || so.SalesOrder.toLowerCase() === cleanSO;
+    return itemMatch && compMatch && soMatch;
   });
+
+  // Second priority: substring match on ItemNumber only if no exact item matched and no specific SO was requested
+  if (matched.length === 0 && !cleanSO) {
+    matched = MOCK_SALES_ORDER_LINES.filter((so) => {
+      const soItem = so.ItemNumber.toLowerCase();
+      const itemMatch = soItem === cleanItem || cleanItem.includes(soItem) || soItem.includes(cleanItem);
+      const compMatch = isAllComp || (so.dataAreaId?.toLowerCase() === cleanComp) || (so.CustomerAccount?.toLowerCase().includes(cleanComp));
+      return itemMatch && compMatch;
+    });
+  }
+
+  // If a specific reference sales order was requested, return ONLY that reference sales order line
+  if (cleanSO) {
+    if (matched.length === 0) {
+      const comp = !isAllComp ? company!.toUpperCase() : "HSIN";
+      const custName = comp === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD";
+      let derivedCustomerPart = "160072";
+      if (cleanItem.includes("1070.0049") || cleanItem.includes("10700049")) {
+        derivedCustomerPart = "29107156";
+      }
+      matched = [
+        {
+          SalesOrder: salesOrder!.trim(),
+          LineNumber: "1.0",
+          ItemNumber: itemNumber,
+          ItemDescription: `Assembly Specification for ${itemNumber}`,
+          CustomerAccount: comp,
+          CustomerName: custName,
+          CustomerPO: `PO-${cleanSO.slice(-6) || "4509008214"}`,
+          ExternalItemNumber: derivedCustomerPart,
+          Quantity: 100,
+          UnitOfMeasure: "Pcs",
+          DeliveryDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+          dataAreaId: comp,
+        },
+      ];
+    } else {
+      matched = matched.filter((so) => so.SalesOrder.toLowerCase() === cleanSO);
+    }
+    return matched;
+  }
 
   if (matched.length === 0 && cleanItem) {
     const baseCode = cleanItem.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
@@ -505,20 +549,6 @@ export function getMockSalesOrders(itemNumber: string, company?: string): D365Sa
         Quantity: 50,
         UnitOfMeasure: "Pcs",
         DeliveryDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
-        dataAreaId: comp,
-      },
-      {
-        SalesOrder: `SO-${shortCode}-02`,
-        LineNumber: "2.0",
-        ItemNumber: itemNumber,
-        ItemDescription: `Assembly Specification for ${itemNumber}`,
-        CustomerAccount: comp,
-        CustomerName: custName,
-        CustomerPO: `PO-${shortCode}-02`,
-        ExternalItemNumber: derivedCustomerPart,
-        Quantity: 25,
-        UnitOfMeasure: "Pcs",
-        DeliveryDate: new Date(Date.now() + 28 * 86400000).toISOString().slice(0, 10),
         dataAreaId: comp,
       },
     ];
