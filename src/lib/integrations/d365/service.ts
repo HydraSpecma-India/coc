@@ -459,7 +459,7 @@ export class D365Service {
 
       const companyClause = !isAllCompanies ? `dataAreaId eq '${targetCompany.toLowerCase()}'` : "";
       const itemClause = `ItemNumber eq '${safeItem}'`;
-      const soClause = safeSO ? `(SalesOrderNumber eq '${safeSO}' or SalesOrder eq '${safeSO}' or SalesId eq '${safeSO}')` : "";
+      const soClause = safeSO ? `SalesOrderNumber eq '${safeSO}'` : "";
       const filterParts = [companyClause, itemClause, soClause].filter(Boolean);
       const combinedFilter = filterParts.join(" and ");
 

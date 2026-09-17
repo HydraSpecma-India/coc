@@ -337,11 +337,24 @@ export function CocWizard({
   const [loadingSalesOrders, setLoadingSalesOrders] = useState(false);
   const [isCustomSO, setIsCustomSO] = useState(false);
   const [customSOValue, setCustomSOValue] = useState("");
+  const activeSalesOrderQueryRef = useRef<string>("");
 
   // Sales Order selection state for Manual / Custom Order Modal
   const [modalSalesOrders, setModalSalesOrders] = useState<D365SalesOrderLine[]>([]);
   const [loadingModalSO, setLoadingModalSO] = useState(false);
   const [modalIsCustomSO, setModalIsCustomSO] = useState(false);
+  const activeModalSOQueryRef = useRef<string>("");
+
+  // Strictly enforce that only sales orders matching the current active Item Number are visible
+  const currentItemCode = (selectedPO?.ItemNumber || "").trim().toLowerCase();
+  const currentItemSalesOrders = salesOrders.filter(
+    (so) => !currentItemCode || so.ItemNumber.toLowerCase() === currentItemCode
+  );
+
+  const currentModalItemCode = (manualOrder.ItemNumber || "").trim().toLowerCase();
+  const currentModalSalesOrders = modalSalesOrders.filter(
+    (so) => !currentModalItemCode || so.ItemNumber.toLowerCase() === currentModalItemCode
+  );
 
   const fetchSalesOrdersForPO = async (
     itemNumber: string,
@@ -349,11 +362,21 @@ export function CocWizard({
     currentPO?: D365ProductionOrder
   ) => {
     const cleanItem = itemNumber?.trim();
-    if (!cleanItem) return;
-    setLoadingSalesOrders(true);
-    setIsCustomSO(false);
+    if (!cleanItem) {
+      setSalesOrders([]);
+      setLoadingSalesOrders(false);
+      return;
+    }
+
     const targetOrder = currentPO || selectedPO;
     const refSO = (targetOrder?.SalesOrder || "").trim();
+    const queryToken = `${cleanItem}:${company}:${refSO}:${Date.now()}`;
+    activeSalesOrderQueryRef.current = queryToken;
+
+    // Immediately clear previous sales orders to prevent showing stale results from prior product
+    setSalesOrders([]);
+    setLoadingSalesOrders(true);
+    setIsCustomSO(false);
 
     try {
       const compParam = company && company !== "ALL" ? `&company=${encodeURIComponent(company)}` : "";
@@ -365,7 +388,13 @@ export function CocWizard({
         error?: string;
       }>(`/api/d365/sales-orders?itemNumber=${encodeURIComponent(cleanItem)}${compParam}${soParam}`);
 
-      let list = res.salesOrders || [];
+      // If a newer query was initiated while this request was in-flight, discard this stale response
+      if (activeSalesOrderQueryRef.current !== queryToken) return;
+
+      // Filter strictly to ensure every returned order line matches the currently selected item number
+      let list = (res.salesOrders || []).filter(
+        (so) => so.ItemNumber.toLowerCase() === cleanItem.toLowerCase()
+      );
 
       // If reference sales order is specified on the production order, show ONLY the reference order line(s) matching the same item
       if (refSO) {
@@ -403,9 +432,6 @@ export function CocWizard({
             },
           ];
         }
-      } else {
-        // Must strictly match the same item number
-        list = list.filter((so) => so.ItemNumber.toLowerCase() === cleanItem.toLowerCase());
       }
 
       setSalesOrders(list);
@@ -445,17 +471,58 @@ export function CocWizard({
       }
     } catch (e) {
       console.warn("Could not fetch sales orders for item", e);
+      if (activeSalesOrderQueryRef.current === queryToken) {
+        if (refSO) {
+          const rawCust = targetOrder?.DeliveryAddressName || targetOrder?.CustomerName || "";
+          const custName =
+            rawCust && !rawCust.toLowerCase().includes("hydraspecma")
+              ? rawCust
+              : company === "HGCN"
+              ? "VESTAS WIND TECHNOLOGY CHINA CO LTD"
+              : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD";
+          setSalesOrders([
+            {
+              SalesOrder: refSO,
+              LineNumber: targetOrder?.SalesLine || "1.0",
+              ItemNumber: cleanItem,
+              ItemDescription: targetOrder?.ItemDescription || `HydraSpecma Assembly (${cleanItem})`,
+              CustomerAccount: targetOrder?.CustomerAccount || company,
+              CustomerName: custName,
+              DeliveryAddressName: targetOrder?.DeliveryAddressName || custName,
+              CustomerPO: targetOrder?.CustomerPO || "4509008214",
+              ExternalItemNumber: targetOrder?.CustomerPartNumber || "160072",
+              Quantity: targetOrder?.Quantity || 1,
+              UnitOfMeasure: targetOrder?.UnitOfMeasure || "Pcs",
+              DeliveryDate: targetOrder?.DeliveryDate || "",
+              dataAreaId: targetOrder?.dataAreaId || company,
+            },
+          ]);
+        } else {
+          setSalesOrders([]);
+        }
+      }
     } finally {
-      setLoadingSalesOrders(false);
+      if (activeSalesOrderQueryRef.current === queryToken) {
+        setLoadingSalesOrders(false);
+      }
     }
   };
 
   const fetchModalSalesOrders = async (itemNumber: string, company = selectedCompany, targetSO?: string) => {
     const cleanItem = itemNumber?.trim();
-    if (!cleanItem) return;
+    if (!cleanItem) {
+      setModalSalesOrders([]);
+      setLoadingModalSO(false);
+      return;
+    }
+
+    const refSO = (targetSO || manualOrder.SalesOrder || "").trim();
+    const queryToken = `${cleanItem}:${company}:${refSO}:${Date.now()}`;
+    activeModalSOQueryRef.current = queryToken;
+
+    setModalSalesOrders([]);
     setLoadingModalSO(true);
     try {
-      const refSO = (targetSO || manualOrder.SalesOrder || "").trim();
       const compParam = company && company !== "ALL" ? `&company=${encodeURIComponent(company)}` : "";
       const soParam = refSO ? `&salesOrder=${encodeURIComponent(refSO)}` : "";
       const res = await api<{
@@ -465,7 +532,11 @@ export function CocWizard({
         error?: string;
       }>(`/api/d365/sales-orders?itemNumber=${encodeURIComponent(cleanItem)}${compParam}${soParam}`);
 
-      let list = res.salesOrders || [];
+      if (activeModalSOQueryRef.current !== queryToken) return;
+
+      let list = (res.salesOrders || []).filter(
+        (so) => so.ItemNumber.toLowerCase() === cleanItem.toLowerCase()
+      );
       if (refSO) {
         const matchingRef = list.filter(
           (so) =>
@@ -475,8 +546,6 @@ export function CocWizard({
         if (matchingRef.length > 0) {
           list = matchingRef;
         }
-      } else {
-        list = list.filter((so) => so.ItemNumber.toLowerCase() === cleanItem.toLowerCase());
       }
       setModalSalesOrders(list);
 
@@ -502,7 +571,9 @@ export function CocWizard({
     } catch (e) {
       console.warn("Could not fetch modal sales orders", e);
     } finally {
-      setLoadingModalSO(false);
+      if (activeModalSOQueryRef.current === queryToken) {
+        setLoadingModalSO(false);
+      }
     }
   };
 
@@ -576,7 +647,7 @@ export function CocWizard({
       return;
     }
     setIsCustomSO(false);
-    const matched = salesOrders.find((so) => so.SalesOrder === soNumber);
+    const matched = currentItemSalesOrders.find((so) => so.SalesOrder === soNumber) || salesOrders.find((so) => so.SalesOrder === soNumber);
     if (matched) {
       const extPart = matched.ExternalItemNumber || "160072";
       const poNum = matched.CustomerPO || selectedPO?.CustomerPO || "4509008214";
@@ -616,7 +687,7 @@ export function CocWizard({
       return;
     }
     setModalIsCustomSO(false);
-    const matched = modalSalesOrders.find((so) => so.SalesOrder === soNumber);
+    const matched = currentModalSalesOrders.find((so) => so.SalesOrder === soNumber) || modalSalesOrders.find((so) => so.SalesOrder === soNumber);
     if (matched) {
       const rawCust = matched.DeliveryAddressName || matched.CustomerName || "";
       const custName = (rawCust && !rawCust.toLowerCase().includes("hydraspecma"))
@@ -733,6 +804,8 @@ export function CocWizard({
 
   const applySelectedPO = (order: D365ProductionOrder) => {
     setSelectedPO(order);
+    setSalesOrders([]);
+    setLoadingSalesOrders(true);
     const initialExtPart = order.CustomerPartNumber || "160072";
     const rawCust = order.DeliveryAddressName || order.CustomerName || "";
     const custName =
@@ -864,7 +937,7 @@ export function CocWizard({
     const itemDesc = selectedPO.ItemDescription?.trim() || `HydraSpecma Assembly (${itemNum})`;
     const tpl = templateList.find((t) => t.id === selectedTemplateId) || templateList[0];
 
-    const activeSO = salesOrders.find((so) => so.SalesOrder === selectedPO.SalesOrder);
+    const activeSO = currentItemSalesOrders.find((so) => so.SalesOrder === selectedPO.SalesOrder) || salesOrders.find((so) => so.SalesOrder === selectedPO.SalesOrder);
     const rawCust =
       (manualFields.CustomerName && !manualFields.CustomerName.toLowerCase().includes("hydraspecma") ? manualFields.CustomerName : null) ||
       activeSO?.DeliveryAddressName ||
@@ -931,7 +1004,7 @@ export function CocWizard({
     const itemNum = selectedPO.ItemNumber?.trim() || prodOrder;
     const itemDesc = selectedPO.ItemDescription?.trim() || `HydraSpecma Assembly (${itemNum})`;
 
-    const activeSO = salesOrders.find((so) => so.SalesOrder === selectedPO.SalesOrder);
+    const activeSO = currentItemSalesOrders.find((so) => so.SalesOrder === selectedPO.SalesOrder) || salesOrders.find((so) => so.SalesOrder === selectedPO.SalesOrder);
     const rawCust =
       (manualFields.CustomerName && !manualFields.CustomerName.toLowerCase().includes("hydraspecma") ? manualFields.CustomerName : null) ||
       activeSO?.DeliveryAddressName ||
@@ -1496,7 +1569,7 @@ export function CocWizard({
                     {/* Sales Order Dropdown */}
                     <Field
                       label="Sales Order Number *"
-                      hint={loadingModalSO ? "Checking matching SOs in D365..." : `${modalSalesOrders.length} matching sales order(s)`}
+                      hint={loadingModalSO ? "Checking matching SOs in D365..." : `${currentModalSalesOrders.length} matching sales order(s)`}
                     >
                       {modalIsCustomSO ? (
                         <div className="flex gap-1.5">
@@ -1519,11 +1592,11 @@ export function CocWizard({
                         </div>
                       ) : (
                         <Select
-                          value={modalSalesOrders.some((s) => s.SalesOrder === manualOrder.SalesOrder) ? manualOrder.SalesOrder : (modalSalesOrders[0]?.SalesOrder || "__custom__")}
+                          value={currentModalSalesOrders.some((s) => s.SalesOrder === manualOrder.SalesOrder) ? manualOrder.SalesOrder : (currentModalSalesOrders[0]?.SalesOrder || "__custom__")}
                           onChange={(e) => handleSelectModalSalesOrder(e.target.value)}
                           className="font-mono text-xs"
                         >
-                          {modalSalesOrders.map((so) => (
+                          {currentModalSalesOrders.map((so) => (
                             <option key={so.SalesOrder} value={so.SalesOrder}>
                               {so.SalesOrder} — {(so.DeliveryAddressName || so.CustomerName)?.slice(0, 20)} (Cust Part: {so.ExternalItemNumber || "N/A"})
                             </option>
@@ -1908,7 +1981,7 @@ export function CocWizard({
                           Sales Order Reference (Item: {selectedPO.ItemNumber})
                         </label>
                         <span className="text-[11px] text-brand-700 font-medium">
-                          {loadingSalesOrders ? "Querying D365..." : `${salesOrders.length} reference line(s)`}
+                          {loadingSalesOrders ? "Querying D365..." : `${currentItemSalesOrders.length} reference line(s)`}
                         </span>
                       </div>
 
@@ -1936,11 +2009,11 @@ export function CocWizard({
                         </div>
                       ) : (
                         <Select
-                          value={salesOrders.some((s) => s.SalesOrder === selectedPO.SalesOrder) ? selectedPO.SalesOrder : (salesOrders[0]?.SalesOrder || "__custom__")}
+                          value={currentItemSalesOrders.some((s) => s.SalesOrder === selectedPO.SalesOrder) ? selectedPO.SalesOrder : (currentItemSalesOrders[0]?.SalesOrder || "__custom__")}
                           onChange={(e) => handleSelectSalesOrder(e.target.value)}
                           className="font-medium text-xs bg-slate-50 border-brand-200 focus:border-brand-500"
                         >
-                          {salesOrders.map((so) => {
+                          {currentItemSalesOrders.map((so) => {
                             let prefix = "🟢";
                             let statusText = `${so.Quantity} pcs available`;
                             if (so.isFullyAssigned) {
@@ -1965,7 +2038,7 @@ export function CocWizard({
 
                       {/* Active Sales Order Allocation Box */}
                       {(() => {
-                        const activeSO = salesOrders.find((s) => s.SalesOrder === selectedPO.SalesOrder);
+                        const activeSO = currentItemSalesOrders.find((s) => s.SalesOrder === selectedPO.SalesOrder) || salesOrders.find((s) => s.SalesOrder === selectedPO.SalesOrder);
                         if (!activeSO) return null;
                         return (
                           <div className="mt-2.5 rounded-lg border border-brand-200 bg-brand-50/50 p-3 text-xs space-y-2">
@@ -2611,7 +2684,7 @@ export function CocWizard({
                       Sales Order Reference
                     </label>
                     <span className="text-[11px] text-brand-700 font-medium">
-                      {loadingSalesOrders ? "Querying D365..." : `${salesOrders.length} reference line(s)`}
+                      {loadingSalesOrders ? "Querying D365..." : `${currentItemSalesOrders.length} reference line(s)`}
                     </span>
                   </div>
                   <div className="text-[10px] text-ink-400 font-mono">
@@ -2642,11 +2715,11 @@ export function CocWizard({
                     </div>
                   ) : (
                     <Select
-                      value={salesOrders.some((s) => s.SalesOrder === selectedPO.SalesOrder) ? selectedPO.SalesOrder : (salesOrders[0]?.SalesOrder || "__custom__")}
+                      value={currentItemSalesOrders.some((s) => s.SalesOrder === selectedPO.SalesOrder) ? selectedPO.SalesOrder : (currentItemSalesOrders[0]?.SalesOrder || "__custom__")}
                       onChange={(e) => handleSelectSalesOrder(e.target.value)}
                       className="font-medium text-xs bg-slate-50 border-brand-200 focus:border-brand-500 w-full"
                     >
-                      {salesOrders.map((so) => {
+                      {currentItemSalesOrders.map((so) => {
                         let prefix = "🟢";
                         let statusText = `${so.Quantity} pcs available`;
                         if (so.isFullyAssigned) {
@@ -2672,7 +2745,7 @@ export function CocWizard({
 
                   {/* Active Sales Order Allocation Box */}
                   {(() => {
-                    const activeSO = salesOrders.find((s) => s.SalesOrder === selectedPO.SalesOrder);
+                    const activeSO = currentItemSalesOrders.find((s) => s.SalesOrder === selectedPO.SalesOrder) || salesOrders.find((s) => s.SalesOrder === selectedPO.SalesOrder);
                     if (!activeSO) return null;
                     return (
                       <div className="mt-2 rounded-lg border border-brand-200 bg-brand-50/50 p-2.5 text-xs space-y-2">
