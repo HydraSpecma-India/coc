@@ -31,7 +31,7 @@ export default async function Dashboard() {
     <div className="mx-auto max-w-6xl pb-16">
       <PageHeader
         title={`Welcome, ${session.user.name || session.user.email}`}
-        description="Certificate of Conformity automation for HydraSpecma India."
+        description="Certificate of Conformity automation for HydraSpecma."
       />
 
       {dbError && (

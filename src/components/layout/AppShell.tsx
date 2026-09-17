@@ -53,16 +53,20 @@ export function AppShell({ user, d365Mode, storageMode, children }: Props) {
     <div className="flex h-screen overflow-hidden">
       {!isDesigner && (
         <aside className="flex w-64 shrink-0 flex-col border-r border-ink-200 bg-white">
-          <Link href="/" prefetch={true} className="flex h-14 items-center gap-2 border-b border-ink-200 px-4 hover:bg-ink-50 transition-colors">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-400 font-bold text-ink-900">H</div>
+          <Link href="/" prefetch={true} className="flex h-14 items-center gap-2.5 border-b border-ink-200 px-3 hover:bg-ink-50 transition-colors">
+            <img
+              src="/hydraspecma-logo.png"
+              alt="HydraSpecma"
+              className="h-8 w-auto object-contain shrink-0"
+            />
             <div className="min-w-0 flex-1 leading-tight">
               <div className="flex items-center gap-1.5">
-                <span className="text-sm font-semibold text-ink-900">COC Platform</span>
-                <span className="inline-flex items-center rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold text-brand-800 border border-brand-200">
+                <span className="text-xs font-bold text-ink-900 tracking-tight">COC Platform</span>
+                <span className="inline-flex items-center rounded bg-brand-50 px-1 py-0.5 text-[9px] font-bold text-brand-800 border border-brand-200">
                   {APP_VERSION}
                 </span>
               </div>
-              <div className="text-[11px] text-ink-500">HydraSpecma India</div>
+              <div className="text-[11px] font-medium text-ink-500">HydraSpecma</div>
             </div>
           </Link>
           <nav className="flex-1 overflow-y-auto px-3 py-4">

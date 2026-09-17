@@ -18,10 +18,12 @@ export default async function SignInPage({
     <div className="flex min-h-screen items-center justify-center bg-ink-100 p-6">
       <div className="w-full max-w-md rounded-xl border border-ink-200 bg-white p-8 shadow-sm">
         {/* Brand Header */}
-        <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-brand-400 text-xl font-black text-ink-900 shadow-sm">
-            H
-          </div>
+        <div className="mb-6 flex items-center gap-3.5">
+          <img
+            src="/hydraspecma-logo.png"
+            alt="HydraSpecma"
+            className="h-10 w-auto object-contain shrink-0"
+          />
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold tracking-tight text-ink-900">COC Platform</h1>
@@ -29,7 +31,7 @@ export default async function SignInPage({
                 {APP_VERSION}
               </span>
             </div>
-            <p className="text-xs text-ink-500 font-medium">Certificate of Conformity • HydraSpecma India</p>
+            <p className="text-xs text-ink-500 font-medium">Certificate of Conformity • HydraSpecma</p>
           </div>
         </div>
 
