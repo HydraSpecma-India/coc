@@ -6,7 +6,8 @@ export async function POST(req: Request) {
   const session = await requireSession();
   requireRole(session, ["Admin"]);
 
-  const { target } = await req.json();
+  const body = await req.json();
+  const { target, webhookUrl } = body;
   const config = await getActiveConfig();
 
   if (target === "d365") {
@@ -62,14 +63,14 @@ export async function POST(req: Request) {
     if (config.sharepoint.mode === "mock") {
       return NextResponse.json({
         ok: true,
-        message: "Storage is configured for HydraSpecma Cloud Storage. Generated certificates will be safely stored in secure cloud storage (coc-generated bucket).",
+        message: "SharePoint is in mock mode. File uploads will be stored in Supabase storage bucket.",
       });
     }
 
-    if (!config.sharepoint.tenantId || !config.sharepoint.clientId || !config.sharepoint.clientSecret) {
+    if (!config.sharepoint.tenantId || !config.sharepoint.clientId || !config.sharepoint.clientSecret || !config.sharepoint.siteId) {
       return NextResponse.json({
         ok: false,
-        error: "Missing Microsoft Graph credentials: Azure Tenant ID, Client ID, and Client Secret are required.",
+        error: "Missing required SharePoint settings: Tenant ID, Client ID, Client Secret, and Site ID are all required.",
       }, { status: 400 });
     }
 
@@ -109,7 +110,7 @@ export async function POST(req: Request) {
   if (target === "teams") {
     try {
       const { TeamsService } = await import("@/lib/integrations/teams/service");
-      const result = await TeamsService.testConnection();
+      const result = await TeamsService.testConnection(webhookUrl);
       return NextResponse.json({
         ok: true,
         message: result.message,

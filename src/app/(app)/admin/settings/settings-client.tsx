@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   PageHeader,
   Card,
@@ -9,13 +9,14 @@ import {
   Badge,
   Button,
   Input,
+  Select,
   Field,
   Label,
   Alert,
 } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
-import { KeyRound, Database, Share2, Cog, RefreshCw, CheckCircle2, AlertCircle, Hash, Send } from "lucide-react";
+import { KeyRound, Database, Share2, Cog, RefreshCw, CheckCircle2, AlertCircle, Hash, Send, Building2, Plus, Trash2 } from "lucide-react";
 import { NumberSequencesPanel } from "./number-sequences-panel";
 
 interface ConfigState {
@@ -64,6 +65,7 @@ interface ConfigState {
   teams?: {
     enabled: boolean;
     webhookUrl: string;
+    companyWebhooks?: Record<string, string>;
   };
 }
 
@@ -73,6 +75,19 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [availableCompanies, setAvailableCompanies] = useState<{ code: string; name: string }[]>([]);
+  const [newCompanyCode, setNewCompanyCode] = useState("");
+  const [newCompanyWebhook, setNewCompanyWebhook] = useState("");
+
+  useEffect(() => {
+    api<{ ok: boolean; companies: { code: string; name: string }[] }>("/api/d365/companies")
+      .then((res) => {
+        if (res.ok && res.companies) {
+          setAvailableCompanies(res.companies);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const saveConfig = async (section: "entra" | "d365" | "sharepoint" | "app" | "teams") => {
     setSaving(true);
@@ -96,13 +111,14 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
     }
   };
 
-  const testConnection = async (target: "d365" | "sharepoint" | "teams") => {
-    setTesting(target);
+  const testConnection = async (target: "d365" | "sharepoint" | "teams", specificWebhookUrl?: string) => {
+    const testKey = specificWebhookUrl ? `teams-${specificWebhookUrl}` : target;
+    setTesting(testKey);
     setTestResult(null);
     try {
       const res = await api<{ ok: boolean; message?: string; error?: string }>("/api/admin/config/test", {
         method: "POST",
-        json: { target, webhookUrl: target === "teams" ? config.teams?.webhookUrl : undefined },
+        json: { target, webhookUrl: target === "teams" ? (specificWebhookUrl || config.teams?.webhookUrl) : undefined },
       });
       if (res.ok) {
         setTestResult({ ok: true, message: res.message || "Connection succeeded!" });
@@ -683,8 +699,8 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
 
             <div className="space-y-4">
               <Field
-                label="Power Automate / Teams Webhook URL"
-                hint="HTTP POST trigger URL from Power Automate or Teams Incoming Webhook"
+                label="Global / Default Power Automate Webhook URL"
+                hint="Fallback HTTP POST trigger URL used for all companies without a custom webhook"
               >
                 <Input
                   type="url"
@@ -696,11 +712,154 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
                       teams: {
                         enabled: config.teams?.enabled ?? true,
                         webhookUrl: e.target.value,
+                        companyWebhooks: config.teams?.companyWebhooks || {},
                       },
                     })
                   }
                 />
               </Field>
+
+              {/* Company-Specific Teams Webhooks Section */}
+              <div className="pt-4 border-t border-ink-200">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink-900 flex items-center gap-1.5">
+                      <Building2 className="h-4 w-4 text-brand-600" />
+                      Company-Specific Teams Webhooks
+                    </h3>
+                    <p className="text-xs text-ink-500">
+                      Configure separate Microsoft Teams channels for each company / legal entity (e.g. India channel for HSIN, China channel for HGCN). Orders for that company will dispatch directly to its channel. If not configured, it falls back to the Global Webhook above.
+                    </p>
+                  </div>
+                </div>
+
+                {/* List of configured company webhooks */}
+                <div className="space-y-3 mt-3">
+                  {Object.entries(config.teams?.companyWebhooks || {}).map(([compCode, url]) => {
+                    const compMeta = availableCompanies.find((c) => c.code === compCode);
+                    const isTestingThis = testing === `teams-${url}`;
+                    return (
+                      <div key={compCode} className="flex flex-col sm:flex-row items-start sm:items-center gap-2 p-3 bg-ink-50 rounded-lg border border-ink-200 text-xs">
+                        <div className="w-48 shrink-0">
+                          <span className="font-bold font-mono text-brand-800 bg-brand-50 px-2 py-0.5 rounded border border-brand-200">
+                            {compCode}
+                          </span>
+                          <span className="ml-1.5 text-ink-700 font-medium truncate block sm:inline">
+                            {compMeta ? compMeta.name : compCode}
+                          </span>
+                        </div>
+                        <Input
+                          type="url"
+                          className="flex-1 bg-white text-xs font-mono"
+                          value={url}
+                          placeholder="https://...powerautomate.com/..."
+                          onChange={(e) => {
+                            const updated = { ...(config.teams?.companyWebhooks || {}), [compCode]: e.target.value };
+                            setConfig({
+                              ...config,
+                              teams: {
+                                enabled: config.teams?.enabled ?? true,
+                                webhookUrl: config.teams?.webhookUrl ?? "",
+                                companyWebhooks: updated,
+                              },
+                            });
+                          }}
+                        />
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            loading={isTestingThis}
+                            onClick={() => testConnection("teams", url)}
+                            className="text-xs gap-1"
+                          >
+                            <Send className="h-3 w-3 text-indigo-600" /> Test
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              const updated = { ...(config.teams?.companyWebhooks || {}) };
+                              delete updated[compCode];
+                              setConfig({
+                                ...config,
+                                teams: {
+                                  enabled: config.teams?.enabled ?? true,
+                                  webhookUrl: config.teams?.webhookUrl ?? "",
+                                  companyWebhooks: updated,
+                                },
+                              });
+                            }}
+                            className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Add New Company Webhook Card/Form */}
+                  <div className="p-3 bg-brand-50/50 rounded-lg border border-brand-200 text-xs space-y-2">
+                    <span className="font-semibold text-ink-900 block">Add Company Webhook:</span>
+                    <div className="grid sm:grid-cols-12 gap-2">
+                      <div className="sm:col-span-4">
+                        <Select
+                          value={newCompanyCode}
+                          onChange={(e) => setNewCompanyCode(e.target.value)}
+                          className="w-full text-xs bg-white"
+                        >
+                          <option value="">-- Select Company --</option>
+                          {availableCompanies
+                            .filter((c) => !(config.teams?.companyWebhooks || {})[c.code])
+                            .map((c) => (
+                              <option key={c.code} value={c.code}>
+                                {c.code} - {c.name}
+                              </option>
+                            ))}
+                        </Select>
+                      </div>
+                      <div className="sm:col-span-6">
+                        <Input
+                          type="url"
+                          value={newCompanyWebhook}
+                          onChange={(e) => setNewCompanyWebhook(e.target.value)}
+                          placeholder="https://...powerautomate.com/..."
+                          className="w-full text-xs font-mono bg-white"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={!newCompanyCode || !newCompanyWebhook}
+                          onClick={() => {
+                            if (!newCompanyCode || !newCompanyWebhook) return;
+                            const updated = {
+                              ...(config.teams?.companyWebhooks || {}),
+                              [newCompanyCode]: newCompanyWebhook.trim(),
+                            };
+                            setConfig({
+                              ...config,
+                              teams: {
+                                enabled: config.teams?.enabled ?? true,
+                                webhookUrl: config.teams?.webhookUrl ?? "",
+                                companyWebhooks: updated,
+                              },
+                            });
+                            setNewCompanyCode("");
+                            setNewCompanyWebhook("");
+                            toast.success(`Added webhook for ${newCompanyCode}. Click "Save Teams Settings" to save.`);
+                          }}
+                          className="w-full text-xs gap-1"
+                        >
+                          <Plus className="h-3 w-3" /> Add
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               <div className="rounded-lg border border-brand-100 bg-brand-50 p-4 text-xs text-brand-800 space-y-2">
                 <p className="font-semibold text-brand-900">Payload Details Sent to Webhook:</p>

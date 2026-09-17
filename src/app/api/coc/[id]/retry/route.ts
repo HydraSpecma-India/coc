@@ -30,6 +30,12 @@ export const POST = route(async (_req, { params }) => {
       }
 
       const ctx = (doc.d365_context_json as Record<string, any>) || {};
+      const rawCust = ctx.customerName || "";
+      const resolvedCustomer =
+        (rawCust && !rawCust.toLowerCase().includes("hydraspecma"))
+          ? rawCust
+          : (doc.customer_account === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
+
       await TeamsService.sendCocToTeams({
         cocId: doc.id,
         cocNumber: doc.coc_number || `COC-${doc.id.slice(0, 8)}`,
@@ -37,9 +43,10 @@ export const POST = route(async (_req, { params }) => {
         itemNumber: doc.item_number || "",
         itemDescription: doc.item_description || "",
         customerPO: doc.customer_po,
-        customerName: ctx.customerName,
+        customerName: resolvedCustomer,
         deliveryDate: ctx.deliveryDate,
         salesOrder: doc.sales_order,
+        company: doc.customer_account || doc.production_order?.slice(0, 4) || "HSIN",
         serialNumber: doc.serial_number,
         quantity: doc.quantity,
         issuedBy: session.user.email || "System",

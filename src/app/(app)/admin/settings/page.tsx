@@ -60,6 +60,7 @@ export default async function SettingsPage() {
     teams: {
       enabled: config.teams.enabled,
       webhookUrl: config.teams.webhookUrl,
+      companyWebhooks: config.teams.companyWebhooks || {},
     },
   };
 

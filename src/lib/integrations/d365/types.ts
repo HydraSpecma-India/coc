@@ -4,6 +4,7 @@ export interface D365ProductionOrder {
   ItemDescription: string;
   CustomerAccount: string;
   CustomerName: string;
+  DeliveryAddressName?: string;
   CustomerPO: string;
   SalesOrder: string;
   SalesLine: string;
@@ -54,6 +55,7 @@ export interface D365SalesOrderLine {
   ItemDescription?: string;
   CustomerAccount: string;
   CustomerName: string;
+  DeliveryAddressName?: string;
   CustomerPO: string;
   ExternalItemNumber: string; // Customer Part Number
   Quantity: number;

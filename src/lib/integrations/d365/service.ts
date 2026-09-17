@@ -232,7 +232,14 @@ export class D365Service {
           ItemNumber: finalItem,
           ItemDescription: finalDesc,
           CustomerAccount: String(item.CustomerAccount || item.CustAccount || item.dataAreaId || "HSIN"),
-          CustomerName: String(item.DeliveryAddressName || item.CustomerName || item.CustName || item.Name || "HydraSpecma India Pvt Ltd"),
+          CustomerName: (() => {
+            const raw = String(item.DeliveryAddressName || item.CustomerName || item.CustName || "").trim();
+            if (raw && !raw.toLowerCase().includes("hydraspecma")) return raw;
+            return String(item.dataAreaId || "").toUpperCase() === "HGCN"
+              ? "VESTAS WIND TECHNOLOGY CHINA CO LTD"
+              : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD";
+          })(),
+          DeliveryAddressName: String(item.DeliveryAddressName || ""),
           CustomerPO: String(item.CustomerRequisitionNumber || item.CustomerPO || item.PurchOrderFormNum || item.CustomerRef || "PO-HSIN"),
           CustomerPartNumber: String(item.ExternalItemNumber || item.CustomerPartNumber || item.CustomerItemNumber || ""),
           dataAreaId: String(item.dataAreaId || "").toUpperCase(),
@@ -471,7 +478,25 @@ export class D365Service {
         const lineNum = String(item.LineNumber || item.SalesLineNumber || item.LineNum || "1.0").trim();
         const extItem = String(item.ExternalItemNumber || item.CustomerItemNumber || item.CustomerPartNumber || "").trim();
         const custPO = String(item.CustomerRequisitionNumber || item.CustomerPO || item.PurchOrderFormNum || "").trim();
-        const custName = String(item.DeliveryAddressName || item.CustomerName || item.CustName || "").trim();
+        const deliveryAddressName = String(
+          item.DeliveryAddressName ||
+          item.DeliveryName ||
+          item.DeliveryAddressDescription ||
+          item.FormattedDeliveryAddress ||
+          ""
+        ).trim();
+        const rawCustName = String(
+          deliveryAddressName ||
+          item.CustomerName ||
+          item.CustName ||
+          item.OrderingCustomerName ||
+          item.InvoiceCustomerName ||
+          ""
+        ).trim();
+        const companyCode = String(item.dataAreaId || targetCompany).toUpperCase();
+        const custName = (rawCustName && !rawCustName.toLowerCase().includes("hydraspecma"))
+          ? rawCustName
+          : (companyCode === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
         const custAcc = String(
           item.OrderingCustomerAccountNumber ||
           item.InvoiceCustomerAccountNumber ||
@@ -487,14 +512,15 @@ export class D365Service {
           ItemNumber: String(item.ItemNumber || cleanItem),
           ItemDescription: String(item.LineDescription || item.ItemDescription || item.ItemName || ""),
           CustomerAccount: custAcc,
-          CustomerName: custName || "HydraSpecma India Pvt Ltd",
+          CustomerName: custName,
+          DeliveryAddressName: deliveryAddressName || custName,
           CustomerPO: custPO,
           ExternalItemNumber: extItem || "160072",
           Quantity: Number(item.OrderedSalesQuantity || item.SalesQuantity || item.Quantity || 1) || 1,
           UnitOfMeasure: String(item.SalesUnit || item.UnitOfMeasure || "Pcs"),
           DeliveryDate: String(item.ConfirmedDeliveryDate || item.RequestedDeliveryDate || item.DeliveryDate || ""),
           LineStatus: lineStatus,
-          dataAreaId: String(item.dataAreaId || targetCompany).toUpperCase(),
+          dataAreaId: companyCode,
         };
       });
 
@@ -522,6 +548,94 @@ export class D365Service {
         salesOrders: fallback,
         error: (err as Error).message,
       };
+    }
+  }
+
+  static async getCompanies(): Promise<{ code: string; name: string }[]> {
+    const config = (await getActiveConfig()).d365;
+
+    const defaultCompanies: { code: string; name: string }[] = [
+      { code: "HSIN", name: "HydraSpecma India (India)" },
+      { code: "HGCN", name: "HydraSpecma China (China)" },
+      { code: "HSDK", name: "HydraSpecma Denmark (Denmark)" },
+      { code: "HSPL", name: "HydraSpecma Poland (Poland)" },
+      { code: "HSSE", name: "HydraSpecma Sweden (Sweden)" },
+      { code: "HSFI", name: "HydraSpecma Finland (Finland)" },
+      { code: "HSUK", name: "HydraSpecma UK (United Kingdom)" },
+      { code: "HSUS", name: "HydraSpecma North America (USA)" },
+      { code: "HSBR", name: "HydraSpecma Brazil (Brazil)" },
+    ];
+
+    if (config.mode === "mock" || !config.baseUrl || !config.clientId || !config.tenantId) {
+      return defaultCompanies;
+    }
+
+    try {
+      const token = await this.getAccessToken(config);
+      const baseUrl = config.baseUrl.replace(/\/+$/, "");
+
+      // 1. Try D365 LegalEntities
+      try {
+        const res = await fetch(`${baseUrl}/data/LegalEntities?$select=LegalEntityId,Name&$top=100`, {
+          headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (Array.isArray(json.value) && json.value.length > 0) {
+            const list = json.value
+              .map((item: any) => ({
+                code: String(item.LegalEntityId || item.DataArea || "").toUpperCase(),
+                name: String(item.Name || item.LegalEntityId || ""),
+              }))
+              .filter((c: any) => c.code);
+            if (list.length > 0) return list;
+          }
+        }
+      } catch {}
+
+      // 2. Try D365 DataAreas
+      try {
+        const res = await fetch(`${baseUrl}/data/DataAreas?$select=id,name&$top=100`, {
+          headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (Array.isArray(json.value) && json.value.length > 0) {
+            const list = json.value
+              .map((item: any) => ({
+                code: String(item.id || "").toUpperCase(),
+                name: String(item.name || item.id || ""),
+              }))
+              .filter((c: any) => c.code);
+            if (list.length > 0) return list;
+          }
+        }
+      } catch {}
+
+      // 3. Try cross-company query on ProductionOrderHeaders to discover active dataAreaIds
+      try {
+        const res = await fetch(`${baseUrl}/data/ProductionOrderHeaders?cross-company=true&$select=dataAreaId&$top=200`, {
+          headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (Array.isArray(json.value) && json.value.length > 0) {
+            const rawSet = new Set<string>(json.value.map((item: any) => String(item.dataAreaId || "").toUpperCase()));
+            const codes: string[] = Array.from(rawSet).filter(Boolean);
+            if (codes.length > 0) {
+              return codes.map((code: string) => {
+                const match = defaultCompanies.find((d) => d.code === code);
+                return match || { code, name: `${code} (Dynamics 365)` };
+              });
+            }
+          }
+        }
+      } catch {}
+
+      return defaultCompanies;
+    } catch (err) {
+      logger.warn("Could not fetch live legal entities from D365, using default companies", { error: (err as Error).message });
+      return defaultCompanies;
     }
   }
 }

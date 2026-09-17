@@ -211,6 +211,12 @@ export function CocDetailClient({
                 <span className="font-mono font-bold text-ink-900">{doc.production_order}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-ink-100">
+                <span className="text-ink-500">Customer:</span>
+                <span className="font-medium text-ink-900 text-right truncate max-w-[200px]" title={String(doc.d365_context_json?.customerName || values.find((v) => v.field_name === "CustomerName")?.value_text || "—")}>
+                  {String(doc.d365_context_json?.customerName || values.find((v) => v.field_name === "CustomerName")?.value_text || "—")}
+                </span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-ink-100">
                 <span className="text-ink-500">Part Number:</span>
                 <span className="font-mono font-medium text-ink-900">{doc.item_number}</span>
               </div>
@@ -251,12 +257,18 @@ export function CocDetailClient({
               {values.length === 0 ? (
                 <div className="text-ink-400 text-center py-4">Standard inspection values applied</div>
               ) : (
-                values.map((v) => (
-                  <div key={v.field_name} className="py-1 border-b border-ink-100 last:border-0">
-                    <div className="font-semibold text-ink-700">{v.field_name}</div>
-                    <div className="text-ink-900 mt-0.5">{v.value_text || "—"}</div>
-                  </div>
-                ))
+                values.map((v) => {
+                  let dispVal = v.value_text || "—";
+                  if (v.field_name === "CustomerName" && dispVal.toLowerCase().includes("hydraspecma")) {
+                    dispVal = String(doc.d365_context_json?.customerName || (doc.customer_account === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD"));
+                  }
+                  return (
+                    <div key={v.field_name} className="py-1 border-b border-ink-100 last:border-0">
+                      <div className="font-semibold text-ink-700">{v.field_name}</div>
+                      <div className="text-ink-900 mt-0.5">{dispVal}</div>
+                    </div>
+                  );
+                })
               )}
             </CardBody>
           </Card>

@@ -44,6 +44,7 @@ export interface IntegrationConfig {
   teams: {
     enabled: boolean;
     webhookUrl: string;
+    companyWebhooks: Record<string, string>;
   };
 }
 
@@ -158,6 +159,10 @@ export async function getActiveConfig(): Promise<IntegrationConfig> {
     teams: {
       enabled: bool("teams.enabled", true),
       webhookUrl: str("teams.webhookUrl", (process.env.TEAMS_WEBHOOK_URL || DEFAULT_TEAMS_WEBHOOK_URL)),
+      companyWebhooks:
+        typeof db["teams.companyWebhooks"] === "object" && db["teams.companyWebhooks"] !== null
+          ? (db["teams.companyWebhooks"] as Record<string, string>)
+          : {},
     },
   };
 }

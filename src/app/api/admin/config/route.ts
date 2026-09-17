@@ -63,6 +63,7 @@ export async function GET() {
       teams: {
         enabled: config.teams.enabled,
         webhookUrl: config.teams.webhookUrl,
+        companyWebhooks: config.teams.companyWebhooks || {},
       },
     },
   });
@@ -126,6 +127,7 @@ export async function PUT(req: Request) {
   if (teams) {
     if (teams.enabled !== undefined) updates.push({ key: "teams.enabled", value: Boolean(teams.enabled) });
     if (teams.webhookUrl !== undefined) updates.push({ key: "teams.webhookUrl", value: teams.webhookUrl.trim() });
+    if (teams.companyWebhooks !== undefined) updates.push({ key: "teams.companyWebhooks", value: teams.companyWebhooks });
   }
 
   const sb = supabaseAdmin();

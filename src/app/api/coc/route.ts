@@ -106,6 +106,17 @@ export const POST = route(async (req) => {
     }
   }
 
+  const rawCustomer = parsed.customerName || parsed.manualValues?.["CustomerName"] || "";
+  const resolvedCustomerName =
+    (rawCustomer && !rawCustomer.toLowerCase().includes("hydraspecma"))
+      ? rawCustomer
+      : (parsed.customerAccount === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
+
+  const resolvedDeliveryDate =
+    parsed.deliveryDate ||
+    parsed.manualValues?.["DeliveryDate"] ||
+    "";
+
   // 1. Create database record in DRAFT
   const doc = await createCocDocument({
     template_id: tplId!,
@@ -121,8 +132,8 @@ export const POST = route(async (req) => {
     quantity: parsed.quantity,
     serial_number: parsed.serialNumber,
     d365_context_json: {
-      customerName: parsed.customerName,
-      deliveryDate: parsed.deliveryDate || parsed.manualValues?.["DeliveryDate"],
+      customerName: resolvedCustomerName,
+      deliveryDate: resolvedDeliveryDate,
       batchNumber: parsed.batchNumber,
       unitOfMeasure: parsed.unitOfMeasure,
       customerPartNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
@@ -134,16 +145,6 @@ export const POST = route(async (req) => {
   const cocNumber = doc.coc_number || "COC-" + doc.id.slice(0, 8);
 
   try {
-    const resolvedCustomerName =
-      parsed.customerName ||
-      parsed.manualValues?.["CustomerName"] ||
-      (parsed.customerAccount === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
-
-    const resolvedDeliveryDate =
-      parsed.deliveryDate ||
-      parsed.manualValues?.["DeliveryDate"] ||
-      "";
-
     // Step 1: D365 Fetch & Context verification
     await logProcessStep(doc.id, "D365_FETCH", "OK", { productionOrder: prodOrder });
 
@@ -197,6 +198,7 @@ export const POST = route(async (req) => {
         customerName: resolvedCustomerName,
         customerPartNumber: parsed.customerPartNumber,
         salesOrder: parsed.salesOrder,
+        company: parsed.customerAccount || prodOrder.slice(0, 4) || "HSIN",
         serialNumber: parsed.serialNumber,
         batchNumber: parsed.batchNumber,
         deliveryDate: resolvedDeliveryDate,
@@ -235,7 +237,11 @@ export const POST = route(async (req) => {
 
     // Save manual field values
     if (parsed.manualValues) {
-      const valueRows = Object.entries(parsed.manualValues).map(([fieldName, val]) => ({
+      const mergedManualValues = {
+        ...parsed.manualValues,
+        CustomerName: resolvedCustomerName,
+      };
+      const valueRows = Object.entries(mergedManualValues).map(([fieldName, val]) => ({
         coc_document_id: doc.id,
         field_name: fieldName,
         source_type: "MANUAL",

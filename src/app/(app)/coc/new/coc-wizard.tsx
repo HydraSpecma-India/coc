@@ -200,6 +200,33 @@ export function CocWizard({
   // PO Search & Selection
   const defaultCompany = !allowedCompanies.includes("ALL") && allowedCompanies.length > 0 ? allowedCompanies[0] : "HSIN";
   const [selectedCompany, setSelectedCompany] = useState<string>(defaultCompany);
+  const [availableCompanies, setAvailableCompanies] = useState<{ code: string; label: string }[]>([
+    { code: "HSIN", label: "HSIN - India (HydraSpecma India)" },
+    { code: "HGCN", label: "HGCN - China (HydraSpecma China)" },
+    { code: "HSDK", label: "HSDK - Denmark (HydraSpecma Denmark)" },
+    { code: "HSPL", label: "HSPL - Poland (HydraSpecma Poland)" },
+    { code: "HSSE", label: "HSSE - Sweden (HydraSpecma Sweden)" },
+    { code: "HSFI", label: "HSFI - Finland (HydraSpecma Finland)" },
+    { code: "HSUK", label: "HSUK - UK (HydraSpecma UK)" },
+    { code: "HSUS", label: "HSUS - USA (HydraSpecma North America)" },
+    { code: "ALL", label: "ALL - Cross-Company (All Entities)" },
+  ]);
+
+  useEffect(() => {
+    api<{ ok: boolean; companies: { code: string; name: string }[] }>("/api/d365/companies")
+      .then((res) => {
+        if (res.ok && res.companies && res.companies.length > 0) {
+          const mapped = res.companies.map((c) => ({
+            code: c.code,
+            label: `${c.code} - ${c.name}`,
+          }));
+          mapped.push({ code: "ALL", label: "ALL - Cross-Company (All Entities)" });
+          setAvailableCompanies(mapped);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL_ACTIVE");
   const [poQuery, setPoQuery] = useState("");
   const [searchResults, setSearchResults] = useState<D365ProductionOrder[]>([]);
@@ -215,7 +242,7 @@ export function CocWizard({
     ItemNumber: "",
     ItemDescription: "",
     CustomerAccount: "HSIN",
-    CustomerName: "HydraSpecma India Pvt Ltd",
+    CustomerName: "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
     CustomerPO: "4509008214",
     CustomerPartNumber: "160072",
     dataAreaId: "HSIN",
@@ -270,7 +297,12 @@ export function CocWizard({
       if (matched) {
         const extPart = matched.ExternalItemNumber || targetOrder?.CustomerPartNumber || "160072";
         const poNum = matched.CustomerPO || targetOrder?.CustomerPO || "4509008214";
-        const custName = matched.CustomerName || targetOrder?.CustomerName || "HydraSpecma India Pvt Ltd";
+        const rawCust = matched.DeliveryAddressName || matched.CustomerName || "";
+        const custName = (rawCust && !rawCust.toLowerCase().includes("hydraspecma"))
+          ? rawCust
+          : targetOrder?.CustomerName && !targetOrder.CustomerName.toLowerCase().includes("hydraspecma")
+            ? targetOrder.CustomerName
+            : (company === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
 
         setSelectedPO((prev) => {
           if (!prev) return prev;
@@ -280,6 +312,7 @@ export function CocWizard({
             CustomerPartNumber: extPart,
             CustomerPO: poNum,
             CustomerName: custName,
+            DeliveryAddressName: matched.DeliveryAddressName || custName,
           };
         });
 
@@ -287,6 +320,7 @@ export function CocWizard({
           ...prev,
           CustomerPartNo: extPart,
           CustomerPO: poNum,
+          CustomerName: custName,
         }));
       }
     } catch (e) {
@@ -315,12 +349,18 @@ export function CocWizard({
       if (list.length > 0) {
         const matched = list.find((so) => so.SalesOrder.toLowerCase() === manualOrder.SalesOrder?.toLowerCase()) || list[0];
         if (matched) {
+          const rawCust = matched.DeliveryAddressName || matched.CustomerName || "";
+          const custName = (rawCust && !rawCust.toLowerCase().includes("hydraspecma"))
+            ? rawCust
+            : (company === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
+
           setManualOrder((prev) => ({
             ...prev,
             SalesOrder: matched.SalesOrder,
             CustomerPartNumber: matched.ExternalItemNumber || prev.CustomerPartNumber || "160072",
             CustomerPO: matched.CustomerPO || prev.CustomerPO,
-            CustomerName: matched.CustomerName || prev.CustomerName,
+            CustomerName: custName,
+            DeliveryAddressName: matched.DeliveryAddressName || custName,
           }));
         }
       }
@@ -339,70 +379,55 @@ export function CocWizard({
   // Product-specific continuous serial sequence state
   const [productSequence, setProductSequence] = useState<{
     rule: { itemNumber: string; mode: "auto" | "manual"; pattern: string; nextNumber: number };
-    nextSerial: string;
+    samplePreview: string;
+    source: "db_configured" | "default_auto";
   } | null>(null);
 
-  const fetchProductSequence = async (itemNumber: string, productName?: string) => {
-    const cleanItem = itemNumber?.trim();
-    if (!cleanItem) return;
+  const fetchProductSequence = async (itemNumber: string, itemDescription?: string) => {
     try {
       const res = await api<{
         ok: boolean;
         rule: { itemNumber: string; mode: "auto" | "manual"; pattern: string; nextNumber: number };
-        nextSerial: string;
-      }>(`/api/sequences/next?itemNumber=${encodeURIComponent(cleanItem)}&productName=${encodeURIComponent(productName || cleanItem)}`);
-
+        samplePreview: string;
+        source: "db_configured" | "default_auto";
+      }>(`/api/admin/number-sequences/rule?itemNumber=${encodeURIComponent(itemNumber)}&itemDescription=${encodeURIComponent(itemDescription || "")}`);
       if (res.ok && res.rule) {
         setProductSequence(res);
-        setManualFields((prev) => ({
-          ...prev,
-          SerialNumber: res.nextSerial,
-        }));
-        if (res.rule.mode === "auto") {
-          setSerialNotice(`Continuous Product Series (${res.rule.itemNumber} • Auto #${res.rule.nextNumber}): ${res.nextSerial}`);
-        } else {
-          setSerialNotice(`Product Series (${res.rule.itemNumber} • Manual): Suggested ${res.nextSerial}`);
+        if (res.rule.mode === "auto" && res.samplePreview) {
+          setManualFields((prev) => ({
+            ...prev,
+            SerialNumber: res.samplePreview,
+          }));
         }
       }
     } catch (e) {
-      console.warn("Could not fetch product sequence", e);
+      console.warn("Could not fetch product serial sequence rule", e);
     }
   };
 
-  const fetchExistingCocsForPO = async (productionOrder: string, itemNumber: string) => {
-    const cleanPO = productionOrder?.trim();
-    if (!cleanPO) return;
+  const fetchExistingCocsForPO = async (poNumber: string, itemNumber?: string) => {
     try {
-      const res = await api<{ ok: boolean; documents: Array<{ coc_number: string; serial_number: string | null; status: string }> }>(
-        `/api/coc?productionOrder=${encodeURIComponent(cleanPO)}`
+      const res = await api<{ ok: boolean; cocs: Array<{ coc_number: string; serial_number: string | null; status: string }> }>(
+        `/api/coc/by-po?po=${encodeURIComponent(poNumber)}`
       );
-      const docs = (res.documents || []).filter((d) => d.status !== "CANCELLED");
-      setExistingCocs(docs);
-
-      const usedSerials = docs.map((d) => d.serial_number?.trim()).filter(Boolean) as string[];
-
-      // If no product sequence is active and earlier units exist for this order
-      if (usedSerials.length > 0 && !productSequence) {
-        const basePrefix = `${itemNumber || cleanPO} - SN`;
-        let nextNum = 1;
-        for (const s of usedSerials) {
-          const match = s.match(/SN(\d+)/i);
-          if (match) {
-            const num = parseInt(match[1], 10);
-            if (num >= nextNum) {
-              nextNum = num + 1;
-            }
-          }
+      if (res.ok && res.cocs) {
+        setExistingCocs(res.cocs);
+        const count = res.cocs.length;
+        if (count > 0) {
+          const nextIndex = count + 1;
+          const padNext = String(nextIndex).padStart(4, "0");
+          const prefixItem = itemNumber?.trim() || poNumber.trim();
+          const autoSuggestedSerial = `${prefixItem} - SN${padNext}`;
+          setManualFields((prev) => ({
+            ...prev,
+            SerialNumber: autoSuggestedSerial,
+          }));
+          setSerialNotice(
+            `Found ${count} previously issued Certificate(s) for this order. Auto-incremented serial number to "${autoSuggestedSerial}".`
+          );
+        } else {
+          setSerialNotice(null);
         }
-        const nextSerial = `${basePrefix}${String(nextNum).padStart(3, "0")}`;
-        const lastDoc = docs[0]?.coc_number || "Existing Certificate";
-        setSerialNotice(
-          `Auto-selected next unit: SN${String(nextNum).padStart(3, "0")} (${lastDoc} already issued for earlier unit)`
-        );
-        setManualFields((prev) => ({
-          ...prev,
-          SerialNumber: prev.SerialNumber || nextSerial,
-        }));
       }
     } catch (e) {
       console.warn("Could not fetch existing COCs for order", e);
@@ -420,7 +445,12 @@ export function CocWizard({
     if (matched) {
       const extPart = matched.ExternalItemNumber || "160072";
       const poNum = matched.CustomerPO || selectedPO?.CustomerPO || "4509008214";
-      const custName = matched.CustomerName || selectedPO?.CustomerName || "HydraSpecma India Pvt Ltd";
+      const rawCust = matched.DeliveryAddressName || matched.CustomerName || "";
+      const custName = (rawCust && !rawCust.toLowerCase().includes("hydraspecma"))
+        ? rawCust
+        : selectedPO?.CustomerName && !selectedPO.CustomerName.toLowerCase().includes("hydraspecma")
+          ? selectedPO.CustomerName
+          : (selectedCompany === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
 
       setSelectedPO((prev) => {
         if (!prev) return prev;
@@ -430,6 +460,7 @@ export function CocWizard({
           CustomerPartNumber: extPart,
           CustomerPO: poNum,
           CustomerName: custName,
+          DeliveryAddressName: matched.DeliveryAddressName || custName,
         };
       });
 
@@ -437,9 +468,10 @@ export function CocWizard({
         ...prev,
         CustomerPartNo: extPart,
         CustomerPO: poNum,
+        CustomerName: custName,
       }));
 
-      toast.success(`Selected Sales Order ${matched.SalesOrder} (Customer Part: ${extPart})`);
+      toast.success(`Selected Sales Order ${matched.SalesOrder} (Customer: ${custName})`);
     }
   };
 
@@ -451,12 +483,18 @@ export function CocWizard({
     setModalIsCustomSO(false);
     const matched = modalSalesOrders.find((so) => so.SalesOrder === soNumber);
     if (matched) {
+      const rawCust = matched.DeliveryAddressName || matched.CustomerName || "";
+      const custName = (rawCust && !rawCust.toLowerCase().includes("hydraspecma"))
+        ? rawCust
+        : (manualOrder.dataAreaId === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
+
       setManualOrder((prev) => ({
         ...prev,
         SalesOrder: matched.SalesOrder,
         CustomerPartNumber: matched.ExternalItemNumber || prev.CustomerPartNumber || "160072",
         CustomerPO: matched.CustomerPO || prev.CustomerPO,
-        CustomerName: matched.CustomerName || prev.CustomerName,
+        CustomerName: custName,
+        DeliveryAddressName: matched.DeliveryAddressName || custName,
       }));
     }
   };
@@ -561,9 +599,11 @@ export function CocWizard({
   const applySelectedPO = (order: D365ProductionOrder) => {
     setSelectedPO(order);
     const initialExtPart = order.CustomerPartNumber || "160072";
+    const rawCust = order.DeliveryAddressName || order.CustomerName || "";
     const custName =
-      order.CustomerName ||
-      (order.dataAreaId === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
+      (rawCust && !rawCust.toLowerCase().includes("hydraspecma"))
+        ? rawCust
+        : (order.dataAreaId === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
     setManualFields((prev) => ({
       ...prev,
       CustomerPartNo: initialExtPart,
@@ -682,6 +722,18 @@ export function CocWizard({
     const itemDesc = selectedPO.ItemDescription?.trim() || `HydraSpecma Assembly (${itemNum})`;
     const tpl = templateList.find((t) => t.id === selectedTemplateId) || templateList[0];
 
+    const activeSO = salesOrders.find((so) => so.SalesOrder === selectedPO.SalesOrder);
+    const rawCust =
+      (manualFields.CustomerName && !manualFields.CustomerName.toLowerCase().includes("hydraspecma") ? manualFields.CustomerName : null) ||
+      activeSO?.DeliveryAddressName ||
+      activeSO?.CustomerName ||
+      (selectedPO.CustomerName && !selectedPO.CustomerName.toLowerCase().includes("hydraspecma") ? selectedPO.CustomerName : null) ||
+      "";
+    const finalCustomerName =
+      (rawCust && !rawCust.toLowerCase().includes("hydraspecma"))
+        ? rawCust
+        : (selectedCompany === "HGCN" || selectedPO.dataAreaId === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
+
     try {
       const res = await fetch("/api/coc/preview", {
         method: "POST",
@@ -692,7 +744,7 @@ export function CocWizard({
           productionOrder: prodOrder,
           itemNumber: itemNum,
           itemDescription: itemDesc,
-          customerName: manualFields.CustomerName || selectedPO.CustomerName || "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
+          customerName: finalCustomerName,
           customerPO: manualFields.CustomerPO || selectedPO.CustomerPO || "4509008214",
           customerPartNumber: manualFields.CustomerPartNo || selectedPO.CustomerPartNumber || "160072",
           salesOrder: selectedPO.SalesOrder || "",
@@ -700,7 +752,7 @@ export function CocWizard({
           serialNumber: manualFields.SerialNumber || selectedPO.SerialNumber || "",
           quantity: selectedPO.Quantity || 1,
           unitOfMeasure: selectedPO.UnitOfMeasure || "Pcs",
-          manualValues: manualFields,
+          manualValues: { ...manualFields, CustomerName: finalCustomerName },
           signatureBase64: signatureDataUrl,
         }),
       });
@@ -737,6 +789,18 @@ export function CocWizard({
     const itemNum = selectedPO.ItemNumber?.trim() || prodOrder;
     const itemDesc = selectedPO.ItemDescription?.trim() || `HydraSpecma Assembly (${itemNum})`;
 
+    const activeSO = salesOrders.find((so) => so.SalesOrder === selectedPO.SalesOrder);
+    const rawCust =
+      (manualFields.CustomerName && !manualFields.CustomerName.toLowerCase().includes("hydraspecma") ? manualFields.CustomerName : null) ||
+      activeSO?.DeliveryAddressName ||
+      activeSO?.CustomerName ||
+      (selectedPO.CustomerName && !selectedPO.CustomerName.toLowerCase().includes("hydraspecma") ? selectedPO.CustomerName : null) ||
+      "";
+    const finalCustomerName =
+      (rawCust && !rawCust.toLowerCase().includes("hydraspecma"))
+        ? rawCust
+        : (selectedCompany === "HGCN" || selectedPO.dataAreaId === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
+
     setGenerating(true);
     try {
       const res = await api<{ ok: boolean; documentId: string; cocNumber: string }>("/api/coc", {
@@ -748,7 +812,7 @@ export function CocWizard({
           productionOrder: prodOrder,
           itemNumber: itemNum,
           itemDescription: itemDesc,
-          customerName: manualFields.CustomerName || selectedPO.CustomerName || "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
+          customerName: finalCustomerName,
           customerPO: manualFields.CustomerPO || selectedPO.CustomerPO || "4509008214",
           customerPartNumber: manualFields.CustomerPartNo || selectedPO.CustomerPartNumber || "160072",
           salesOrder: selectedPO.SalesOrder || "",
@@ -758,7 +822,7 @@ export function CocWizard({
           unitOfMeasure: selectedPO.UnitOfMeasure || "Pcs",
           deliveryDate: manualFields.DeliveryDate || selectedPO.DeliveryDate || "",
           serialNumber: manualFields.SerialNumber || selectedPO.SerialNumber || "",
-          manualValues: manualFields,
+          manualValues: { ...manualFields, CustomerName: finalCustomerName },
           signatureBase64: signatureDataUrl,
         },
       });
@@ -1075,13 +1139,7 @@ export function CocWizard({
                       className="font-medium text-xs bg-slate-50 border-slate-300 h-9"
                       title="D365 Legal Entity (dataAreaId)"
                     >
-                      {[
-                        { code: "HSIN", label: "HSIN - India (HydraSpecma India)" },
-                        { code: "HGCN", label: "HGCN - China (HydraSpecma China)" },
-                        { code: "HSDK", label: "HSDK - Denmark (HydraSpecma A/S)" },
-                        { code: "HSSW", label: "HSSW - Sweden (HydraSpecma AB)" },
-                        { code: "ALL", label: "ALL - Cross-Company (All Entities)" },
-                      ]
+                      {availableCompanies
                         .filter((c) => allowedCompanies.includes("ALL") || allowedCompanies.includes(c.code))
                         .map((c) => (
                           <option key={c.code} value={c.code}>
@@ -1116,13 +1174,7 @@ export function CocWizard({
                 {/* Quick Entity Switcher Tabs */}
                 <div className="flex items-center gap-1.5 text-xs text-ink-500 pt-1 flex-wrap">
                   <span className="text-[11px] font-medium text-ink-400">Legal Entity:</span>
-                  {[
-                    { code: "HSIN", label: "HSIN (India)" },
-                    { code: "HGCN", label: "HGCN (China)" },
-                    { code: "HSDK", label: "HSDK (Denmark)" },
-                    { code: "HSSW", label: "HSSW (Sweden)" },
-                    { code: "ALL", label: "ALL Entities" },
-                  ]
+                  {availableCompanies
                     .filter((c) => allowedCompanies.includes("ALL") || allowedCompanies.includes(c.code))
                     .map((ent) => (
                     <button
@@ -1135,7 +1187,7 @@ export function CocWizard({
                           : "bg-white text-ink-600 border-ink-200 hover:bg-ink-100"
                       }`}
                     >
-                      {ent.label}
+                      {ent.code}
                     </button>
                   ))}
                   <span className="ml-auto text-[11px] font-mono text-ink-400">
@@ -1293,7 +1345,7 @@ export function CocWizard({
                         >
                           {modalSalesOrders.map((so) => (
                             <option key={so.SalesOrder} value={so.SalesOrder}>
-                              {so.SalesOrder} — {so.CustomerName?.slice(0, 20)} (Cust Part: {so.ExternalItemNumber || "N/A"})
+                              {so.SalesOrder} — {(so.DeliveryAddressName || so.CustomerName)?.slice(0, 20)} (Cust Part: {so.ExternalItemNumber || "N/A"})
                             </option>
                           ))}
                           <option value="__custom__">+ Enter Custom Sales Order...</option>
@@ -1678,7 +1730,7 @@ export function CocWizard({
                             }
                             return (
                               <option key={so.SalesOrder} value={so.SalesOrder}>
-                                {prefix} {so.SalesOrder} &bull; {so.CustomerName?.slice(0, 20)} &bull; Cust Part: {so.ExternalItemNumber || "160072"} &bull; [{statusText}]
+                                {prefix} {so.SalesOrder} &bull; {(so.DeliveryAddressName || so.CustomerName)?.slice(0, 20)} &bull; Cust Part: {so.ExternalItemNumber || "160072"} &bull; [{statusText}]
                               </option>
                             );
                           })}
@@ -2384,7 +2436,7 @@ export function CocWizard({
                         }
                         return (
                           <option key={so.SalesOrder} value={so.SalesOrder}>
-                            {prefix} {so.SalesOrder} • {so.CustomerName?.slice(0, 16)} • Cust Part: {so.ExternalItemNumber || "160072"} • [{statusText}]
+                            {prefix} {so.SalesOrder} • {(so.DeliveryAddressName || so.CustomerName)?.slice(0, 16)} • Cust Part: {so.ExternalItemNumber || "160072"} • [{statusText}]
                           </option>
                         );
                       })}
@@ -2510,7 +2562,7 @@ export function CocWizard({
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="text-emerald-700">Serial for this COC:</span>
                     <span className="font-mono font-bold text-emerald-950">
-                      {manualFields.SerialNumber || productSequence.nextSerial}
+                      {manualFields.SerialNumber || productSequence.samplePreview}
                     </span>
                   </div>
                   <div className="text-[9.5px] text-emerald-700">

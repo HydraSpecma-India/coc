@@ -13,6 +13,7 @@ export interface SendCocTeamsParams {
   customerName?: string | null;
   customerPartNumber?: string | null;
   salesOrder?: string | null;
+  company?: string | null;
   serialNumber?: string | null;
   deliveryDate?: string | null;
   batchNumber?: string | null;
@@ -95,7 +96,12 @@ export class TeamsService {
       return { ok: true, status: 200, message: "Teams webhook integration is disabled" };
     }
 
-    const url = config.teams.webhookUrl || DEFAULT_TEAMS_WEBHOOK_URL;
+    const compCode = (params.company || "").trim().toUpperCase();
+    const companyWebhook = compCode && config.teams.companyWebhooks?.[compCode];
+    const url = (companyWebhook && companyWebhook.startsWith("http"))
+      ? companyWebhook
+      : (config.teams.webhookUrl || DEFAULT_TEAMS_WEBHOOK_URL);
+
     if (!url || !url.startsWith("http")) {
       throw new Error("No valid Teams webhook URL configured.");
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   PageHeader,
@@ -28,6 +28,21 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
 
   // Search filter
   const [searchTerm, setSearchTerm] = useState("");
+  const [companies, setCompanies] = useState<{ code: string; name: string }[]>([
+    { code: "HSIN", name: "HydraSpecma India (India)" },
+    { code: "HGCN", name: "HydraSpecma China (China)" },
+    { code: "HSDK", name: "HydraSpecma Denmark (Denmark)" },
+  ]);
+
+  useEffect(() => {
+    api<{ ok: boolean; companies: { code: string; name: string }[] }>("/api/d365/companies")
+      .then((res) => {
+        if (res.ok && res.companies && res.companies.length > 0) {
+          setCompanies(res.companies);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Create User Modal state
   const [createOpen, setCreateOpen] = useState(false);
@@ -298,12 +313,14 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
                     <Select
                       value={u.allowed_companies?.[0] || "ALL"}
                       onChange={(e) => patchUser(u.id, { allowed_companies: [e.target.value] })}
-                      className="w-32 h-8 text-xs font-medium"
+                      className="w-36 h-8 text-xs font-medium"
                     >
                       <option value="ALL">All Companies</option>
-                      <option value="HSIN">HSIN (India)</option>
-                      <option value="HGCN">HGCN (China)</option>
-                      <option value="HSDK">HSDK (Denmark)</option>
+                      {companies.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.code} ({c.name.split("(")[0].trim() || c.code})
+                        </option>
+                      ))}
                     </Select>
                   </Td>
 
@@ -431,10 +448,12 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
               value={createForm.allowedCompany}
               onChange={(e) => setCreateForm({ ...createForm, allowedCompany: e.target.value })}
             >
-              <option value="ALL">All Companies (Global)</option>
-              <option value="HSIN">HSIN (India)</option>
-              <option value="HGCN">HGCN (China)</option>
-              <option value="HSDK">HSDK (Denmark)</option>
+              <option value="ALL">All Companies (Global Access)</option>
+              {companies.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.code} - {c.name}
+                </option>
+              ))}
             </Select>
           </Field>
 
