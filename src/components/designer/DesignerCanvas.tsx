@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Stage, Layer, Rect, Group, Transformer, Image as KImage, Line } from "react-konva";
 import Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
-import { useDesigner } from "./store";
+import { useDesigner, type FieldDef } from "./store";
 import { ElementBody, tableSize } from "./elements";
 import { loadBackgroundImage } from "./background";
 import type { TemplateElement } from "@/lib/template/schema";
@@ -26,7 +26,7 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
   const readOnly = useDesigner((s) => s.readOnly);
   const gridSnap = useDesigner((s) => s.gridSnap);
   const showGrid = useDesigner((s) => s.showGrid);
-  const { select, toggleSelect, commit } = useDesigner();
+  const fields = useDesigner((s) => s.fields);
 
   const stageRef = useRef<Konva.Stage>(null);
   const trRef = useRef<Konva.Transformer>(null);
@@ -72,65 +72,72 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
   }, [selectedIds, page?.elements, readOnly, zoom]);
 
   // ── mouse: selection + marquee ───────────────────────────────────────────
-  const onMouseDown = (e: KonvaEventObject<MouseEvent>) => {
+  const onMouseDown = useCallback((e: KonvaEventObject<MouseEvent>) => {
     const stage = stageRef.current;
     if (!stage) return;
     const clickedEmpty = e.target === stage || e.target.name() === "page-bg";
     if (!clickedEmpty) return;
-    if (!e.evt.shiftKey) select([]);
+    if (!e.evt.shiftKey) useDesigner.getState().select([]);
     const p = stage.getRelativePointerPosition();
     if (p) setMarquee({ x1: p.x, y1: p.y, x2: p.x, y2: p.y });
-  };
-  const onMouseMove = () => {
+  }, []);
+  const onMouseMove = useCallback(() => {
     if (!marquee) return;
     const p = stageRef.current?.getRelativePointerPosition();
     if (p) setMarquee({ ...marquee, x2: p.x, y2: p.y });
-  };
-  const onMouseUp = () => {
+  }, [marquee]);
+  const onMouseUp = useCallback(() => {
     if (!marquee || !page) return;
     const box = { x: Math.min(marquee.x1, marquee.x2), y: Math.min(marquee.y1, marquee.y2), w: Math.abs(marquee.x2 - marquee.x1), h: Math.abs(marquee.y2 - marquee.y1) };
     if (box.w > 3 && box.h > 3) {
       const hits = page.elements.filter((el) => !el.hidden && el.x < box.x + box.w && el.x + el.width > box.x && el.y < box.y + box.h && el.y + el.height > box.y).map((e) => e.id);
-      select(hits);
+      useDesigner.getState().select(hits);
     }
     setMarquee(null);
-  };
+  }, [marquee, page]);
 
-  const onElementClick = (e: KonvaEventObject<MouseEvent>, id: string) => {
+  const onElementClick = useCallback((e: KonvaEventObject<MouseEvent | TouchEvent>, id: string) => {
     e.cancelBubble = true;
-    if (readOnly) return select([id]);
-    if (e.evt.shiftKey) toggleSelect(id);
-    else if (!selectedIds.includes(id)) select([id]);
-  };
+    const state = useDesigner.getState();
+    if (state.readOnly) return state.select([id]);
+    if ("shiftKey" in e.evt && e.evt.shiftKey) state.toggleSelect(id);
+    else if (!state.selectedIds.includes(id)) state.select([id]);
+  }, []);
 
-  const onElementDblClick = (id: string) => {
-    if (readOnly) return;
-    const el = page?.elements.find((e) => e.id === id);
+  const onElementDblClick = useCallback((id: string) => {
+    const state = useDesigner.getState();
+    if (state.readOnly) return;
+    const el = state.template?.pages[state.pageIndex]?.elements.find((element) => element.id === id);
     if (el && el.type === "text") {
       setInlineEditing({ id: el.id, text: el.text });
     }
-  };
+  }, []);
 
   // ── drag / transform ─────────────────────────────────────────────────────
-  const onDragEnd = (e: KonvaEventObject<DragEvent>, id: string) => {
+  const onDragEnd = useCallback((e: KonvaEventObject<DragEvent>, id: string) => {
     const node = e.target;
-    const dx = snap(node.x(), gridSnap) - (page?.elements.find((el) => el.id === id)?.x ?? 0);
-    const dy = snap(node.y(), gridSnap) - (page?.elements.find((el) => el.id === id)?.y ?? 0);
-    const ids = selectedIds.includes(id) ? selectedIds : [id];
-    commit((t) => {
-      for (const el of t.pages[pageIndex].elements) {
+    const state = useDesigner.getState();
+    const page = state.template?.pages[state.pageIndex];
+    const dx = snap(node.x(), state.gridSnap) - (page?.elements.find((el) => el.id === id)?.x ?? 0);
+    const dy = snap(node.y(), state.gridSnap) - (page?.elements.find((el) => el.id === id)?.y ?? 0);
+    const ids = state.selectedIds.includes(id) ? state.selectedIds : [id];
+    state.commit((t) => {
+      for (const el of t.pages[state.pageIndex].elements) {
         if (ids.includes(el.id) && !el.locked) {
-          el.x = snap(el.x + dx, gridSnap);
-          el.y = snap(el.y + dy, gridSnap);
+          el.x = snap(el.x + dx, state.gridSnap);
+          el.y = snap(el.y + dy, state.gridSnap);
         }
       }
     });
     // Konva already moved the dragged node; other selected nodes were moved by the transformer group drag
-  };
+  }, []);
 
-  const onTransformEnd = () => {
+  const onTransformEnd = useCallback(() => {
     const tr = trRef.current;
     if (!tr) return;
+    const state = useDesigner.getState();
+    const page = state.template?.pages[state.pageIndex];
+    if (!page) return;
     const patches: Record<string, Record<string, unknown>> = {};
     for (const node of tr.nodes()) {
       const id = node.id();
@@ -142,7 +149,7 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
       const h = Math.max(el.type === "line" ? 0 : 4, el.height * sy);
       node.scaleX(1);
       node.scaleY(1);
-      const patch: Record<string, unknown> = { x: snap(node.x(), gridSnap), y: snap(node.y(), gridSnap), width: snap(w, gridSnap), height: snap(h, gridSnap), rotation: Math.round(node.rotation() * 10) / 10 };
+      const patch: Record<string, unknown> = { x: snap(node.x(), state.gridSnap), y: snap(node.y(), state.gridSnap), width: snap(w, state.gridSnap), height: snap(h, state.gridSnap), rotation: Math.round(node.rotation() * 10) / 10 };
       if (el.type === "table") {
         // scale columns proportionally, keep row heights
         const ratio = w / el.width;
@@ -153,10 +160,10 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
       }
       patches[id] = patch;
     }
-    commit((t) => {
-      for (const el of t.pages[pageIndex].elements) if (patches[el.id]) Object.assign(el, patches[el.id]);
+    state.commit((t) => {
+      for (const el of t.pages[state.pageIndex].elements) if (patches[el.id]) Object.assign(el, patches[el.id]);
     });
-  };
+  }, []);
 
   // ── HTML5 drop from palette ──────────────────────────────────────────────
   const onDrop = useCallback(
@@ -223,11 +230,12 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
             <ElementNode
               key={el.id}
               el={el}
+              fields={fields}
               selected={selectedIds.includes(el.id)}
               draggable={!readOnly && !el.locked}
-              onClick={(e) => onElementClick(e, el.id)}
+              onClick={onElementClick}
               onDblClick={onElementDblClick}
-              onDragEnd={(e) => onDragEnd(e, el.id)}
+              onDragEnd={onDragEnd}
             />
           ))}
           <Transformer
@@ -268,7 +276,7 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
             value={inlineEditing.text}
             onChange={(e) => setInlineEditing({ ...inlineEditing, text: e.target.value })}
             onBlur={() => {
-              commit((t) => {
+              useDesigner.getState().commit((t) => {
                 const target = t.pages[pageIndex].elements.find((e) => e.id === inlineEditing.id);
                 if (target && target.type === "text") target.text = inlineEditing.text;
               });
@@ -299,8 +307,9 @@ export function DesignerCanvas({ assetMimeTypes, onDropElement }: Props) {
   );
 }
 
-function ElementNode({
+const ElementNode = memo(function ElementNode({
   el,
+  fields,
   selected,
   draggable,
   onClick,
@@ -308,13 +317,13 @@ function ElementNode({
   onDragEnd,
 }: {
   el: TemplateElement;
+  fields: FieldDef[];
   selected: boolean;
   draggable: boolean;
-  onClick: (e: KonvaEventObject<MouseEvent>) => void;
+  onClick: (e: KonvaEventObject<MouseEvent | TouchEvent>, id: string) => void;
   onDblClick?: (id: string) => void;
-  onDragEnd: (e: KonvaEventObject<DragEvent>) => void;
+  onDragEnd: (e: KonvaEventObject<DragEvent>, id: string) => void;
 }) {
-  const fields = useDesigner((s) => s.fields);
   if (el.hidden) return null;
   const size = el.type === "table" ? tableSize(el) : { width: el.width, height: el.height };
   const isLine = el.type === "line";
@@ -334,11 +343,11 @@ function ElementNode({
       opacity={el.opacity}
       draggable={draggable}
       locked={el.locked}
-      onClick={onClick}
-      onTap={onClick as never}
+      onClick={(e) => onClick(e, el.id)}
+      onTap={(e) => onClick(e, el.id)}
       onDblClick={() => onDblClick?.(el.id)}
       onDblTap={() => onDblClick?.(el.id)}
-      onDragEnd={onDragEnd}
+      onDragEnd={(e) => onDragEnd(e, el.id)}
     >
       {/* generous hit area so lines and small elements are easily clickable */}
       <Rect x={hitX} y={hitY} width={hitW} height={hitH} fill="transparent" />
@@ -346,4 +355,4 @@ function ElementNode({
       {el.locked && selected && <Rect width={size.width} height={size.height} stroke="#ef4444" strokeWidth={1} dash={[2, 2]} listening={false} />}
     </Group>
   );
-}
+});

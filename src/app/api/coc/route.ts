@@ -36,8 +36,12 @@ export const GET = route(async (req) => {
   await requireSession();
   const q = req.nextUrl.searchParams.get("q") || "";
   const productionOrder = req.nextUrl.searchParams.get("productionOrder") || "";
-  const docs = await listCocDocuments({ query: q, productionOrder, limit: 50 });
-  return json({ ok: true, documents: docs });
+  const limitParam = Number.parseInt(req.nextUrl.searchParams.get("limit") || "50", 10);
+  const offsetParam = Number.parseInt(req.nextUrl.searchParams.get("offset") || "0", 10);
+  const limit = Number.isFinite(limitParam) ? Math.min(100, Math.max(1, limitParam)) : 50;
+  const offset = Number.isFinite(offsetParam) ? Math.max(0, offsetParam) : 0;
+  const docs = await listCocDocuments({ query: q, productionOrder, limit, offset });
+  return json({ ok: true, documents: docs, hasMore: docs.length === limit });
 });
 
 export const POST = route(async (req) => {

@@ -6,6 +6,7 @@
  * 2× the page size for crisp zooming. Results are cached per asset/page.
  */
 const cache = new Map<string, Promise<HTMLImageElement>>();
+const pdfBytesCache = new Map<string, Promise<Uint8Array>>();
 
 async function loadPdfjs() {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -20,6 +21,19 @@ function imageFromUrl(url: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error("Image could not be loaded"));
     img.src = url;
   });
+}
+
+async function loadPdfBytes(url: string): Promise<Uint8Array> {
+  const hit = pdfBytesCache.get(url);
+  if (hit) return hit;
+
+  const request = fetch(url).then(async (res) => {
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return new Uint8Array(await res.arrayBuffer());
+  });
+  pdfBytesCache.set(url, request);
+  request.catch(() => pdfBytesCache.delete(url));
+  return request;
 }
 
 export function loadBackgroundImage(assetId: string, mimeType: string, pageIndex: number): Promise<HTMLImageElement> {
@@ -43,20 +57,18 @@ export function loadBackgroundImage(assetId: string, mimeType: string, pageIndex
 
     const pdfjs = await loadPdfjs();
 
-    // Fetch array buffer to guarantee cross-browser compatibility and avoid range request failures
-    let arrayBuffer: ArrayBuffer;
+    // Cache the source PDF separately from its rasterized pages. A multi-page
+    // template otherwise downloads the same PDF once for every page opened.
+    let bytes: Uint8Array;
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      arrayBuffer = await res.arrayBuffer();
+      bytes = await loadPdfBytes(url);
     } catch {
       // Fallback to bundled HydraSpecma template PDF
-      const fallbackRes = await fetch("/templates/hydraspecma-coc-template.pdf");
-      if (!fallbackRes.ok) throw new Error("Could not load background template PDF");
-      arrayBuffer = await fallbackRes.arrayBuffer();
+      bytes = await loadPdfBytes("/templates/hydraspecma-coc-template.pdf");
     }
 
-    const doc = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+    // PDF.js may transfer the buffer to its worker, so give it a fresh copy.
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes) }).promise;
     const targetPage = Math.min(Math.max(1, pageIndex + 1), doc.numPages);
     const page = await doc.getPage(targetPage);
     const scale = 2;

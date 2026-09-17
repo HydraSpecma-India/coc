@@ -109,7 +109,7 @@ export function PropertiesPanel() {
   const selected = useSelectedElements();
   const fields = useDesigner((s) => s.fields);
   const readOnly = useDesigner((s) => s.readOnly);
-  const { updateElement, updateElements, removeSelected, duplicateSelected, reorder } = useDesigner();
+  const { updateElement, updateElements, removeSelected, duplicateSelected, reorder } = useDesigner.getState();
 
   if (readOnly) {
     return (
@@ -488,7 +488,7 @@ function TableProps({ el, set }: { el: Extract<TemplateElement, { type: "table" 
 function TemplateProperties() {
   const template = useDesigner((s) => s.template);
   const pageIndex = useDesigner((s) => s.pageIndex);
-  const { updateSettings, updateTemplateMeta, commit } = useDesigner();
+  const { updateSettings, updateTemplateMeta, commit } = useDesigner.getState();
   if (!template) return null;
   const page = template.pages[pageIndex];
   return (

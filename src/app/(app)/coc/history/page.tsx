@@ -4,12 +4,13 @@ import { HistoryClient } from "./history-client";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Completed COCs" };
+const HISTORY_PAGE_SIZE = 50;
 
 export default async function CocHistoryPage() {
   const session = await requireSession();
   let docs: COCDocumentRow[] = [];
   try {
-    docs = await listCocDocuments({ limit: 200 });
+    docs = await listCocDocuments({ limit: HISTORY_PAGE_SIZE });
   } catch (e) {
     console.error("CocHistoryPage DB error:", e);
   }

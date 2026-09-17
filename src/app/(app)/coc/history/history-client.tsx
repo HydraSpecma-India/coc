@@ -33,13 +33,17 @@ interface HistoryClientProps {
   allowedCompanies?: string[];
 }
 
+const HISTORY_PAGE_SIZE = 50;
+
 export function HistoryClient({
   initialDocs,
   allowedCompanies = ["ALL"],
 }: HistoryClientProps) {
-  const [docs] = useState<COCDocumentRow[]>(initialDocs);
+  const [docs, setDocs] = useState<COCDocumentRow[]>(initialDocs);
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(initialDocs.length === HISTORY_PAGE_SIZE);
 
   // Company / Legal Entity Filter
   const defaultCompany =
@@ -133,6 +137,22 @@ export function HistoryClient({
         return <Badge tone="danger">Failed</Badge>;
       default:
         return <Badge tone="warning">{status}</Badge>;
+    }
+  };
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const result = await api<{ ok: boolean; documents: COCDocumentRow[]; hasMore: boolean }>(
+        `/api/coc?offset=${docs.length}&limit=${HISTORY_PAGE_SIZE}`,
+      );
+      setDocs((current) => {
+        const knownIds = new Set(current.map((doc) => doc.id));
+        return [...current, ...result.documents.filter((doc) => !knownIds.has(doc.id))];
+      });
+      setHasMore(result.hasMore);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -507,6 +527,13 @@ export function HistoryClient({
             })}
           </tbody>
         </Table>
+      )}
+      {hasMore && (
+        <div className="mt-6 flex justify-center">
+          <Button variant="secondary" onClick={loadMore} loading={loadingMore}>
+            Load 50 more certificates
+          </Button>
+        </div>
       )}
     </div>
   );

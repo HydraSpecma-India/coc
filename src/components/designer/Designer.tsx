@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -31,7 +31,9 @@ interface Props {
 }
 
 export function Designer(props: Props) {
-  const { init, setFields, undo, redo, removeSelected, duplicateSelected, copySelected, paste, nudge, select, setZoom, align, addElement, toggleGridSnap, toggleShowGrid, markSaved } = useDesigner();
+  // Actions are stable. Reading them directly avoids subscribing this large
+  // component to every store update in addition to the focused selectors below.
+  const { init, setFields, undo, redo, removeSelected, duplicateSelected, copySelected, paste, nudge, select, setZoom, align, addElement, toggleGridSnap, toggleShowGrid, markSaved } = useDesigner.getState();
   const template = useDesigner((s) => s.template);
   const dirty = useDesigner((s) => s.dirty);
   const zoom = useDesigner((s) => s.zoom);
@@ -49,7 +51,10 @@ export function Designer(props: Props) {
   const [publishing, setPublishing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
-  const assetMimeTypes = Object.fromEntries(assets.map((a) => [a.id, a.mime_type]));
+  const assetMimeTypes = useMemo(
+    () => Object.fromEntries(assets.map((a) => [a.id, a.mime_type])),
+    [assets],
+  );
 
   useEffect(() => {
     init(props.initial, readOnly);

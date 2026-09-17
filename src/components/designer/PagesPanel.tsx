@@ -8,7 +8,7 @@ export function PagesPanel() {
   const template = useDesigner((s) => s.template);
   const pageIndex = useDesigner((s) => s.pageIndex);
   const readOnly = useDesigner((s) => s.readOnly);
-  const { setPage, addPage, removePage, movePage } = useDesigner();
+  const { setPage, addPage, removePage, movePage } = useDesigner.getState();
   if (!template) return null;
 
   return (
