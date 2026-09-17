@@ -1,14 +1,12 @@
-import { requireCapability, requireSession } from "@/lib/auth/guards";
+import { requireCapability } from "@/lib/auth/guards";
 import { listTemplates } from "@/lib/db/repositories/templates";
-import { getUserByEmail } from "@/lib/db/repositories/users";
 import { CocWizard } from "./coc-wizard";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "New COC" };
 
 export default async function NewCocPage() {
-  const session = await requireSession();
-  await requireCapability("createCoc");
+  const session = await requireCapability("createCoc");
 
   let templateSummaries: Array<{
     id: string;
@@ -48,8 +46,10 @@ export default async function NewCocPage() {
   );
   const templates = hasStandard ? templateSummaries : [standardTemplate, ...templateSummaries];
 
-  const user = session.user.email ? await getUserByEmail(session.user.email) : null;
-  const allowedCompanies = user?.allowed_companies && user.allowed_companies.length > 0 ? user.allowed_companies : ["ALL"];
+  // Retrieved directly from the JWT session without an extra database round-trip
+  const allowedCompanies = session.user.allowedCompanies && session.user.allowedCompanies.length > 0
+    ? session.user.allowedCompanies
+    : ["ALL"];
 
   return (
     <CocWizard

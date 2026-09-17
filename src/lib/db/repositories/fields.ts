@@ -37,12 +37,31 @@ export interface D365MappingRow {
   field?: FieldDefinitionRow;
 }
 
-export async function listFieldDefinitions(opts: { includeInactive?: boolean } = {}): Promise<FieldDefinitionRow[]> {
+let cachedFields: FieldDefinitionRow[] | null = null;
+let lastFieldsFetch = 0;
+const FIELDS_CACHE_TTL = 60_000; // 60s cache
+
+export function invalidateFieldsCache(): void {
+  cachedFields = null;
+  lastFieldsFetch = 0;
+}
+
+export async function listFieldDefinitions(opts: { includeInactive?: boolean; force?: boolean } = {}): Promise<FieldDefinitionRow[]> {
+  const now = Date.now();
+  if (!opts.force && !opts.includeInactive && cachedFields && now - lastFieldsFetch < FIELDS_CACHE_TTL) {
+    return cachedFields;
+  }
+
   let q = supabaseAdmin().from("coc_field_definitions").select("*").order("sort_order").order("display_name");
   if (!opts.includeInactive) q = q.eq("active", true);
   const { data, error } = await q;
   if (error) throw error;
-  return data as FieldDefinitionRow[];
+  const res = data as FieldDefinitionRow[];
+  if (!opts.includeInactive) {
+    cachedFields = res;
+    lastFieldsFetch = now;
+  }
+  return res;
 }
 
 export async function createFieldDefinition(
@@ -57,6 +76,7 @@ export async function createFieldDefinition(
     .select()
     .single();
   if (error) throw error;
+  invalidateFieldsCache();
   return data as FieldDefinitionRow;
 }
 
@@ -74,6 +94,7 @@ export async function updateFieldDefinition(
     .select()
     .single();
   if (error) throw error;
+  invalidateFieldsCache();
   return data as FieldDefinitionRow;
 }
 
@@ -84,6 +105,7 @@ export async function deleteFieldDefinition(id: string): Promise<void> {
     .update({ active: false, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) throw error;
+  invalidateFieldsCache();
 }
 
 export async function listD365Mappings(): Promise<D365MappingRow[]> {

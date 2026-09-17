@@ -40,20 +40,42 @@ const VERSION_SUMMARY_COLS =
 
 const uid = (id?: string | null) => (id && /^[0-9a-f-]{36}$/i.test(id) ? id : null);
 
-export async function listTemplates(): Promise<(TemplateRow & { versions: TemplateVersionSummary[] })[]> {
+let cachedTemplates: (TemplateRow & { versions: TemplateVersionSummary[] })[] | null = null;
+let lastTemplatesFetch = 0;
+const TEMPLATES_CACHE_TTL = 60_000; // 60-second cache
+
+export function invalidateTemplatesCache(): void {
+  cachedTemplates = null;
+  lastTemplatesFetch = 0;
+}
+
+export async function listTemplates(force = false): Promise<(TemplateRow & { versions: TemplateVersionSummary[] })[]> {
+  const now = Date.now();
+  if (!force && cachedTemplates && now - lastTemplatesFetch < TEMPLATES_CACHE_TTL) {
+    return cachedTemplates;
+  }
+
   const db = supabaseAdmin();
-  const { data: templates, error } = await db.from("coc_templates").select("*").order("updated_at", { ascending: false });
-  if (error) throw error;
-  const { data: versions, error: e2 } = await db
-    .from("coc_template_versions")
-    .select(VERSION_SUMMARY_COLS)
-    .neq("status", "deleted")
-    .order("version_number", { ascending: false });
-  if (e2) throw e2;
-  return (templates as TemplateRow[]).map((t) => ({
+  const [tRes, vRes] = await Promise.all([
+    db.from("coc_templates").select("*").order("updated_at", { ascending: false }),
+    db
+      .from("coc_template_versions")
+      .select(VERSION_SUMMARY_COLS)
+      .neq("status", "deleted")
+      .order("version_number", { ascending: false }),
+  ]);
+
+  if (tRes.error) throw tRes.error;
+  if (vRes.error) throw vRes.error;
+
+  const result = (tRes.data as TemplateRow[]).map((t) => ({
     ...t,
-    versions: (versions as TemplateVersionSummary[]).filter((v) => v.template_id === t.id),
+    versions: (vRes.data as TemplateVersionSummary[]).filter((v) => v.template_id === t.id),
   }));
+
+  cachedTemplates = result;
+  lastTemplatesFetch = now;
+  return result;
 }
 
 export async function getTemplate(id: string): Promise<(TemplateRow & { versions: TemplateVersionSummary[] }) | null> {
@@ -110,6 +132,7 @@ export async function createTemplate(input: {
     .select("*")
     .single();
   if (e2) throw e2;
+  invalidateTemplatesCache();
   return { template: t as TemplateRow, version: v as TemplateVersionRow };
 }
 
@@ -131,6 +154,7 @@ export async function updateTemplate(
     .select("*")
     .single();
   if (error) throw error;
+  invalidateTemplatesCache();
   return data as TemplateRow;
 }
 
@@ -142,6 +166,7 @@ export async function deleteTemplate(id: string): Promise<void> {
   if ((docs ?? 0) > 0) throw Errors.conflict("Documents were generated from this template. Archive it instead.");
   const { error } = await db.from("coc_templates").delete().eq("id", id);
   if (error) throw error;
+  invalidateTemplatesCache();
 }
 
 export async function getVersion(templateId: string, versionId: string): Promise<TemplateVersionRow | null> {
@@ -184,6 +209,7 @@ export async function saveDraft(
     .select("*")
     .single();
   if (error) throw error;
+  invalidateTemplatesCache();
   return data as TemplateVersionRow;
 }
 
@@ -216,6 +242,7 @@ export async function createVersion(templateId: string, fromVersionId: string | 
     .select("*")
     .single();
   if (error) throw error;
+  invalidateTemplatesCache();
   return data as TemplateVersionRow;
 }
 
@@ -237,6 +264,7 @@ export async function publishVersion(templateId: string, versionId: string, user
   if (error) throw error;
   const { error: e2 } = await db.from("coc_templates").update({ active_version_id: versionId, updated_by: uid(userId) }).eq("id", templateId);
   if (e2) throw e2;
+  invalidateTemplatesCache();
   return data as TemplateVersionRow;
 }
 
@@ -248,14 +276,16 @@ export async function deactivateVersion(templateId: string, versionId: string, u
   const { error } = await db.from("coc_template_versions").update({ status: "deprecated" }).eq("id", versionId);
   if (error) throw error;
   await db.from("coc_templates").update({ active_version_id: null, updated_by: uid(userId) }).eq("id", templateId);
+  invalidateTemplatesCache();
 }
 
 export async function setVersionStatus(templateId: string, versionId: string, from: TemplateVersionRow["status"], to: TemplateVersionRow["status"]) {
   const v = await getVersion(templateId, versionId);
   if (!v) throw Errors.notFound("Template version");
-  if (v.status !== from) throw Errors.conflict(`Version is ${v.status}; expected ${from}.`);
+  if (v.status !== from) throw Errors.conflict(`Version is not in '${from}' status.`);
   const { error } = await supabaseAdmin().from("coc_template_versions").update({ status: to }).eq("id", versionId);
   if (error) throw error;
+  invalidateTemplatesCache();
 }
 
 export async function duplicateTemplate(templateId: string, newName: string, userId?: string) {

@@ -14,6 +14,7 @@ declare module "next-auth" {
       name?: string | null;
       role: Role;
       isDev?: boolean;
+      allowedCompanies?: string[];
     };
   }
 }
@@ -47,6 +48,7 @@ if (env().AUTH_MICROSOFT_ENTRA_ID_ID) {
 }
 
 import { verifyUserCredentials } from "@/lib/db/repositories/users";
+import { supabaseAdmin } from "@/lib/db/supabase-admin";
 
 // 1. Password Credentials Provider
 providers.push(
@@ -65,11 +67,19 @@ providers.push(
       try {
         const user = await verifyUserCredentials(email, password);
         if (user) {
+          // Asynchronously update last_login_at in the background without blocking the login response
+          supabaseAdmin()
+            .from("coc_users")
+            .update({ last_login_at: new Date().toISOString() })
+            .eq("id", user.id)
+            .then(() => {}, (e) => logger.warn("Failed to update last_login_at", { error: (e as Error).message }));
+
           return {
             id: user.id,
             email: user.email,
             name: user.display_name || user.email,
             role: user.role,
+            allowed_companies: user.allowed_companies || ["ALL"],
           } as never;
         }
       } catch (err) {
@@ -102,13 +112,14 @@ providers.push(
             email: user.email,
             name: user.display_name || user.email,
             role: user.role,
+            allowed_companies: user.allowed_companies || ["ALL"],
           } as never;
         }
       }
       // Guaranteed Admin role for manigandan.parthasarathi@hydraspecma.com
       const role = email === "manigandan.parthasarathi@hydraspecma.com" ? "Admin" : (isRole(c?.role) ? c.role : "Admin");
       const name = String(c?.name || (email.includes("manigandan") ? "Manigandan Parthasarathi" : "Admin User"));
-      return { id: `local:${email}`, email, name, role, isDev: true } as never;
+      return { id: `local:${email}`, email, name, role, isDev: true, allowed_companies: ["ALL"] } as never;
     },
   }),
 );
@@ -126,6 +137,19 @@ export const authConfig: NextAuthConfig = {
         const claimRole = roleFromClaims(profile);
         const isDev = (user as { isDev?: boolean }).isDev === true;
         const devRole = (user as { role?: Role }).role;
+        const userAllowedCompanies = (user as { allowed_companies?: string[] }).allowed_companies;
+
+        // Fast path for credentials login: user is already verified & loaded from DB
+        if (account?.provider === "credentials" && user.id && !user.id.startsWith("local:")) {
+          token.uid = user.id;
+          token.role = (user as { role?: Role }).role || "Viewer";
+          token.active = true;
+          token.allowed_companies = userAllowedCompanies || ["ALL"];
+          token.isDev = false;
+          token.email = email;
+          return token;
+        }
+
         try {
           const dbUser = await upsertUserOnSignIn({
             entraObjectId: (profile as { oid?: string })?.oid ?? (isDev ? user.id : undefined),
@@ -137,12 +161,14 @@ export const authConfig: NextAuthConfig = {
           token.uid = dbUser.id;
           token.role = dbUser.role;
           token.active = dbUser.active;
+          token.allowed_companies = dbUser.allowed_companies || ["ALL"];
         } catch (err) {
           // Supabase not reachable: allow sign-in with a minimal, non-persisted identity
           logger.error("user upsert failed during sign-in", { email, error: (err as Error).message });
           token.uid = user.id;
           token.role = isDev ? devRole : claimRole ?? (adminEmails().includes(email) ? "Admin" : "Viewer");
           token.active = true;
+          token.allowed_companies = ["ALL"];
         }
         token.isDev = isDev;
         token.email = email;
@@ -154,6 +180,9 @@ export const authConfig: NextAuthConfig = {
       session.user.email = String(token.email ?? "");
       session.user.role = isRole(token.role) ? token.role : "Viewer";
       session.user.isDev = token.isDev === true;
+      session.user.allowedCompanies = Array.isArray(token.allowed_companies)
+        ? (token.allowed_companies as string[])
+        : ["ALL"];
       if (token.active === false) {
         // Deactivated users get a Viewer session with no id → every guard fails.
         session.user.role = "Viewer";
