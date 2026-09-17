@@ -8,7 +8,6 @@ import {
   Th,
   Td,
   Select,
-  Checkbox,
   Badge,
   Alert,
   Button,
@@ -18,13 +17,44 @@ import {
 } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
-import { ROLES, type Role } from "@/lib/auth/roles";
+import { CAPABILITY_DEFINITIONS, type Capability, type Role } from "@/lib/auth/roles";
 import type { UserRow } from "@/lib/db/repositories/users";
-import { UserPlus, KeyRound, Trash2, Search, UserCheck, UserX, Shield } from "lucide-react";
+import type { RoleRow } from "@/lib/db/repositories/roles";
+import {
+  UserPlus,
+  KeyRound,
+  Trash2,
+  Search,
+  UserCheck,
+  UserX,
+  Shield,
+  ShieldCheck,
+  Plus,
+  Edit2,
+  Users as UsersIcon,
+  CheckCircle2,
+  Lock,
+  Sparkles,
+} from "lucide-react";
 
-export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: string }) {
+export function UsersClient({
+  users,
+  initialRoles,
+  selfId,
+}: {
+  users: UserRow[];
+  initialRoles: RoleRow[];
+  selfId: string;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+
+  // Active Tab: "users" or "roles"
+  const [activeTab, setActiveTab] = useState<"users" | "roles">("users");
+
+  // Roles state
+  const [roles, setRoles] = useState<RoleRow[]>(initialRoles);
+  const [loadingRoles, setLoadingRoles] = useState(false);
 
   // Search filter
   const [searchTerm, setSearchTerm] = useState("");
@@ -33,6 +63,18 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
     { code: "HGCN", name: "HydraSpecma China (China)" },
     { code: "HSDK", name: "HydraSpecma Denmark (Denmark)" },
   ]);
+
+  const refreshRoles = async () => {
+    setLoadingRoles(true);
+    try {
+      const res = await api<{ roles: RoleRow[] }>("/api/roles");
+      if (res.roles) setRoles(res.roles);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingRoles(false);
+    }
+  };
 
   useEffect(() => {
     api<{ ok: boolean; companies: { code: string; name: string }[] }>("/api/d365/companies")
@@ -49,7 +91,7 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
   const [createForm, setCreateForm] = useState<{
     displayName: string;
     email: string;
-    role: Role;
+    role: string;
     password: string;
     active: boolean;
     allowedCompany: string;
@@ -73,7 +115,26 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
   const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // Patch role, active state, or company access
+  // Role Create / Edit Modal state
+  const [roleModalOpen, setRoleModalOpen] = useState(false);
+  const [roleModalMode, setRoleModalMode] = useState<"create" | "edit" | "view">("create");
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [roleForm, setRoleForm] = useState<{
+    name: string;
+    description: string;
+    capabilities: Capability[];
+  }>({
+    name: "",
+    description: "",
+    capabilities: ["viewDashboard", "viewCoc"],
+  });
+  const [roleLoading, setRoleLoading] = useState(false);
+
+  // Delete Role Confirmation Modal state
+  const [deleteRoleTarget, setDeleteRoleTarget] = useState<RoleRow | null>(null);
+  const [deleteRoleLoading, setDeleteRoleLoading] = useState(false);
+
+  // Patch user handler
   const patchUser = async (
     id: string,
     body: { role?: string; active?: boolean; displayName?: string; allowed_companies?: string[] }
@@ -84,6 +145,7 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
       startTransition(() => {
         router.refresh();
       });
+      refreshRoles();
     } catch (e) {
       toast.error("Update failed", (e as Error).message);
     }
@@ -114,7 +176,7 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
       setCreateForm({
         displayName: "",
         email: "",
-        role: "Production",
+        role: roles[0]?.name || "Production",
         password: "User@123",
         active: true,
         allowedCompany: "ALL",
@@ -122,6 +184,7 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
       startTransition(() => {
         router.refresh();
       });
+      refreshRoles();
     } catch (e) {
       toast.error("Failed to create user", (e as Error).message);
     } finally {
@@ -138,16 +201,16 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast.error("Passwords do not match", "Please make sure both passwords match.");
+      toast.error("Passwords do not match");
       return;
     }
     setResetLoading(true);
     try {
       await api(`/api/users/${resetTarget.id}/reset-password`, {
         method: "POST",
-        json: { password: newPassword },
+        json: { newPassword },
       });
-      toast.success("Password reset", `New password set for ${resetTarget.email}.`);
+      toast.success("Password reset", `Updated password for ${resetTarget.email}`);
       setResetTarget(null);
       setNewPassword("");
       setConfirmPassword("");
@@ -164,11 +227,12 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
     setDeleteLoading(true);
     try {
       await api(`/api/users/${deleteTarget.id}`, { method: "DELETE" });
-      toast.success("User deleted", `${deleteTarget.email} was removed.`);
+      toast.success("User removed", `${deleteTarget.email} deleted.`);
       setDeleteTarget(null);
       startTransition(() => {
         router.refresh();
       });
+      refreshRoles();
     } catch (e) {
       toast.error("Delete failed", (e as Error).message);
     } finally {
@@ -176,7 +240,122 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
     }
   };
 
+  // Open Create Role modal
+  const openCreateRole = () => {
+    setRoleModalMode("create");
+    setEditingRoleId(null);
+    setRoleForm({
+      name: "",
+      description: "",
+      capabilities: ["viewDashboard", "viewCoc"],
+    });
+    setRoleModalOpen(true);
+  };
+
+  // Open Edit/View Role modal
+  const openEditRole = (role: RoleRow, viewOnly = false) => {
+    setRoleModalMode(viewOnly ? "view" : "edit");
+    setEditingRoleId(role.id);
+    setRoleForm({
+      name: role.name,
+      description: role.description || "",
+      capabilities: role.capabilities || [],
+    });
+    setRoleModalOpen(true);
+  };
+
+  // Toggle capability checkbox
+  const toggleCapability = (cap: Capability) => {
+    if (roleModalMode === "view") return;
+    setRoleForm((prev) => {
+      const exists = prev.capabilities.includes(cap);
+      return {
+        ...prev,
+        capabilities: exists ? prev.capabilities.filter((c) => c !== cap) : [...prev.capabilities, cap],
+      };
+    });
+  };
+
+  const selectAllCapabilities = () => {
+    if (roleModalMode === "view") return;
+    setRoleForm((prev) => ({
+      ...prev,
+      capabilities: CAPABILITY_DEFINITIONS.map((c) => c.key),
+    }));
+  };
+
+  const deselectAllCapabilities = () => {
+    if (roleModalMode === "view") return;
+    setRoleForm((prev) => ({
+      ...prev,
+      capabilities: [],
+    }));
+  };
+
+  // Save Role handler (Create or Edit)
+  const handleSaveRole = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (roleModalMode === "view") {
+      setRoleModalOpen(false);
+      return;
+    }
+
+    if (!roleForm.name.trim()) {
+      toast.error("Role name required", "Please enter a unique name for the role.");
+      return;
+    }
+
+    setRoleLoading(true);
+    try {
+      if (roleModalMode === "create") {
+        await api("/api/roles", {
+          method: "POST",
+          json: {
+            name: roleForm.name.trim(),
+            description: roleForm.description.trim() || undefined,
+            capabilities: roleForm.capabilities,
+          },
+        });
+        toast.success("Role created", `Custom role "${roleForm.name}" created successfully.`);
+      } else if (roleModalMode === "edit" && editingRoleId) {
+        await api(`/api/roles/${editingRoleId}`, {
+          method: "PATCH",
+          json: {
+            name: roleForm.name.trim(),
+            description: roleForm.description.trim() || undefined,
+            capabilities: roleForm.capabilities,
+          },
+        });
+        toast.success("Role updated", `Role "${roleForm.name}" updated successfully.`);
+      }
+      setRoleModalOpen(false);
+      refreshRoles();
+    } catch (err) {
+      toast.error("Failed to save role", (err as Error).message);
+    } finally {
+      setRoleLoading(false);
+    }
+  };
+
+  // Delete Role handler
+  const handleDeleteRole = async () => {
+    if (!deleteRoleTarget) return;
+    setDeleteRoleLoading(true);
+    try {
+      await api(`/api/roles/${deleteRoleTarget.id}`, { method: "DELETE" });
+      toast.success("Role deleted", `Role "${deleteRoleTarget.name}" was deleted.`);
+      setDeleteRoleTarget(null);
+      refreshRoles();
+    } catch (err) {
+      toast.error("Could not delete role", (err as Error).message);
+    } finally {
+      setDeleteRoleLoading(false);
+    }
+  };
+
+  // Filtered users
   const filteredUsers = users.filter((u) => {
+    if (!searchTerm.trim()) return true;
     const q = searchTerm.toLowerCase();
     return (
       (u.display_name && u.display_name.toLowerCase().includes(q)) ||
@@ -189,376 +368,733 @@ export function UsersClient({ users, selfId }: { users: UserRow[]; selfId: strin
     <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
         title="User & Access Management"
-        description="Manage user accounts, assign authorization roles, reset login passwords, and configure access permissions."
+        description="Manage user accounts, assign authorization roles, reset login passwords, and define custom role capabilities."
         actions={
-          <Button
-            variant="primary"
-            onClick={() => setCreateOpen(true)}
-            className="flex items-center gap-1.5 shadow-sm"
-          >
-            <UserPlus className="h-4 w-4" />
-            <span>Add User</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            {activeTab === "users" ? (
+              <Button
+                variant="primary"
+                onClick={() => setCreateOpen(true)}
+                className="flex items-center gap-1.5 shadow-sm"
+              >
+                <UserPlus className="h-4 w-4" />
+                <span>Add User</span>
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                onClick={openCreateRole}
+                className="flex items-center gap-1.5 shadow-sm"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Create New Role</span>
+              </Button>
+            )}
+          </div>
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-4">
-        <div className="rounded-lg border border-ink-200 bg-white p-4 shadow-sm">
-          <div className="text-xs font-medium text-ink-500">Total Users</div>
-          <div className="mt-1 text-2xl font-bold text-ink-900">{users.length}</div>
-        </div>
-        <div className="rounded-lg border border-ink-200 bg-white p-4 shadow-sm">
-          <div className="text-xs font-medium text-ink-500">Active Accounts</div>
-          <div className="mt-1 text-2xl font-bold text-emerald-600">
-            {users.filter((u) => u.active).length}
-          </div>
-        </div>
-        <div className="rounded-lg border border-ink-200 bg-white p-4 shadow-sm">
-          <div className="text-xs font-medium text-ink-500">Administrators</div>
-          <div className="mt-1 text-2xl font-bold text-brand-600">
-            {users.filter((u) => u.role === "Admin").length}
-          </div>
-        </div>
-        <div className="rounded-lg border border-ink-200 bg-white p-4 shadow-sm">
-          <div className="text-xs font-medium text-ink-500">Quality & Production</div>
-          <div className="mt-1 text-2xl font-bold text-sky-600">
-            {users.filter((u) => u.role === "Quality" || u.role === "Production").length}
-          </div>
-        </div>
+      {/* Tabs Switcher */}
+      <div className="flex items-center border-b border-ink-200 gap-4">
+        <button
+          type="button"
+          onClick={() => setActiveTab("users")}
+          className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-semibold transition-colors ${
+            activeTab === "users"
+              ? "border-brand-500 text-brand-700"
+              : "border-transparent text-ink-500 hover:text-ink-900"
+          }`}
+        >
+          <UsersIcon className="h-4 w-4" />
+          <span>Users</span>
+          <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-ink-600 font-mono">
+            {users.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("roles")}
+          className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-semibold transition-colors ${
+            activeTab === "roles"
+              ? "border-brand-500 text-brand-700"
+              : "border-transparent text-ink-500 hover:text-ink-900"
+          }`}
+        >
+          <Shield className="h-4 w-4" />
+          <span>Roles & Permissions</span>
+          <span className="ml-1 rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700 font-mono font-bold">
+            {roles.length}
+          </span>
+        </button>
       </div>
 
-      <Alert tone="info">
-        <div className="space-y-1 text-xs leading-relaxed">
-          <p className="font-semibold text-sky-900">Role Capability Matrix:</p>
-          <p>
-            <strong className="text-ink-900">Admin:</strong> Complete system control, ERP/SSO setup, user management, and template configuration. ·{" "}
-            <strong className="text-ink-900">Production:</strong> Create, edit, and print Certificates of Conformity. ·{" "}
-            <strong className="text-ink-900">Quality:</strong> Review, complete, and certify COCs. ·{" "}
-            <strong className="text-ink-900">Viewer:</strong> Read-only access to completed COCs and audit logs.
-          </p>
-        </div>
-      </Alert>
+      {activeTab === "users" ? (
+        /* ================= USERS TAB ================= */
+        <div className="space-y-6">
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div className="rounded-lg border border-ink-200 bg-white p-4 shadow-sm">
+              <div className="text-xs font-medium text-ink-500">Total Users</div>
+              <div className="mt-1 text-2xl font-bold text-ink-900">{users.length}</div>
+            </div>
+            <div className="rounded-lg border border-ink-200 bg-white p-4 shadow-sm">
+              <div className="text-xs font-medium text-ink-500">Active Accounts</div>
+              <div className="mt-1 text-2xl font-bold text-emerald-600">
+                {users.filter((u) => u.active).length}
+              </div>
+            </div>
+            <div className="rounded-lg border border-ink-200 bg-white p-4 shadow-sm">
+              <div className="text-xs font-medium text-ink-500">Administrators</div>
+              <div className="mt-1 text-2xl font-bold text-brand-600">
+                {users.filter((u) => u.role.toLowerCase() === "admin").length}
+              </div>
+            </div>
+            <div className="rounded-lg border border-ink-200 bg-white p-4 shadow-sm">
+              <div className="text-xs font-medium text-ink-500">Configured Roles</div>
+              <div className="mt-1 text-2xl font-bold text-indigo-600">
+                {roles.length} Roles
+              </div>
+            </div>
+          </div>
 
-      {/* Search Bar */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-ink-400" />
-          <input
-            type="text"
-            placeholder="Search by name, email, or role..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="h-9 w-full rounded-md border border-ink-300 bg-white pl-9 pr-3 text-xs text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-400"
-          />
-        </div>
-      </div>
+          <Alert tone="info">
+            <div className="space-y-1 text-xs leading-relaxed">
+              <p className="font-semibold text-sky-900 flex items-center gap-1.5">
+                <ShieldCheck className="h-4 w-4 text-sky-700" />
+                Role-Based Visibility & Access:
+              </p>
+              <p>
+                Each user's assigned role directly determines what they can see in the sidebar navigation and what actions they are authorized to perform. You can assign any role below or switch to the{" "}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("roles")}
+                  className="font-bold underline text-sky-800 hover:text-sky-950"
+                >
+                  Roles & Permissions tab
+                </button>{" "}
+                to create custom roles with specific view and manage rights.
+              </p>
+            </div>
+          </Alert>
 
-      {/* Users Table */}
-      <Table>
-        <thead>
-          <tr>
-            <Th>User</Th>
-            <Th>Email Address</Th>
-            <Th>Assigned Role</Th>
-            <Th>Company Access</Th>
-            <Th>Status</Th>
-            <Th>Last Sign-in</Th>
-            <Th className="text-right">Actions</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredUsers.length === 0 ? (
-            <tr>
-              <td colSpan={7} className="px-4 py-8 text-center text-ink-400 border-b border-ink-100">
-                No user accounts found matching &quot;{searchTerm}&quot;
-              </td>
-            </tr>
-          ) : (
-            filteredUsers.map((u) => {
-              const isSelf = u.id === selfId;
+          {/* Search Bar */}
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-ink-400" />
+              <input
+                type="text"
+                placeholder="Search by name, email, or role..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full rounded-md border border-ink-200 bg-white py-2 pl-9 pr-3 text-xs placeholder:text-ink-400 focus:border-brand-500 focus:outline-none"
+              />
+            </div>
+            {searchTerm && (
+              <Button variant="ghost" size="sm" onClick={() => setSearchTerm("")}>
+                Clear
+              </Button>
+            )}
+            <span className="ml-auto text-xs text-ink-400">
+              Showing {filteredUsers.length} of {users.length} users
+            </span>
+          </div>
+
+          {/* Users Table */}
+          <div className="overflow-hidden rounded-lg border border-ink-200 bg-white shadow-sm">
+            <Table>
+              <thead>
+                <tr className="border-b border-ink-200 bg-ink-50/70 text-left text-xs font-semibold text-ink-700">
+                  <Th>User</Th>
+                  <Th>Role / Access Level</Th>
+                  <Th>Company Access</Th>
+                  <Th>Status</Th>
+                  <Th>Last Login</Th>
+                  <Th className="text-right">Actions</Th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100 text-xs">
+                {filteredUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-ink-400">
+                      No users match your search criteria.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredUsers.map((u) => {
+                    const isSelf = u.id === selfId;
+                    const assignedRole = roles.find((r) => r.name.toLowerCase() === u.role.toLowerCase());
+                    return (
+                      <tr key={u.id} className="hover:bg-ink-50/50 transition-colors">
+                        <Td>
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-900">
+                              {(u.display_name || u.email).slice(0, 2).toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-ink-900 flex items-center gap-1.5">
+                                {u.display_name || u.email.split("@")[0]}
+                                {isSelf && (
+                                  <Badge tone="info" className="text-[10px] px-1 py-0 font-normal">
+                                    You
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-ink-500 font-mono">{u.email}</div>
+                            </div>
+                          </div>
+                        </Td>
+
+                        {/* Assign Role Dropdown */}
+                        <Td>
+                          <div className="space-y-1">
+                            <Select
+                              value={u.role}
+                              disabled={isSelf}
+                              onChange={(e) => patchUser(u.id, { role: e.target.value })}
+                              className="text-xs font-medium py-1 px-2 border-ink-200 bg-white focus:border-brand-500"
+                              title={isSelf ? "Cannot change your own role" : "Assign user role"}
+                            >
+                              {roles.map((r) => (
+                                <option key={r.id} value={r.name}>
+                                  {r.name} {!r.is_system ? "(Custom)" : ""}
+                                </option>
+                              ))}
+                            </Select>
+                            {assignedRole?.description && (
+                              <p className="text-[10px] text-ink-400 line-clamp-1 max-w-[200px]" title={assignedRole.description}>
+                                {assignedRole.description}
+                              </p>
+                            )}
+                          </div>
+                        </Td>
+
+                        {/* Company Access Dropdown */}
+                        <Td>
+                          <Select
+                            value={u.allowed_companies && u.allowed_companies.length > 0 ? u.allowed_companies[0] : "ALL"}
+                            onChange={(e) => patchUser(u.id, { allowed_companies: [e.target.value] })}
+                            className="text-xs py-1 px-2 border-ink-200 bg-white"
+                          >
+                            <option value="ALL">🌐 ALL Companies (Global)</option>
+                            {companies.map((c) => (
+                              <option key={c.code} value={c.code}>
+                                🏢 {c.code} - {c.name}
+                              </option>
+                            ))}
+                          </Select>
+                        </Td>
+
+                        {/* Status Toggle */}
+                        <Td>
+                          <button
+                            type="button"
+                            disabled={isSelf}
+                            onClick={() => patchUser(u.id, { active: !u.active })}
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                              u.active
+                                ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
+                                : "bg-ink-100 text-ink-600 hover:bg-ink-200"
+                            } ${isSelf ? "cursor-not-allowed opacity-75" : "cursor-pointer"}`}
+                            title={isSelf ? "Cannot deactivate yourself" : "Click to toggle active/deactivated"}
+                          >
+                            {u.active ? <UserCheck className="h-3 w-3" /> : <UserX className="h-3 w-3" />}
+                            {u.active ? "Active" : "Inactive"}
+                          </button>
+                        </Td>
+
+                        <Td className="text-ink-500 font-mono text-[11px]">
+                          {u.last_login_at
+                            ? new Date(u.last_login_at).toLocaleDateString("en-GB", {
+                                day: "2-digit",
+                                month: "short",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : "Never"}
+                        </Td>
+
+                        <Td className="text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setResetTarget(u);
+                                setNewPassword("");
+                                setConfirmPassword("");
+                              }}
+                              className="text-[11px] h-7 px-2"
+                              title="Reset Password"
+                            >
+                              <KeyRound className="h-3 w-3 mr-1 text-ink-500" />
+                              Reset
+                            </Button>
+
+                            {!isSelf && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setDeleteTarget(u)}
+                                className="text-red-600 hover:bg-red-50 h-7 w-7 p-0"
+                                title="Delete user"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        </Td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </Table>
+          </div>
+        </div>
+      ) : (
+        /* ================= ROLES & PERMISSIONS TAB ================= */
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-ink-900">Configured Authorization Roles</h3>
+              <p className="text-xs text-ink-500">
+                Define and manage roles to restrict or grant access to specific pages, tools, and capabilities.
+              </p>
+            </div>
+            <Button variant="primary" onClick={openCreateRole} className="gap-1.5 shadow-sm text-xs">
+              <Plus className="h-4 w-4" />
+              <span>Create New Role</span>
+            </Button>
+          </div>
+
+          {/* Roles Grid */}
+          <div className="grid gap-4 md:grid-cols-2">
+            {roles.map((role) => {
+              const roleCaps = role.capabilities || [];
               return (
-                <tr key={u.id} className="hover:bg-ink-50/50 transition-colors">
-                  <Td className="font-medium text-ink-900">
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-ink-100 text-xs font-bold text-ink-700">
-                        {(u.display_name || u.email).slice(0, 2).toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span>{u.display_name || "—"}</span>
-                          {isSelf && <Badge tone="brand">You</Badge>}
+                <div
+                  key={role.id}
+                  className="rounded-xl border border-ink-200 bg-white p-4 shadow-sm space-y-3.5 flex flex-col justify-between"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-100 text-brand-800">
+                          <Shield className="h-4 w-4" />
                         </div>
+                        <span className="font-bold text-ink-900 text-sm">{role.name}</span>
+                        {role.is_system ? (
+                          <Badge tone="neutral" className="text-[10px] px-1.5 py-0">
+                            System Role
+                          </Badge>
+                        ) : (
+                          <Badge tone="success" className="text-[10px] px-1.5 py-0 flex items-center gap-0.5">
+                            <Sparkles className="h-2.5 w-2.5" />
+                            Custom Role
+                          </Badge>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs font-mono font-semibold text-ink-600 bg-ink-100 px-2 py-0.5 rounded-full">
+                          {role.user_count ?? 0} {role.user_count === 1 ? "user" : "users"}
+                        </span>
                       </div>
                     </div>
-                  </Td>
 
-                  <Td className="text-ink-600 font-mono text-xs">{u.email}</Td>
+                    <p className="text-xs text-ink-600 leading-relaxed min-h-[36px]">
+                      {role.description || "No description provided for this role."}
+                    </p>
 
-                  <Td>
-                    <Select
-                      value={u.role}
-                      disabled={isSelf && u.role === "Admin"}
-                      onChange={(e) => patchUser(u.id, { role: e.target.value })}
-                      className="w-36 h-8 text-xs font-medium"
-                    >
-                      {ROLES.map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
-                      ))}
-                    </Select>
-                  </Td>
+                    {/* Permissions list */}
+                    <div className="pt-2 border-t border-ink-100 space-y-1.5">
+                      <div className="text-[11px] font-semibold text-ink-700 flex items-center justify-between">
+                        <span>Granted Permissions:</span>
+                        <span className="text-[10px] text-ink-400 font-mono">
+                          {roleCaps.length} / {CAPABILITY_DEFINITIONS.length} active
+                        </span>
+                      </div>
 
-                  <Td>
-                    <Select
-                      value={u.allowed_companies?.[0] || "ALL"}
-                      onChange={(e) => patchUser(u.id, { allowed_companies: [e.target.value] })}
-                      className="w-36 h-8 text-xs font-medium"
-                    >
-                      <option value="ALL">All Companies</option>
-                      {companies.map((c) => (
-                        <option key={c.code} value={c.code}>
-                          {c.code} ({c.name.split("(")[0].trim() || c.code})
-                        </option>
-                      ))}
-                    </Select>
-                  </Td>
+                      <div className="flex flex-wrap gap-1">
+                        {CAPABILITY_DEFINITIONS.map((def) => {
+                          const hasCap = roleCaps.includes(def.key);
+                          if (!hasCap) return null;
+                          return (
+                            <span
+                              key={def.key}
+                              className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[10.5px] font-medium text-ink-800 border border-slate-200"
+                              title={def.description}
+                            >
+                              <CheckCircle2 className="h-3 w-3 text-emerald-600 shrink-0" />
+                              {def.label}
+                            </span>
+                          );
+                        })}
+                        {roleCaps.length === 0 && (
+                          <span className="text-[11px] text-ink-400 italic">No permissions granted</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
 
-                  <Td>
-                    <button
-                      type="button"
-                      disabled={isSelf}
-                      onClick={() => patchUser(u.id, { active: !u.active })}
-                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium cursor-pointer transition-colors ${
-                        u.active
-                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
-                          : "bg-ink-100 text-ink-500 border border-ink-200 hover:bg-ink-200"
-                      } ${isSelf ? "cursor-not-allowed opacity-80" : ""}`}
-                      title={isSelf ? "You cannot deactivate your own account" : "Click to toggle active status"}
-                    >
-                      {u.active ? (
-                        <>
-                          <UserCheck className="h-3 w-3" />
-                          <span>Active</span>
-                        </>
-                      ) : (
-                        <>
-                          <UserX className="h-3 w-3" />
-                          <span>Disabled</span>
-                        </>
-                      )}
-                    </button>
-                  </Td>
-
-                  <Td className="text-ink-500 text-xs">
-                    {u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never"}
-                  </Td>
-
-                  <Td className="text-right">
-                    <div className="flex items-center justify-end gap-1.5">
+                  {/* Role Actions */}
+                  <div className="pt-3 border-t border-ink-100 flex items-center justify-between">
+                    {role.is_system ? (
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => {
-                          setResetTarget(u);
-                          setNewPassword("");
-                          setConfirmPassword("");
-                        }}
-                        className="flex items-center gap-1 text-xs text-ink-700 hover:text-ink-900"
-                        title="Reset user password"
+                        onClick={() => openEditRole(role, true)}
+                        className="text-xs h-7 gap-1"
                       >
-                        <KeyRound className="h-3.5 w-3.5 text-ink-500" />
-                        <span>Reset Password</span>
+                        <Lock className="h-3 w-3 text-ink-400" />
+                        <span>View Permissions</span>
                       </Button>
+                    ) : (
+                      <div className="flex items-center gap-2 w-full justify-between">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openEditRole(role, false)}
+                          className="text-xs h-7 gap-1"
+                        >
+                          <Edit2 className="h-3 w-3 text-brand-600" />
+                          <span>Edit Permissions</span>
+                        </Button>
 
-                      {!isSelf && (
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setDeleteTarget(u)}
-                          className="text-red-600 hover:bg-red-50 hover:text-red-700 px-2"
-                          title="Delete user account"
+                          onClick={() => setDeleteRoleTarget(role)}
+                          className="text-xs h-7 gap-1 text-red-600 hover:bg-red-50"
+                          title={
+                            (role.user_count ?? 0) > 0
+                              ? "Cannot delete role while users are assigned"
+                              : "Delete custom role"
+                          }
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="h-3 w-3" />
+                          <span>Delete</span>
                         </Button>
-                      )}
-                    </div>
-                  </Td>
-                </tr>
+                      </div>
+                    )}
+                  </div>
+                </div>
               );
-            })
-          )}
-        </tbody>
-      </Table>
+            })}
+          </div>
+        </div>
+      )}
 
-      {/* Add User Modal */}
-      <Dialog
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        title="Add New User"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              loading={createLoading}
-              onClick={(e) => handleCreateUser(e as never)}
-            >
-              Create User
-            </Button>
-          </>
-        }
-      >
+      {/* ================= MODALS ================= */}
+
+      {/* 1. Create User Modal */}
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} title="Create New User Account">
         <form onSubmit={handleCreateUser} className="space-y-4">
-          <Field label="Full Name">
+          <Field label="Full Name" hint="First and last name of the employee">
             <Input
-              placeholder="e.g. John Doe"
               value={createForm.displayName}
               onChange={(e) => setCreateForm({ ...createForm, displayName: e.target.value })}
+              placeholder="e.g. Rahul Sharma"
             />
           </Field>
 
-          <Field label="Work Email Address *">
+          <Field label="Email Address *" hint="Company email address">
             <Input
               type="email"
               required
-              placeholder="name@hydraspecma.com"
               value={createForm.email}
               onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+              placeholder="user@hydraspecma.com"
             />
           </Field>
 
-          <Field label="System Role *">
+          <Field label="Authorization Role *" hint="Select from standard or custom created roles">
             <Select
               value={createForm.role}
-              onChange={(e) => setCreateForm({ ...createForm, role: e.target.value as Role })}
+              onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })}
             >
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
+              {roles.map((r) => (
+                <option key={r.id} value={r.name}>
+                  {r.name} {!r.is_system ? "(Custom Role)" : `— ${r.description?.slice(0, 45)}...`}
                 </option>
               ))}
             </Select>
           </Field>
 
-          <Field label="Company Access">
+          <Field label="Company Access Permission *" hint="Restricts the legal entity orders this user can view/issue">
             <Select
               value={createForm.allowedCompany}
               onChange={(e) => setCreateForm({ ...createForm, allowedCompany: e.target.value })}
             >
-              <option value="ALL">All Companies (Global Access)</option>
+              <option value="ALL">🌐 ALL Companies (Global Cross-Company Access)</option>
               {companies.map((c) => (
                 <option key={c.code} value={c.code}>
-                  {c.code} - {c.name}
+                  🏢 {c.code} - {c.name}
                 </option>
               ))}
             </Select>
           </Field>
 
-          <Field label="Initial Password" hint="Minimum 4 characters">
+          <Field label="Initial Password" hint="Temporary password for first sign in">
             <Input
               type="text"
-              placeholder="e.g. Welcome@123"
               value={createForm.password}
               onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+              placeholder="User@123"
             />
           </Field>
 
-          <div className="pt-2">
-            <Checkbox
-              label="Account is Active (allows sign-in immediately)"
+          <div className="flex items-center gap-2 pt-2">
+            <input
+              id="createActive"
+              type="checkbox"
               checked={createForm.active}
               onChange={(e) => setCreateForm({ ...createForm, active: e.target.checked })}
+              className="rounded border-ink-300 text-brand-600 focus:ring-brand-500"
             />
+            <label htmlFor="createActive" className="text-xs font-medium text-ink-700">
+              Account Active immediately
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t border-ink-100">
+            <Button variant="outline" type="button" onClick={() => setCreateOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" loading={createLoading}>
+              Create User
+            </Button>
           </div>
         </form>
       </Dialog>
 
-      {/* Reset Password Modal */}
+      {/* 2. Create / Edit Role Modal */}
       <Dialog
-        open={Boolean(resetTarget)}
-        onClose={() => setResetTarget(null)}
-        title={`Reset Password: ${resetTarget?.display_name || resetTarget?.email || "User"}`}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setResetTarget(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              loading={resetLoading}
-              onClick={(e) => handleResetPassword(e as never)}
-            >
-              Update Password
-            </Button>
-          </>
+        open={roleModalOpen}
+        onClose={() => setRoleModalOpen(false)}
+        title={
+          roleModalMode === "create"
+            ? "Create New Custom Role"
+            : roleModalMode === "edit"
+            ? `Edit Role: ${roleForm.name}`
+            : `Role Permissions: ${roleForm.name}`
         }
       >
-        {resetTarget && (
-          <form onSubmit={handleResetPassword} className="space-y-4">
-            <div className="rounded-md bg-ink-50 p-3 text-xs text-ink-600">
-              Setting a new login password for{" "}
-              <strong className="text-ink-900">{resetTarget.email}</strong>. The user can immediately sign in with this password.
+        <form onSubmit={handleSaveRole} className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+          <Field label="Role Name *" hint="Unique name for this role (e.g. Supervisor, Inspector, Auditor)">
+            <Input
+              disabled={roleModalMode === "view"}
+              required
+              value={roleForm.name}
+              onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })}
+              placeholder="e.g. Quality Inspector"
+            />
+          </Field>
+
+          <Field label="Description" hint="Brief explanation of responsibilities and scope">
+            <Input
+              disabled={roleModalMode === "view"}
+              value={roleForm.description}
+              onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })}
+              placeholder="e.g. Authorized to inspect orders, verify checklists, and generate COCs"
+            />
+          </Field>
+
+          {/* Capabilities Selector */}
+          <div className="space-y-2 pt-2 border-t border-ink-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-xs font-bold text-ink-900">
+                  Access Permissions (What this role can see & do)
+                </label>
+                <p className="text-[11px] text-ink-500">
+                  Unchecked options will be hidden from the sidebar navigation and blocked from access.
+                </p>
+              </div>
+
+              {roleModalMode !== "view" && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={selectAllCapabilities}
+                    className="text-[11px] text-brand-700 hover:underline font-semibold"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-ink-300">&bull;</span>
+                  <button
+                    type="button"
+                    onClick={deselectAllCapabilities}
+                    className="text-[11px] text-ink-500 hover:underline"
+                  >
+                    Deselect All
+                  </button>
+                </div>
+              )}
             </div>
 
-            <Field label="New Password *">
-              <Input
-                type="password"
-                required
-                minLength={4}
-                placeholder="Enter new password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-              />
-            </Field>
+            {/* Categories */}
+            {(["Documents & Operations", "Templates & Configuration", "Administration & Security"] as const).map(
+              (category) => {
+                const groupItems = CAPABILITY_DEFINITIONS.filter((c) => c.category === category);
+                return (
+                  <div key={category} className="rounded-lg border border-ink-200 p-3 space-y-2 bg-slate-50/50">
+                    <div className="text-[11px] font-bold text-ink-800 uppercase tracking-wider">
+                      {category}
+                    </div>
 
-            <Field label="Confirm New Password *">
-              <Input
-                type="password"
-                required
-                minLength={4}
-                placeholder="Re-type new password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-              />
-            </Field>
-          </form>
-        )}
+                    <div className="grid gap-2">
+                      {groupItems.map((cap) => {
+                        const checked = roleForm.capabilities.includes(cap.key);
+                        return (
+                          <label
+                            key={cap.key}
+                            className={`flex items-start gap-2.5 p-2 rounded-md border text-xs cursor-pointer transition-colors ${
+                              checked
+                                ? "bg-brand-50/70 border-brand-300 text-ink-900"
+                                : "bg-white border-ink-200 text-ink-600 hover:bg-slate-50"
+                            } ${roleModalMode === "view" ? "cursor-default" : ""}`}
+                          >
+                            <input
+                              type="checkbox"
+                              disabled={roleModalMode === "view"}
+                              checked={checked}
+                              onChange={() => toggleCapability(cap.key)}
+                              className="mt-0.5 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+                            />
+                            <div className="space-y-0.5">
+                              <div className="font-semibold text-ink-900 flex items-center gap-1">
+                                <span>{cap.label}</span>
+                                <code className="text-[10px] text-ink-400 font-mono">({cap.key})</code>
+                              </div>
+                              <div className="text-[11px] text-ink-500">{cap.description}</div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              }
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t border-ink-100">
+            <Button variant="outline" type="button" onClick={() => setRoleModalOpen(false)}>
+              {roleModalMode === "view" ? "Close" : "Cancel"}
+            </Button>
+            {roleModalMode !== "view" && (
+              <Button variant="primary" type="submit" loading={roleLoading}>
+                {roleModalMode === "create" ? "Create Role" : "Save Changes"}
+              </Button>
+            )}
+          </div>
+        </form>
       </Dialog>
 
-      {/* Delete User Confirmation Modal */}
+      {/* 3. Delete Role Modal */}
       <Dialog
-        open={Boolean(deleteTarget)}
-        onClose={() => setDeleteTarget(null)}
-        title="Delete User Account"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
+        open={Boolean(deleteRoleTarget)}
+        onClose={() => setDeleteRoleTarget(null)}
+        title="Confirm Role Deletion"
+      >
+        <div className="space-y-3 text-xs">
+          <p className="text-ink-700">
+            Are you sure you want to delete the custom role{" "}
+            <strong className="text-ink-900">{deleteRoleTarget?.name}</strong>?
+          </p>
+
+          {(deleteRoleTarget?.user_count ?? 0) > 0 ? (
+            <Alert tone="danger">
+              There are currently <strong>{deleteRoleTarget?.user_count}</strong> user(s) assigned to this role. You must reassign those users to another role before deleting.
+            </Alert>
+          ) : (
+            <p className="text-ink-500">
+              This action cannot be undone. Users will no longer be able to receive this role.
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-ink-100">
+            <Button variant="outline" onClick={() => setDeleteRoleTarget(null)}>
               Cancel
             </Button>
             <Button
               variant="danger"
-              loading={deleteLoading}
-              onClick={handleDeleteUser}
+              disabled={(deleteRoleTarget?.user_count ?? 0) > 0}
+              loading={deleteRoleLoading}
+              onClick={handleDeleteRole}
             >
-              Delete User
+              Delete Role
             </Button>
-          </>
-        }
-      >
-        {deleteTarget && (
-          <div className="space-y-3 text-sm text-ink-700">
-            <p>
-              Are you sure you want to permanently delete the account for{" "}
-              <strong className="text-ink-900">{deleteTarget.email}</strong>?
-            </p>
-            <p className="text-xs text-ink-500">
-              This action cannot be undone. All audit history associated with this user ID will be retained.
-            </p>
           </div>
-        )}
+        </div>
+      </Dialog>
+
+      {/* 4. Reset Password Modal */}
+      <Dialog
+        open={Boolean(resetTarget)}
+        onClose={() => setResetTarget(null)}
+        title={`Reset Password: ${resetTarget?.email}`}
+      >
+        <form onSubmit={handleResetPassword} className="space-y-4">
+          <p className="text-xs text-ink-600">
+            Enter a new password for <strong className="text-ink-900">{resetTarget?.email}</strong>. The user can use this password to sign in immediately.
+          </p>
+
+          <Field label="New Password *" hint="Must be at least 4 characters">
+            <Input
+              type="password"
+              required
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="••••••••"
+            />
+          </Field>
+
+          <Field label="Confirm Password *">
+            <Input
+              type="password"
+              required
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="••••••••"
+            />
+          </Field>
+
+          <div className="flex justify-end gap-2 pt-4 border-t border-ink-100">
+            <Button variant="outline" type="button" onClick={() => setResetTarget(null)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" loading={resetLoading}>
+              Save New Password
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* 5. Delete User Confirmation Modal */}
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        title="Confirm User Deletion"
+      >
+        <div className="space-y-3 text-xs">
+          <p className="text-ink-700">
+            Are you sure you want to permanently delete the user account for{" "}
+            <strong className="text-ink-900">{deleteTarget?.email}</strong>?
+          </p>
+          <p className="text-ink-500">
+            This will remove their login access and history. Historical Certificates of Conformity previously issued by this user will remain preserved in the audit log.
+          </p>
+          <div className="flex justify-end gap-2 pt-3 border-t border-ink-100">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button variant="danger" loading={deleteLoading} onClick={handleDeleteUser}>
+              Delete Account
+            </Button>
+          </div>
+        </div>
       </Dialog>
     </div>
   );

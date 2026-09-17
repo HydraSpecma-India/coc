@@ -4,6 +4,7 @@ import Credentials from "next-auth/providers/credentials";
 import { adminEmails, devBypassEnabled, env } from "@/lib/env";
 import { isRole, type Role } from "@/lib/auth/roles";
 import { upsertUserOnSignIn } from "@/lib/db/repositories/users";
+import { getCapabilitiesForRole } from "@/lib/db/repositories/roles";
 import { logger } from "@/lib/logging/logger";
 
 declare module "next-auth" {
@@ -15,6 +16,7 @@ declare module "next-auth" {
       role: Role;
       isDev?: boolean;
       allowedCompanies?: string[];
+      capabilities?: string[];
     };
   }
 }
@@ -145,6 +147,7 @@ export const authConfig: NextAuthConfig = {
           token.role = (user as { role?: Role }).role || "Viewer";
           token.active = true;
           token.allowed_companies = userAllowedCompanies || ["ALL"];
+          token.capabilities = await getCapabilitiesForRole(String(token.role));
           token.isDev = false;
           token.email = email;
           return token;
@@ -162,6 +165,7 @@ export const authConfig: NextAuthConfig = {
           token.role = dbUser.role;
           token.active = dbUser.active;
           token.allowed_companies = dbUser.allowed_companies || ["ALL"];
+          token.capabilities = await getCapabilitiesForRole(dbUser.role);
         } catch (err) {
           // Supabase not reachable: allow sign-in with a minimal, non-persisted identity
           logger.error("user upsert failed during sign-in", { email, error: (err as Error).message });
@@ -169,6 +173,7 @@ export const authConfig: NextAuthConfig = {
           token.role = isDev ? devRole : claimRole ?? (adminEmails().includes(email) ? "Admin" : "Viewer");
           token.active = true;
           token.allowed_companies = ["ALL"];
+          token.capabilities = await getCapabilitiesForRole(String(token.role));
         }
         token.isDev = isDev;
         token.email = email;
@@ -183,10 +188,14 @@ export const authConfig: NextAuthConfig = {
       session.user.allowedCompanies = Array.isArray(token.allowed_companies)
         ? (token.allowed_companies as string[])
         : ["ALL"];
+      session.user.capabilities = Array.isArray(token.capabilities)
+        ? (token.capabilities as string[])
+        : await getCapabilitiesForRole(session.user.role);
       if (token.active === false) {
         // Deactivated users get a Viewer session with no id → every guard fails.
         session.user.role = "Viewer";
         session.user.id = "";
+        session.user.capabilities = [];
       }
       return session;
     },

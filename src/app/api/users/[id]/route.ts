@@ -11,7 +11,7 @@ export const PATCH = route<{ id: string }>(async (req, { params }) => {
   const body = z
     .object({
       displayName: z.string().optional(),
-      role: z.enum(ROLES).optional(),
+      role: z.string().min(1).optional(),
       active: z.boolean().optional(),
       allowed_companies: z.array(z.string()).optional(),
     })

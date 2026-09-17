@@ -12,32 +12,32 @@ import { Toaster } from "@/components/ui/toast";
 import { Badge } from "@/components/ui";
 
 interface Props {
-  user: { name?: string | null; email: string; role: Role; isDev?: boolean };
+  user: { name?: string | null; email: string; role: Role; isDev?: boolean; capabilities?: string[] };
   d365Mode: string;
   storageMode: string;
   children: React.ReactNode;
 }
 
-const nav = (role: Role) => [
+const nav = (role: Role, capabilities?: string[]) => [
   {
     title: "Documents",
     items: [
-      { href: "/", label: "Dashboard", icon: LayoutDashboard, show: true },
-      { href: "/coc/new", label: "New COC", icon: FilePlus2, show: can(role, "createCoc") },
-      { href: "/coc/history", label: "COC History", icon: History, show: can(role, "viewCoc") },
+      { href: "/", label: "Dashboard", icon: LayoutDashboard, show: can(role, "viewDashboard", capabilities) },
+      { href: "/coc/new", label: "New COC", icon: FilePlus2, show: can(role, "createCoc", capabilities) },
+      { href: "/coc/history", label: "COC History", icon: History, show: can(role, "viewCoc", capabilities) },
     ],
   },
   {
     title: "Administration",
     items: [
-      { href: "/admin/templates", label: "Templates", icon: FileText, show: can(role, "viewTemplates") },
-      { href: "/admin/fields", label: "Field Definitions", icon: ListTree, show: can(role, "manageFields") },
-      { href: "/admin/d365-mappings", label: "D365FO Field Mapping", icon: Database, show: can(role, "manageFields") },
-      { href: "/admin/sharepoint", label: "SharePoint Configuration", icon: FolderCog, show: can(role, "manageSettings") },
-      { href: "/admin/users", label: "Users", icon: Users, show: can(role, "manageUsers") },
-      { href: "/admin/signatures", label: "Signatures", icon: PenTool, show: true },
-      { href: "/admin/audit", label: "Audit Logs", icon: ScrollText, show: can(role, "viewAudit") },
-      { href: "/admin/settings", label: "System Settings", icon: Settings, show: can(role, "manageSettings") },
+      { href: "/admin/templates", label: "Templates", icon: FileText, show: can(role, "viewTemplates", capabilities) },
+      { href: "/admin/fields", label: "Field Definitions", icon: ListTree, show: can(role, "manageFields", capabilities) },
+      { href: "/admin/d365-mappings", label: "D365FO Field Mapping", icon: Database, show: can(role, "manageFields", capabilities) },
+      { href: "/admin/sharepoint", label: "SharePoint Configuration", icon: FolderCog, show: can(role, "manageSettings", capabilities) },
+      { href: "/admin/users", label: "Users & Roles", icon: Users, show: can(role, "manageUsers", capabilities) },
+      { href: "/admin/signatures", label: "Signatures", icon: PenTool, show: can(role, "manageSignatures", capabilities) },
+      { href: "/admin/audit", label: "Audit Logs", icon: ScrollText, show: can(role, "viewAudit", capabilities) },
+      { href: "/admin/settings", label: "System Settings", icon: Settings, show: can(role, "manageSettings", capabilities) },
     ],
   },
 ];
@@ -46,7 +46,7 @@ export function AppShell({ user, d365Mode, storageMode, children }: Props) {
   const pathname = usePathname();
   const isDesigner = pathname.includes("/designer/");
   const isCocNew = pathname.startsWith("/coc/new");
-  const groups = nav(user.role);
+  const groups = nav(user.role, user.capabilities);
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -60,7 +60,9 @@ export function AppShell({ user, d365Mode, storageMode, children }: Props) {
             </div>
           </div>
           <nav className="flex-1 overflow-y-auto px-3 py-4">
-            {groups.map((g) => (
+            {groups
+              .filter((g) => g.items.some((i) => i.show))
+              .map((g) => (
               <div key={g.title} className="mb-5">
                 <div className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-ink-400">{g.title}</div>
                 {g.items

@@ -9,7 +9,7 @@ export type AuditAction =
   | "D365_UPDATED" | "RETRIED" | "FAILED" | "SIGNED_IN" | "ROLE_CHANGED" | "SETTINGS_CHANGED";
 
 export interface AuditInput {
-  entityType: "template" | "template_version" | "field_definition" | "coc_document" | "user" | "settings" | "asset";
+  entityType: "template" | "template_version" | "field_definition" | "coc_document" | "user" | "settings" | "asset" | "role";
   entityId?: string;
   action: AuditAction;
   user: { id?: string; email?: string };

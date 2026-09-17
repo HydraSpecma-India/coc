@@ -1,6 +1,7 @@
 import "server-only";
 import { auth } from "@/lib/auth/auth";
 import { can, type Capability } from "@/lib/auth/roles";
+import { getCapabilitiesForRole } from "@/lib/db/repositories/roles";
 import { Errors } from "@/lib/errors";
 import type { Session } from "next-auth";
 
@@ -16,15 +17,21 @@ export async function requireSession(): Promise<AppSession> {
 /** Throws 403 unless the session role has the capability. Authorization lives here, never in the UI. */
 export async function requireCapability(capability: Capability): Promise<AppSession> {
   const session = await requireSession();
-  if (!can(session.user.role, capability)) throw Errors.forbidden(capability.replace(/([A-Z])/g, " $1").toLowerCase());
+  const caps = session.user.capabilities || (await getCapabilitiesForRole(session.user.role));
+  if (!can(session.user.role, capability, caps)) {
+    throw Errors.forbidden(capability.replace(/([A-Z])/g, " $1").toLowerCase());
+  }
   return session;
 }
 
 /** Throws 403 unless the session has one of the required roles. */
 export function requireRole(session: Session, roles: readonly string[]): void {
   const role = (session?.user as { role?: string })?.role;
-  if (!role || !roles.includes(role)) {
+  if (!role) {
     throw Errors.forbidden(`Requires role: ${roles.join(" or ")}`);
   }
-}
+  if (role.toLowerCase() === "admin") return;
+  if (roles.map((r) => r.toLowerCase()).includes(role.toLowerCase())) return;
 
+  throw Errors.forbidden(`Requires role: ${roles.join(" or ")}`);
+}

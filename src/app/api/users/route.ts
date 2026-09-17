@@ -13,7 +13,7 @@ export const GET = route(async () => {
 const CreateUserSchema = z.object({
   email: z.string().email("Invalid email address"),
   displayName: z.string().optional(),
-  role: z.enum(ROLES),
+  role: z.string().min(1, "Role is required"),
   password: z.string().min(4, "Password must be at least 4 characters").optional(),
   active: z.boolean().optional(),
   allowed_companies: z.array(z.string()).optional(),
