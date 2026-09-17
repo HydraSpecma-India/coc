@@ -137,8 +137,8 @@ export function CocDetailClient({
               { id: "VALIDATE", title: "2. Rules Validation" },
               { id: "RENDER", title: "3. PDF Rendering" },
               { id: "SP_UPLOAD", title: "4. Storage Upload" },
-              { id: "D365_UPDATE", title: "5. D365 Registration" },
-              { id: "TEAMS_WEBHOOK", title: "6. Teams Notification" },
+              { id: "TEAMS_WEBHOOK", title: "5. Teams Notification" },
+              { id: "D365_UPDATE", title: "6. D365 Registration" },
             ].map((p) => {
               const match = steps.find((s) => s.step === p.id);
               const status = match ? match.status : "PENDING";
