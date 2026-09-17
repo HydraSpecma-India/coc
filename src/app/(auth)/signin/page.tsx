@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth, hasEntraProvider } from "@/lib/auth/auth";
 import { SignInForm } from "./signin-form";
+import { APP_VERSION } from "@/lib/version";
 
 export const metadata = { title: "Sign in - COC Platform" };
 
@@ -22,7 +23,12 @@ export default async function SignInPage({
             H
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-ink-900">COC Platform</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold tracking-tight text-ink-900">COC Platform</h1>
+              <span className="rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-bold text-brand-800 border border-brand-200">
+                {APP_VERSION}
+              </span>
+            </div>
             <p className="text-xs text-ink-500 font-medium">Certificate of Conformity • HydraSpecma India</p>
           </div>
         </div>

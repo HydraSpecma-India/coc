@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils/cn";
 import { can, type Role } from "@/lib/auth/roles";
 import { Toaster } from "@/components/ui/toast";
 import { Badge } from "@/components/ui";
+import { APP_VERSION } from "@/lib/version";
 
 interface Props {
   user: { name?: string | null; email: string; role: Role; isDev?: boolean; capabilities?: string[] };
@@ -54,8 +55,13 @@ export function AppShell({ user, d365Mode, storageMode, children }: Props) {
         <aside className="flex w-64 shrink-0 flex-col border-r border-ink-200 bg-white">
           <div className="flex h-14 items-center gap-2 border-b border-ink-200 px-4">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-400 font-bold text-ink-900">H</div>
-            <div className="leading-tight">
-              <div className="text-sm font-semibold">COC Platform</div>
+            <div className="min-w-0 flex-1 leading-tight">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-semibold text-ink-900">COC Platform</span>
+                <span className="inline-flex items-center rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold text-brand-800 border border-brand-200">
+                  {APP_VERSION}
+                </span>
+              </div>
               <div className="text-[11px] text-ink-500">HydraSpecma India</div>
             </div>
           </div>
