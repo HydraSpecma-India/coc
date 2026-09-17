@@ -4,7 +4,12 @@ const nextConfig: NextConfig = {
   // Bundle the reference COC so the seed endpoint works on Vercel.
   outputFileTracingIncludes: { "/api/templates/seed": ["./reference/**"] },
   serverExternalPackages: ["pdf-lib", "@pdf-lib/fontkit"],
-  experimental: { serverActions: { bodySizeLimit: "25mb" } },
+  compress: true,
+  poweredByHeader: false,
+  experimental: {
+    serverActions: { bodySizeLimit: "25mb" },
+    optimizePackageImports: ["lucide-react", "@supabase/supabase-js"],
+  },
   headers: async () => [
     {
       source: "/(.*)",

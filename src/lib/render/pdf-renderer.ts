@@ -163,6 +163,39 @@ async function renderSignatureBox(
   });
 }
 
+// In-memory cache for downloaded template PDF background assets & template JSON
+const templateAssetBufferCache = new Map<string, Buffer>();
+const templateVersionCache = new Map<string, { templateJson: any; backgroundAssetId: string | null; cachedAt: number }>();
+let localTemplateBytesCache: Buffer | null = null;
+const TEMPLATE_CACHE_TTL = 300_000; // 5 minutes
+
+export function clearPdfTemplateCaches() {
+  templateAssetBufferCache.clear();
+  templateVersionCache.clear();
+  localTemplateBytesCache = null;
+}
+
+async function getAssetBytes(sb: any, assetId: string): Promise<Buffer | null> {
+  const cached = templateAssetBufferCache.get(assetId);
+  if (cached) return cached;
+
+  const { data: asset } = await sb
+    .from("coc_template_assets")
+    .select("storage_path")
+    .eq("id", assetId)
+    .maybeSingle();
+
+  if (asset?.storage_path) {
+    const { data: fileBlob } = await sb.storage.from(Buckets.templateAssets).download(asset.storage_path);
+    if (fileBlob) {
+      const buf = Buffer.from(await fileBlob.arrayBuffer());
+      templateAssetBufferCache.set(assetId, buf);
+      return buf;
+    }
+  }
+  return null;
+}
+
 export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
   pdfDoc.registerFontkit(fontkit);
@@ -175,31 +208,35 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
   let templateBytes: Buffer | null = null;
   let templateJson: any = null;
 
-  // 1. Resolve template definition and background PDF from Supabase
+  // 1. Resolve template definition and background PDF from Supabase (with caching)
   try {
     const sb = supabaseAdmin();
     let vId = context.templateVersionId;
     const tId = context.templateId || "00000000-0000-0000-0000-000000000001";
+    const now = Date.now();
 
     if (vId) {
-      const { data: ver } = await sb
-        .from("coc_template_versions")
-        .select("id, background_asset_id, template_json, version_number")
-        .eq("id", vId)
-        .maybeSingle();
-      if (ver) {
-        templateJson = ver.template_json;
-        if (ver.background_asset_id) {
-          const { data: asset } = await sb
-            .from("coc_template_assets")
-            .select("storage_path")
-            .eq("id", ver.background_asset_id)
-            .maybeSingle();
-          if (asset?.storage_path) {
-            const { data: fileBlob } = await sb.storage.from(Buckets.templateAssets).download(asset.storage_path);
-            if (fileBlob) {
-              templateBytes = Buffer.from(await fileBlob.arrayBuffer());
-            }
+      const cachedVer = templateVersionCache.get(vId);
+      if (cachedVer && now - cachedVer.cachedAt < TEMPLATE_CACHE_TTL) {
+        templateJson = cachedVer.templateJson;
+        if (cachedVer.backgroundAssetId) {
+          templateBytes = await getAssetBytes(sb, cachedVer.backgroundAssetId);
+        }
+      } else {
+        const { data: ver } = await sb
+          .from("coc_template_versions")
+          .select("id, background_asset_id, template_json, version_number")
+          .eq("id", vId)
+          .maybeSingle();
+        if (ver) {
+          templateJson = ver.template_json;
+          templateVersionCache.set(vId, {
+            templateJson: ver.template_json,
+            backgroundAssetId: ver.background_asset_id,
+            cachedAt: now,
+          });
+          if (ver.background_asset_id) {
+            templateBytes = await getAssetBytes(sb, ver.background_asset_id);
           }
         }
       }
@@ -214,24 +251,27 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
 
       const activeVerId = t?.active_version_id;
       if (activeVerId) {
-        const { data: ver } = await sb
-          .from("coc_template_versions")
-          .select("id, background_asset_id, template_json, version_number")
-          .eq("id", activeVerId)
-          .maybeSingle();
-        if (ver) {
-          templateJson = ver.template_json;
-          if (ver.background_asset_id && !templateBytes) {
-            const { data: asset } = await sb
-              .from("coc_template_assets")
-              .select("storage_path")
-              .eq("id", ver.background_asset_id)
-              .maybeSingle();
-            if (asset?.storage_path) {
-              const { data: fileBlob } = await sb.storage.from(Buckets.templateAssets).download(asset.storage_path);
-              if (fileBlob) {
-                templateBytes = Buffer.from(await fileBlob.arrayBuffer());
-              }
+        const cachedVer = templateVersionCache.get(activeVerId);
+        if (cachedVer && now - cachedVer.cachedAt < TEMPLATE_CACHE_TTL) {
+          templateJson = cachedVer.templateJson;
+          if (cachedVer.backgroundAssetId && !templateBytes) {
+            templateBytes = await getAssetBytes(sb, cachedVer.backgroundAssetId);
+          }
+        } else {
+          const { data: ver } = await sb
+            .from("coc_template_versions")
+            .select("id, background_asset_id, template_json, version_number")
+            .eq("id", activeVerId)
+            .maybeSingle();
+          if (ver) {
+            templateJson = ver.template_json;
+            templateVersionCache.set(activeVerId, {
+              templateJson: ver.template_json,
+              backgroundAssetId: ver.background_asset_id,
+              cachedAt: now,
+            });
+            if (ver.background_asset_id && !templateBytes) {
+              templateBytes = await getAssetBytes(sb, ver.background_asset_id);
             }
           }
         }
@@ -255,12 +295,17 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
     console.warn("Could not load custom template from database/storage, falling back:", err);
   }
 
-  // 2. Fallback to bundled official HydraSpecma template PDF
-  if (!templateBytes && fs.existsSync(templatePath)) {
-    try {
-      templateBytes = fs.readFileSync(templatePath);
-    } catch (e) {
-      console.warn("Could not read local template PDF:", e);
+  // 2. Fallback to bundled official HydraSpecma template PDF (with in-memory buffer cache)
+  if (!templateBytes) {
+    if (localTemplateBytesCache) {
+      templateBytes = localTemplateBytesCache;
+    } else if (fs.existsSync(templatePath)) {
+      try {
+        localTemplateBytesCache = fs.readFileSync(templatePath);
+        templateBytes = localTemplateBytesCache;
+      } catch (e) {
+        console.warn("Could not read local template PDF:", e);
+      }
     }
   }
 

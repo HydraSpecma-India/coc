@@ -10,8 +10,47 @@ export interface D365SearchResult {
   error?: string;
 }
 
+interface CachedToken {
+  token: string;
+  expiresAt: number;
+}
+let cachedD365Token: CachedToken | null = null;
+
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
+const MAX_CACHE_SIZE = 50;
+const poSearchCache = new Map<string, CacheEntry<D365SearchResult>>();
+const soSearchCache = new Map<string, CacheEntry<{ mode: "mock" | "live"; salesOrders: D365SalesOrderLine[]; error?: string }>>();
+let cachedCompaniesList: CacheEntry<{ code: string; name: string }[]> | null = null;
+
+function setBoundedCache<T>(cache: Map<string, CacheEntry<T>>, key: string, entry: CacheEntry<T>) {
+  if (cache.size >= MAX_CACHE_SIZE) {
+    const firstKey = cache.keys().next().value;
+    if (firstKey) cache.delete(firstKey);
+  }
+  cache.set(key, entry);
+}
+
 export class D365Service {
+  /**
+   * Clears in-memory caches (useful if settings change or credentials rotate).
+   */
+  static clearCaches() {
+    cachedD365Token = null;
+    poSearchCache.clear();
+    soSearchCache.clear();
+    cachedCompaniesList = null;
+  }
+
   private static async getAccessToken(config: Awaited<ReturnType<typeof getActiveConfig>>["d365"]): Promise<string> {
+    const now = Date.now();
+    if (cachedD365Token && now < cachedD365Token.expiresAt) {
+      return cachedD365Token.token;
+    }
+
     const tokenUrl = `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`;
     const res = await fetch(tokenUrl, {
       method: "POST",
@@ -30,6 +69,12 @@ export class D365Service {
     }
 
     const data = await res.json();
+    const expiresInSec = typeof data.expires_in === "number" ? data.expires_in : 3600;
+    // Buffer of 120 seconds before actual token expiration
+    cachedD365Token = {
+      token: data.access_token,
+      expiresAt: now + Math.max(60, expiresInSec - 120) * 1000,
+    };
     return data.access_token;
   }
 
@@ -37,6 +82,15 @@ export class D365Service {
     const config = (await getActiveConfig()).d365;
     const targetCompany = (company || config.company || "HSIN").trim();
     const isAllCompanies = targetCompany.toUpperCase() === "ALL";
+
+    const targetStatus = status.trim().toLowerCase();
+    const cleanQ = query.trim();
+    const cacheKey = `${targetCompany.toUpperCase()}|${targetStatus}|${cleanQ.toLowerCase()}`;
+    const now = Date.now();
+    const cached = poSearchCache.get(cacheKey);
+    if (cached && now < cached.expiresAt) {
+      return cached.data;
+    }
 
     // Allowed statuses per user requirements: Released, Started, Reported as finished (ReportedFinished), End (Completed)
     const ALLOWED_STATUS_SET = new Set([
@@ -48,8 +102,6 @@ export class D365Service {
       "ended",
       "end",
     ]);
-
-    const targetStatus = status.trim().toLowerCase();
 
     const matchesStatus = (st?: string) => {
       if (!st) return true;
@@ -99,7 +151,9 @@ export class D365Service {
       // Sort "last to first" (descending order number)
       list.sort((a, b) => b.ProductionOrder.localeCompare(a.ProductionOrder, undefined, { numeric: true, sensitivity: "base" }));
 
-      return { mode: "mock", orders: list };
+      const resObj: D365SearchResult = { mode: "mock", orders: list };
+      setBoundedCache(poSearchCache, cacheKey, { data: resObj, expiresAt: now + 30_000 });
+      return resObj;
     }
 
     // Live D365FO OData
@@ -296,7 +350,9 @@ export class D365Service {
       // 3. Sort "last to first" (descending order number)
       filteredOrders.sort((a, b) => b.ProductionOrder.localeCompare(a.ProductionOrder, undefined, { numeric: true, sensitivity: "base" }));
 
-      return { mode: "live", orders: filteredOrders };
+      const resObj: D365SearchResult = { mode: "live", orders: filteredOrders };
+      setBoundedCache(poSearchCache, cacheKey, { data: resObj, expiresAt: now + 30_000 });
+      return resObj;
     } catch (err) {
       logger.error("D365 live query failed", { error: (err as Error).message });
       return {
@@ -431,6 +487,13 @@ export class D365Service {
       return { mode: config.mode, salesOrders: [] };
     }
 
+    const cacheKey = `${targetCompany.toUpperCase()}|${cleanItem.toLowerCase()}|${statusFilter.toLowerCase()}|${(salesOrder || "").trim().toLowerCase()}`;
+    const now = Date.now();
+    const cached = soSearchCache.get(cacheKey);
+    if (cached && now < cached.expiresAt) {
+      return cached.data;
+    }
+
     if (config.mode === "mock") {
       let salesOrders = getMockSalesOrders(cleanItem, targetCompany, salesOrder);
       if (statusFilter.toLowerCase() === "open") {
@@ -438,7 +501,9 @@ export class D365Service {
           (so) => !so.LineStatus || !/invoiced|canceled|cancelled/i.test(so.LineStatus)
         );
       }
-      return { mode: "mock", salesOrders };
+      const resObj = { mode: "mock" as const, salesOrders };
+      setBoundedCache(soSearchCache, cacheKey, { data: resObj, expiresAt: now + 45_000 });
+      return resObj;
     }
 
     // Live D365FO OData query
@@ -583,13 +648,14 @@ export class D365Service {
 
       if (filteredList.length === 0) {
         const fallback = getMockSalesOrders(cleanItem, targetCompany, salesOrder);
-        return {
-          mode: "live",
-          salesOrders: fallback,
-        };
+        const resObj = { mode: "live" as const, salesOrders: fallback };
+        setBoundedCache(soSearchCache, cacheKey, { data: resObj, expiresAt: now + 45_000 });
+        return resObj;
       }
 
-      return { mode: "live", salesOrders: filteredList };
+      const resObj = { mode: "live" as const, salesOrders: filteredList };
+      setBoundedCache(soSearchCache, cacheKey, { data: resObj, expiresAt: now + 45_000 });
+      return resObj;
     } catch (err) {
       logger.error("D365 getSalesOrdersByItem failed", { itemNumber: cleanItem, error: (err as Error).message });
       const fallback = getMockSalesOrders(cleanItem, targetCompany, salesOrder);
@@ -602,6 +668,11 @@ export class D365Service {
   }
 
   static async getCompanies(): Promise<{ code: string; name: string }[]> {
+    const now = Date.now();
+    if (cachedCompaniesList && now < cachedCompaniesList.expiresAt) {
+      return cachedCompaniesList.data;
+    }
+
     const config = (await getActiveConfig()).d365;
 
     const defaultCompanies: { code: string; name: string }[] = [
@@ -617,6 +688,7 @@ export class D365Service {
     ];
 
     if (config.mode === "mock" || !config.baseUrl || !config.clientId || !config.tenantId) {
+      cachedCompaniesList = { data: defaultCompanies, expiresAt: now + 300_000 };
       return defaultCompanies;
     }
 
@@ -638,7 +710,10 @@ export class D365Service {
                 name: String(item.Name || item.LegalEntityId || ""),
               }))
               .filter((c: any) => c.code);
-            if (list.length > 0) return list;
+            if (list.length > 0) {
+              cachedCompaniesList = { data: list, expiresAt: now + 300_000 };
+              return list;
+            }
           }
         }
       } catch {}
@@ -657,7 +732,10 @@ export class D365Service {
                 name: String(item.name || item.id || ""),
               }))
               .filter((c: any) => c.code);
-            if (list.length > 0) return list;
+            if (list.length > 0) {
+              cachedCompaniesList = { data: list, expiresAt: now + 300_000 };
+              return list;
+            }
           }
         }
       } catch {}
@@ -673,18 +751,22 @@ export class D365Service {
             const rawSet = new Set<string>(json.value.map((item: any) => String(item.dataAreaId || "").toUpperCase()));
             const codes: string[] = Array.from(rawSet).filter(Boolean);
             if (codes.length > 0) {
-              return codes.map((code: string) => {
+              const list = codes.map((code: string) => {
                 const match = defaultCompanies.find((d) => d.code === code);
                 return match || { code, name: `${code} (Dynamics 365)` };
               });
+              cachedCompaniesList = { data: list, expiresAt: now + 300_000 };
+              return list;
             }
           }
         }
       } catch {}
 
+      cachedCompaniesList = { data: defaultCompanies, expiresAt: now + 300_000 };
       return defaultCompanies;
     } catch (err) {
       logger.warn("Could not fetch live legal entities from D365, using default companies", { error: (err as Error).message });
+      cachedCompaniesList = { data: defaultCompanies, expiresAt: now + 60_000 };
       return defaultCompanies;
     }
   }

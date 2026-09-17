@@ -17,6 +17,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `inline; filename="${fileName}"`,
+        "Cache-Control": "private, max-age=86400, stale-while-revalidate=60",
       },
     });
   } catch (err) {

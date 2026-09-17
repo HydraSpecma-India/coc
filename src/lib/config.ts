@@ -53,7 +53,7 @@ export const DEFAULT_TEAMS_WEBHOOK_URL =
 
 let cachedSettings: Record<string, unknown> | null = null;
 let lastFetch = 0;
-const CACHE_TTL_MS = 10_000; // 10s cache to avoid repetitive DB calls
+const CACHE_TTL_MS = 60_000; // 60s cache to avoid repetitive DB calls
 
 export async function fetchAllDbSettings(force = false): Promise<Record<string, unknown>> {
   const now = Date.now();

@@ -828,7 +828,30 @@ export function CocWizard({
     }
 
     fetchSalesOrdersForPO(order.ItemNumber, order.dataAreaId || selectedCompany, order);
-    fetchExistingCocsForPO(order.ProductionOrder, order.ItemNumber);
+
+    // Fast-path: If order.cocList is already available from order search, populate immediately
+    if (Array.isArray(order.cocList)) {
+      setExistingCocs(order.cocList);
+      const count = order.cocList.length;
+      if (count > 0) {
+        const nextIndex = count + 1;
+        const padNext = String(nextIndex).padStart(4, "0");
+        const prefixItem = order.ItemNumber?.trim() || order.ProductionOrder.trim();
+        const autoSuggestedSerial = `${prefixItem} - SN${padNext}`;
+        setManualFields((prev) => ({
+          ...prev,
+          SerialNumber: autoSuggestedSerial,
+        }));
+        setSerialNotice(
+          `Found ${count} previously issued Certificate(s) for this order. Auto-incremented serial number to "${autoSuggestedSerial}".`
+        );
+      } else {
+        setSerialNotice(null);
+      }
+    } else {
+      fetchExistingCocsForPO(order.ProductionOrder, order.ItemNumber);
+    }
+
     fetchProductSequence(order.ItemNumber, order.ItemDescription);
   };
 
