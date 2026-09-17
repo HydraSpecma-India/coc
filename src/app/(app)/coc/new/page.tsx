@@ -14,6 +14,8 @@ export default async function NewCocPage() {
     template_type: string;
     active_version_id: string | null;
     active_version_number: number;
+    applicable_companies?: string[];
+    applicable_items?: string[];
   }> = [];
 
   try {
@@ -26,6 +28,8 @@ export default async function NewCocPage() {
         template_type: t.template_type,
         active_version_id: t.active_version_id,
         active_version_number: activeVer?.version_number || 1,
+        applicable_companies: t.applicable_companies ?? ["ALL"],
+        applicable_items: t.applicable_items ?? ["*"],
       };
     });
   } catch (e) {
@@ -39,6 +43,8 @@ export default async function NewCocPage() {
     template_type: "COC",
     active_version_id: "00000000-0000-0000-0000-000000000002",
     active_version_number: 1,
+    applicable_companies: ["ALL"],
+    applicable_items: ["*"],
   };
 
   const hasStandard = templateSummaries.some(

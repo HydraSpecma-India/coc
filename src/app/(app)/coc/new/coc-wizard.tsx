@@ -53,6 +53,66 @@ interface TemplateSummary {
   template_type: string;
   active_version_id: string | null;
   active_version_number: number;
+  applicable_companies?: string[];
+  applicable_items?: string[];
+}
+
+function getTemplateMatchScore(
+  tpl: TemplateSummary,
+  itemNumber?: string,
+  company?: string
+): { score: number; reason: string | null } {
+  const normComp = (company || "").trim().toUpperCase();
+  const normItem = (itemNumber || "").trim().toLowerCase();
+
+  const compList = (tpl.applicable_companies && tpl.applicable_companies.length > 0 ? tpl.applicable_companies : ["ALL"]).map((c) => c.trim().toUpperCase());
+  const itemList = (tpl.applicable_items && tpl.applicable_items.length > 0 ? tpl.applicable_items : ["*"]).map((i) => i.trim().toLowerCase());
+
+  const matchesAllComp = compList.includes("ALL");
+  const matchesSpecificComp = normComp ? compList.includes(normComp) : false;
+  const compValid = matchesAllComp || matchesSpecificComp;
+
+  const matchesAllItems = itemList.includes("*");
+  const matchesSpecificItem = normItem ? itemList.includes(normItem) : false;
+  const itemValid = matchesAllItems || matchesSpecificItem;
+
+  if (!compValid || !itemValid) {
+    return { score: -1, reason: null };
+  }
+
+  // Priority 1: Both specific item AND specific company
+  if (matchesSpecificItem && matchesSpecificComp) {
+    return { score: 100, reason: `${company} & Item ${itemNumber}` };
+  }
+  // Priority 2: Specific item, all companies
+  if (matchesSpecificItem && matchesAllComp) {
+    return { score: 80, reason: `Item ${itemNumber}` };
+  }
+  // Priority 3: Specific company, all items
+  if (matchesSpecificComp && matchesAllItems) {
+    return { score: 40, reason: `Company ${company}` };
+  }
+  // Priority 4: Default generic template (ALL + *)
+  return { score: 10, reason: "Standard Template" };
+}
+
+function findBestMatchingTemplate(
+  templates: TemplateSummary[],
+  itemNumber?: string,
+  company?: string
+): TemplateSummary | null {
+  let bestTpl: TemplateSummary | null = null;
+  let highestScore = -1;
+
+  for (const tpl of templates) {
+    const { score } = getTemplateMatchScore(tpl, itemNumber, company);
+    if (score > highestScore) {
+      highestScore = score;
+      bestTpl = tpl;
+    }
+  }
+
+  return bestTpl;
 }
 
 function generateAutoSignature(name: string): string {
@@ -129,6 +189,8 @@ export function CocWizard({
   const [uploadPdfName, setUploadPdfName] = useState("");
   const [uploadPdfDesc, setUploadPdfDesc] = useState("");
   const [uploadPdfRevision, setUploadPdfRevision] = useState("Rev 01");
+  const [uploadPdfCompany, setUploadPdfCompany] = useState("ALL");
+  const [uploadPdfItems, setUploadPdfItems] = useState("*");
   const [uploadingPdf, setUploadingPdf] = useState(false);
   const [modifyingTemplate, setModifyingTemplate] = useState(false);
 
@@ -164,6 +226,8 @@ export function CocWizard({
       fd.append("description", uploadPdfDesc.trim() || "Created from uploaded PDF");
       fd.append("revision", uploadPdfRevision.trim() || "Rev 01");
       fd.append("publish", "true");
+      fd.append("applicableCompanies", uploadPdfCompany.trim() || "ALL");
+      fd.append("applicableItems", uploadPdfItems.trim() || "*");
 
       const res = await api<{
         ok: boolean;
@@ -175,12 +239,16 @@ export function CocWizard({
       });
 
       if (res.ok && res.template) {
+        const cos = uploadPdfCompany.trim().split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+        const its = uploadPdfItems.trim().split(",").map((s) => s.trim()).filter(Boolean);
         const newSummary: TemplateSummary = {
           id: res.template.id,
           name: res.template.name,
           template_type: res.template.template_type,
           active_version_id: res.template.active_version_id,
           active_version_number: res.template.active_version_number || 1,
+          applicable_companies: cos.length > 0 ? cos : ["ALL"],
+          applicable_items: its.length > 0 ? its : ["*"],
         };
         setTemplateList((prev) => [newSummary, ...prev]);
         setSelectedTemplateId(newSummary.id);
@@ -188,6 +256,8 @@ export function CocWizard({
         setUploadPdfFile(null);
         setUploadPdfName("");
         setUploadPdfDesc("");
+        setUploadPdfCompany("ALL");
+        setUploadPdfItems("*");
         toast.success(`Template "${newSummary.name}" created from PDF and selected!`);
       }
     } catch (e) {
@@ -677,6 +747,13 @@ export function CocWizard({
       DeliveryDate: order.DeliveryDate ? order.DeliveryDate.slice(0, 10) : prev.DeliveryDate || "",
       SerialNumber: order.SerialNumber || `${order.ItemNumber || order.ProductionOrder} - SN001`,
     }));
+
+    // Automatically match & select the template designated for this PO's Item Number & Company
+    const bestTpl = findBestMatchingTemplate(templateList, order.ItemNumber, order.dataAreaId || selectedCompany);
+    if (bestTpl && bestTpl.id !== selectedTemplateId) {
+      setSelectedTemplateId(bestTpl.id);
+    }
+
     fetchSalesOrdersForPO(order.ItemNumber, order.dataAreaId || selectedCompany, order);
     fetchExistingCocsForPO(order.ProductionOrder, order.ItemNumber);
     fetchProductSequence(order.ItemNumber, order.ItemDescription);
@@ -969,17 +1046,35 @@ export function CocWizard({
                   onChange={(e) => setSelectedTemplateId(e.target.value)}
                   className="h-8 max-w-[240px] sm:max-w-xs truncate rounded border border-ink-300 bg-ink-50/60 px-2.5 py-0 text-xs font-semibold text-ink-900 focus:border-brand-500 focus:bg-white focus:outline-hidden cursor-pointer"
                 >
-                  {templateList.map((tpl) => (
-                    <option key={tpl.id} value={tpl.id}>
-                      {tpl.name} {tpl.active_version_id ? `(v${tpl.active_version_number})` : "(Draft)"}
-                    </option>
-                  ))}
+                  {templateList.map((tpl) => {
+                    const matchInfo = selectedPO
+                      ? getTemplateMatchScore(tpl, selectedPO.ItemNumber, selectedPO.dataAreaId || selectedCompany)
+                      : null;
+                    const isMatch = matchInfo && matchInfo.score >= 40;
+                    return (
+                      <option key={tpl.id} value={tpl.id}>
+                        {isMatch ? "🎯 " : ""}{tpl.name} {tpl.active_version_id ? `(v${tpl.active_version_number})` : "(Draft)"}
+                        {isMatch ? ` [Matches: ${matchInfo.reason}]` : ""}
+                      </option>
+                    );
+                  })}
                 </select>
                 {selectedTemplate && (
                   <Badge tone={selectedTemplate.active_version_id ? "success" : "warning"} className="text-[10px] px-1.5 py-0.5 font-medium shrink-0">
                     {selectedTemplate.active_version_id ? `v${selectedTemplate.active_version_number} Published` : "Draft"}
                   </Badge>
                 )}
+                {selectedPO && (() => {
+                  const matchInfo = getTemplateMatchScore(selectedTemplate, selectedPO.ItemNumber, selectedPO.dataAreaId || selectedCompany);
+                  if (matchInfo && matchInfo.score >= 40) {
+                    return (
+                      <Badge tone="success" className="text-[10px] px-2 py-0.5 font-bold shrink-0 flex items-center gap-1 border-emerald-300 bg-emerald-50 text-emerald-800">
+                        <span>🎯 Matched: {matchInfo.reason}</span>
+                      </Badge>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             </div>
             <div className="flex items-center gap-1.5 ml-auto shrink-0">
@@ -1473,6 +1568,11 @@ export function CocWizard({
                           CustomerPO: manualOrder.CustomerPO || prev.CustomerPO || "4509008214",
                           SerialNumber: manualOrder.SerialNumber || `${manualOrder.ItemNumber} - SN001`,
                         }));
+                        // Auto-match template
+                        const bestTpl = findBestMatchingTemplate(templateList, finalOrder.ItemNumber, finalOrder.dataAreaId || selectedCompany);
+                        if (bestTpl && bestTpl.id !== selectedTemplateId) {
+                          setSelectedTemplateId(bestTpl.id);
+                        }
                         setShowManualModal(false);
                         fetchSalesOrdersForPO(finalOrder.ItemNumber, finalOrder.dataAreaId || selectedCompany, finalOrder);
                         fetchExistingCocsForPO(finalOrder.ProductionOrder, finalOrder.ItemNumber);
@@ -2897,6 +2997,23 @@ export function CocWizard({
             </Field>
             <Field label="Template Type">
               <Input value="COC" readOnly className="bg-ink-50 text-ink-600" />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Applicable Company" hint="ALL or e.g. HSIN, HGCN">
+              <Input
+                value={uploadPdfCompany}
+                onChange={(e) => setUploadPdfCompany(e.target.value)}
+                placeholder="ALL or HSIN, HGCN"
+              />
+            </Field>
+            <Field label="Applicable Item Number(s)" hint="* or e.g. 1070.0049">
+              <Input
+                value={uploadPdfItems}
+                onChange={(e) => setUploadPdfItems(e.target.value)}
+                placeholder="* or 1070.0049"
+              />
             </Field>
           </div>
 

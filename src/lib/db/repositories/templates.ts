@@ -11,6 +11,8 @@ export interface TemplateRow {
   template_type: string;
   status: "active" | "archived";
   active_version_id: string | null;
+  applicable_companies?: string[];
+  applicable_items?: string[];
   created_by: string | null;
   updated_by: string | null;
   created_at: string;
@@ -96,6 +98,8 @@ export async function createTemplate(input: {
   name: string;
   description?: string;
   templateType: string;
+  applicableCompanies?: string[];
+  applicableItems?: string[];
   userId?: string;
   templateJson?: TemplateJson;
 }): Promise<{ template: TemplateRow; version: TemplateVersionRow }> {
@@ -106,6 +110,8 @@ export async function createTemplate(input: {
       name: input.name,
       description: input.description ?? null,
       template_type: input.templateType,
+      applicable_companies: input.applicableCompanies && input.applicableCompanies.length > 0 ? input.applicableCompanies : ["ALL"],
+      applicable_items: input.applicableItems && input.applicableItems.length > 0 ? input.applicableItems : ["*"],
       created_by: uid(input.userId),
       updated_by: uid(input.userId),
     })
@@ -138,7 +144,14 @@ export async function createTemplate(input: {
 
 export async function updateTemplate(
   id: string,
-  patch: { name?: string; description?: string | null; templateType?: string; status?: "active" | "archived" },
+  patch: {
+    name?: string;
+    description?: string | null;
+    templateType?: string;
+    status?: "active" | "archived";
+    applicableCompanies?: string[];
+    applicableItems?: string[];
+  },
   userId?: string,
 ): Promise<TemplateRow> {
   const { data, error } = await supabaseAdmin()
@@ -148,6 +161,8 @@ export async function updateTemplate(
       ...(patch.description !== undefined && { description: patch.description }),
       ...(patch.templateType !== undefined && { template_type: patch.templateType }),
       ...(patch.status !== undefined && { status: patch.status }),
+      ...(patch.applicableCompanies !== undefined && { applicable_companies: patch.applicableCompanies }),
+      ...(patch.applicableItems !== undefined && { applicable_items: patch.applicableItems }),
       updated_by: uid(userId),
     })
     .eq("id", id)
@@ -299,6 +314,8 @@ export async function duplicateTemplate(templateId: string, newName: string, use
     name: newName,
     description: template.description ?? undefined,
     templateType: template.template_type,
+    applicableCompanies: template.applicable_companies,
+    applicableItems: template.applicable_items,
     userId,
     templateJson: json,
   });

@@ -19,6 +19,8 @@ const PatchSchema = z.object({
   description: z.string().trim().max(500).nullable().optional(),
   templateType: z.string().trim().min(1).max(60).optional(),
   status: z.enum(["active", "archived"]).optional(),
+  applicableCompanies: z.array(z.string()).optional(),
+  applicableItems: z.array(z.string()).optional(),
 });
 
 export const PATCH = route<P>(async (req, { params }) => {

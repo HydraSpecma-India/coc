@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, Copy, Sparkles, Archive, Trash2, PencilRuler, Upload, FileUp } from "lucide-react";
+import { Plus, Copy, Sparkles, Archive, Trash2, PencilRuler, Upload, FileUp, Target, Building2, Tag } from "lucide-react";
 import { Button, Badge, Dialog, Field, Input, Select, Textarea, PageHeader, Table, Th, Td, EmptyState } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
@@ -19,10 +19,23 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
   const [uploadName, setUploadName] = useState("");
   const [uploadDesc, setUploadDesc] = useState("");
   const [uploadRev, setUploadRev] = useState("Rev 01");
+  const [uploadCompany, setUploadCompany] = useState("ALL");
+  const [uploadItems, setUploadItems] = useState("*");
   const [dupTarget, setDupTarget] = useState<T | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", description: "", templateType: templateTypes[0] ?? "COC" });
+  const [form, setForm] = useState({
+    name: "",
+    description: "",
+    templateType: templateTypes[0] ?? "COC",
+    applicableCompany: "ALL",
+    applicableItems: "*",
+  });
   const [dupName, setDupName] = useState("");
+
+  // Edit Applicability Modal state
+  const [editApplicabilityTarget, setEditApplicabilityTarget] = useState<T | null>(null);
+  const [applicabilityCompany, setApplicabilityCompany] = useState("ALL");
+  const [applicabilityItems, setApplicabilityItems] = useState("*");
 
   async function handleModifyTemplate(templateId: string) {
     setBusy(`edit-${templateId}`);
@@ -54,6 +67,8 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
       fd.append("description", uploadDesc.trim() || "Created from uploaded PDF");
       fd.append("revision", uploadRev.trim() || "Rev 01");
       fd.append("publish", "true");
+      fd.append("applicableCompanies", uploadCompany.trim() || "ALL");
+      fd.append("applicableItems", uploadItems.trim() || "*");
 
       const res = await api<{ ok: boolean; template: { id: string }; version: { id: string } }>("/api/templates/from-pdf", {
         method: "POST",
@@ -66,6 +81,8 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
         setUploadFile(null);
         setUploadName("");
         setUploadDesc("");
+        setUploadCompany("ALL");
+        setUploadItems("*");
         router.push(`/admin/templates/${res.template.id}/designer/${res.version.id}`);
       }
     } catch (e) {
@@ -78,12 +95,53 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
   async function create() {
     setBusy("create");
     try {
-      const res = await api<{ template: TemplateRow; version: { id: string } }>("/api/templates", { method: "POST", json: form });
+      const cos = form.applicableCompany.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+      const its = form.applicableItems.split(",").map((s) => s.trim()).filter(Boolean);
+      const res = await api<{ template: TemplateRow; version: { id: string } }>("/api/templates", {
+        method: "POST",
+        json: {
+          name: form.name,
+          description: form.description,
+          templateType: form.templateType,
+          applicableCompanies: cos.length > 0 ? cos : ["ALL"],
+          applicableItems: its.length > 0 ? its : ["*"],
+        },
+      });
       toast.success("Template created");
       setCreateOpen(false);
       router.push(`/admin/templates/${res.template.id}/designer/${res.version.id}`);
     } catch (e) {
       toast.error("Could not create template", (e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleSaveApplicability() {
+    if (!editApplicabilityTarget) return;
+    setBusy("saving-applicability");
+    try {
+      const cos = applicabilityCompany
+        .split(",")
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean);
+      const its = applicabilityItems
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      await api(`/api/templates/${editApplicabilityTarget.id}`, {
+        method: "PATCH",
+        json: {
+          applicableCompanies: cos.length > 0 ? cos : ["ALL"],
+          applicableItems: its.length > 0 ? its : ["*"],
+        },
+      });
+      toast.success("Template applicability updated successfully");
+      setEditApplicabilityTarget(null);
+      router.refresh();
+    } catch (e) {
+      toast.error("Failed to update applicability", (e as Error).message);
     } finally {
       setBusy(null);
     }
@@ -171,6 +229,7 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
             <tr>
               <Th>Name</Th>
               <Th>Type</Th>
+              <Th>Applicability</Th>
               <Th>Published</Th>
               <Th>Versions</Th>
               <Th>Updated</Th>
@@ -180,6 +239,8 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
           <tbody>
             {templates.map((t) => {
               const active = t.versions.find((v) => v.id === t.active_version_id);
+              const isAllCompanies = !t.applicable_companies || t.applicable_companies.length === 0 || t.applicable_companies.includes("ALL");
+              const isAllItems = !t.applicable_items || t.applicable_items.length === 0 || t.applicable_items.includes("*");
               return (
                 <tr key={t.id} className="hover:bg-ink-50">
                   <Td>
@@ -192,20 +253,64 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
                   <Td>
                     <Badge tone="brand">{t.template_type}</Badge>
                   </Td>
+                  <Td>
+                    <div className="flex flex-col gap-1 text-xs">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-bold text-ink-400 uppercase">Co:</span>
+                        {isAllCompanies ? (
+                          <Badge tone="neutral" className="text-[10px] px-1.5 py-0.5 font-medium">All Companies</Badge>
+                        ) : (
+                          <span className="flex flex-wrap gap-1">
+                            {t.applicable_companies!.map((c) => (
+                              <Badge key={c} tone="brand" className="text-[10px] px-1.5 py-0.5 font-mono font-semibold">{c}</Badge>
+                            ))}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-bold text-ink-400 uppercase">Item:</span>
+                        {isAllItems ? (
+                          <Badge tone="neutral" className="text-[10px] px-1.5 py-0.5 font-medium">All Items (*)</Badge>
+                        ) : (
+                          <span className="flex flex-wrap gap-1">
+                            {t.applicable_items!.map((it) => (
+                              <Badge key={it} tone="success" className="text-[10px] px-1.5 py-0.5 font-mono font-semibold">{it}</Badge>
+                            ))}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </Td>
                   <Td>{active ? <Badge tone="success">v{active.version_number} · {active.revision}</Badge> : <span className="text-ink-400">—</span>}</Td>
                   <Td>{t.versions.length}</Td>
                   <Td className="text-ink-500">{new Date(t.updated_at).toLocaleString()}</Td>
                   <Td>
                     <div className="flex justify-end gap-1">
                       {canManage && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          loading={busy === `edit-${t.id}`}
-                          onClick={() => handleModifyTemplate(t.id)}
-                        >
-                          <PencilRuler className="h-3.5 w-3.5" /> Design
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            title="Configure Company & Item Applicability"
+                            onClick={() => {
+                              setEditApplicabilityTarget(t);
+                              setApplicabilityCompany(t.applicable_companies?.join(", ") || "ALL");
+                              setApplicabilityItems(t.applicable_items?.join(", ") || "*");
+                            }}
+                            className="h-8 text-xs gap-1 text-ink-700 hover:text-ink-900 border-ink-300"
+                          >
+                            <Target className="h-3.5 w-3.5 text-brand-600" /> Target
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            loading={busy === `edit-${t.id}`}
+                            onClick={() => handleModifyTemplate(t.id)}
+                            className="h-8 text-xs gap-1"
+                          >
+                            <PencilRuler className="h-3.5 w-3.5" /> Design
+                          </Button>
+                        </>
                       )}
                       {canManage && (
                         <>
@@ -241,6 +346,22 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
               {templateTypes.map((t) => <option key={t}>{t}</option>)}
             </Select>
           </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Applicable Company" hint="ALL or e.g. HSIN, HGCN">
+              <Input
+                value={form.applicableCompany}
+                onChange={(e) => setForm({ ...form, applicableCompany: e.target.value })}
+                placeholder="ALL or HSIN, HGCN"
+              />
+            </Field>
+            <Field label="Applicable Item Number(s)" hint="* or e.g. 1070.0049">
+              <Input
+                value={form.applicableItems}
+                onChange={(e) => setForm({ ...form, applicableItems: e.target.value })}
+                placeholder="* or 1070.0049, 1071.0747"
+              />
+            </Field>
+          </div>
           <Field label="Description" hint="(optional)"><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
         </div>
       </Dialog>
@@ -330,6 +451,23 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
             />
           </Field>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Applicable Company" hint="ALL or e.g. HSIN, HGCN">
+              <Input
+                value={uploadCompany}
+                onChange={(e) => setUploadCompany(e.target.value)}
+                placeholder="ALL or HSIN, HGCN"
+              />
+            </Field>
+            <Field label="Applicable Item Number(s)" hint="* or e.g. 1070.0049">
+              <Input
+                value={uploadItems}
+                onChange={(e) => setUploadItems(e.target.value)}
+                placeholder="* or 1070.0049"
+              />
+            </Field>
+          </div>
+
           <Field label="Description (Optional)">
             <Textarea
               value={uploadDesc}
@@ -337,6 +475,46 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
               placeholder="e.g. Customer approved COC layout..."
             />
           </Field>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(editApplicabilityTarget)}
+        onClose={() => setEditApplicabilityTarget(null)}
+        title={`Edit Applicability: ${editApplicabilityTarget?.name || ""}`}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setEditApplicabilityTarget(null)}>Cancel</Button>
+            <Button onClick={handleSaveApplicability} loading={busy === "saving-applicability"}>
+              Save Applicability
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg bg-brand-50/60 p-3 text-xs text-ink-700 border border-brand-200">
+            Configure which legal entity (company) and product item numbers will automatically select and use this Certificate template in the New COC Wizard.
+          </div>
+          <Field label="Applicable Company / Legal Entity" hint="ALL for any company, or e.g. HSIN, HGCN">
+            <Input
+              value={applicabilityCompany}
+              onChange={(e) => setApplicabilityCompany(e.target.value)}
+              placeholder="ALL or HSIN, HGCN, HSDK"
+              autoFocus
+            />
+          </Field>
+          <Field label="Applicable Item / Product Number(s)" hint="* for all items, or comma-separated item numbers">
+            <Input
+              value={applicabilityItems}
+              onChange={(e) => setApplicabilityItems(e.target.value)}
+              placeholder="* or 1070.0049, 1071.0747"
+            />
+          </Field>
+          <div className="text-xs text-ink-600 space-y-1 bg-ink-50 p-3 rounded-md border border-ink-200">
+            <div className="font-semibold text-ink-800">Targeting Rules:</div>
+            <div>&bull; <strong className="text-ink-900 font-mono">ALL &bull; *</strong> : General template applicable for all companies and all products.</div>
+            <div>&bull; <strong className="text-ink-900 font-mono">HSIN &bull; 1070.0049</strong> : Automatically prioritized and selected whenever item 1070.0049 is chosen in HSIN.</div>
+          </div>
         </div>
       </Dialog>
     </div>

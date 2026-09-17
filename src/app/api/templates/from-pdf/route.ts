@@ -18,6 +18,14 @@ export const POST = route(async (req) => {
   const revision = (formData.get("revision") as string | null)?.trim() || "Rev 01";
   const publishParam = formData.get("publish");
   const shouldPublish = publishParam === null || publishParam === "true" || publishParam === "1";
+  const applicableCompaniesRaw = (formData.get("applicableCompanies") as string | null)?.trim();
+  const applicableItemsRaw = (formData.get("applicableItems") as string | null)?.trim();
+  const applicableCompanies = applicableCompaniesRaw
+    ? applicableCompaniesRaw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
+    : ["ALL"];
+  const applicableItems = applicableItemsRaw
+    ? applicableItemsRaw.split(",").map((s) => s.trim()).filter(Boolean)
+    : ["*"];
 
   if (!file) {
     throw Errors.validation("A PDF file is required.");
@@ -103,6 +111,8 @@ export const POST = route(async (req) => {
     name,
     description,
     templateType: "COC",
+    applicableCompanies,
+    applicableItems,
     userId: session.user.id,
     templateJson,
   });
