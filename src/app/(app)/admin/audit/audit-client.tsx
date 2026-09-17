@@ -42,7 +42,7 @@ export function AuditClient({ initialLogs }: { initialLogs: AuditLogRow[] }) {
   });
 
   return (
-    <div className="mx-auto max-w-6xl pb-16">
+    <div className="w-full pb-16">
       <PageHeader
         title="Audit Trail"
         description="Immutable record of document generations, template revisions, role updates, and system configuration changes."

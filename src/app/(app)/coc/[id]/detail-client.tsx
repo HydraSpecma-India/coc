@@ -84,7 +84,7 @@ export function CocDetailClient({
   const hasFailedStep = steps.some((s) => s.status === "FAILED");
 
   return (
-    <div className="mx-auto max-w-6xl pb-16">
+    <div className="w-full pb-16">
       <div className="mb-4">
         <Link href="/coc/history" className="inline-flex items-center gap-1 text-xs font-medium text-ink-500 hover:text-ink-900">
           <ArrowLeft className="h-3.5 w-3.5" /> Back to Completed COCs

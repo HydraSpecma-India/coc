@@ -150,7 +150,7 @@ export function FieldsClient({ initialFields }: { initialFields: FieldDefinition
   };
 
   return (
-    <div className="mx-auto max-w-6xl pb-16">
+    <div className="w-full pb-16">
       <PageHeader
         title="Field Definitions"
         description="Catalog of dynamic data fields available in the document designer, mapped from D365FO, manual inputs, and system calculations."

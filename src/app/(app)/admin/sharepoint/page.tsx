@@ -16,7 +16,7 @@ export default async function SharePointPage() {
   );
 
   return (
-    <div className="mx-auto max-w-5xl pb-16">
+    <div className="w-full pb-16">
       <PageHeader
         title="SharePoint Document Integration"
         description="Configure automated archiving of finalized Certificate of Conformity PDFs directly into your Microsoft 365 SharePoint document libraries."

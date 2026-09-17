@@ -1080,7 +1080,7 @@ export function CocWizard({
     <div className="flex h-full w-full overflow-hidden">
       {/* Center Main Scrollable Workflow Canvas */}
       <div className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="mx-auto max-w-5xl space-y-6 pb-20">
+        <div className="w-full space-y-6 pb-20">
           <PageHeader
             title="Create Certificate of Conformity"
             description="Issue an official COC by selecting a production order, validating quality parameters, and applying an authorized digital signature."
@@ -1751,7 +1751,7 @@ export function CocWizard({
                   </div>
                 )
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
                   {displayedResults.map((order) => {
                     const isSelected = selectedPO?.ProductionOrder === order.ProductionOrder;
                     const entityBadge = order.dataAreaId || (order.CustomerAccount ? order.CustomerAccount.toUpperCase() : selectedCompany);

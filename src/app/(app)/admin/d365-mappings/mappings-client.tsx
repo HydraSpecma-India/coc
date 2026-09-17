@@ -91,7 +91,7 @@ export function MappingsClient({
   };
 
   return (
-    <div className="mx-auto max-w-6xl pb-16">
+    <div className="w-full pb-16">
       <PageHeader
         title="D365FO Field Mappings"
         description="Bind document template fields directly to Dynamics 365 Finance & Operations OData entities and properties."

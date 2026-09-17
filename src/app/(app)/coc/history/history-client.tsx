@@ -157,7 +157,7 @@ export function HistoryClient({
   };
 
   return (
-    <div className="mx-auto max-w-7xl pb-16">
+    <div className="w-full pb-16">
       <PageHeader
         title="Completed Certificates of Conformity"
         description="Search, view, and download completed Certificates of Conformity issued across all production orders."
@@ -298,8 +298,7 @@ export function HistoryClient({
           </div>
         </div>
       ) : viewMode === "grid" ? (
-        /* Visual Cards Grid Layout (Identical to COC Wizard Selection Grid) */
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
           {filtered.map((d) => {
             const docCtx = (d.d365_context_json || {}) as Record<string, unknown>;
             const docCompany = (

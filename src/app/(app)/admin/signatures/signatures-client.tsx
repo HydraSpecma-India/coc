@@ -115,7 +115,7 @@ export function SignaturesClient({ initialSignatures }: { initialSignatures: Sig
   };
 
   return (
-    <div className="mx-auto max-w-5xl pb-16">
+    <div className="w-full pb-16">
       <PageHeader
         title="Stored Signatures"
         description="Manage official digital quality signatures that can be attached to Certificates of Conformity."

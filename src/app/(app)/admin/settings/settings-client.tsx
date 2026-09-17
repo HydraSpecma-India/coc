@@ -137,7 +137,7 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
   };
 
   return (
-    <div className="mx-auto max-w-5xl pb-16">
+    <div className="w-full pb-16">
       <PageHeader
         title="System Settings & Integrations"
         description="Configure Dynamics 365, Microsoft Entra SSO, SharePoint, and application rules. Settings are saved to Supabase and take effect immediately."

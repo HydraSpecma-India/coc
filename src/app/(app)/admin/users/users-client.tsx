@@ -365,7 +365,7 @@ export function UsersClient({
   });
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="w-full space-y-6">
       <PageHeader
         title="User & Access Management"
         description="Manage user accounts, assign authorization roles, reset login passwords, and define custom role capabilities."

@@ -196,7 +196,7 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
   }
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="w-full">
       <PageHeader
         title="Templates"
         description="Document templates with version control. Only one version per template can be published at a time."

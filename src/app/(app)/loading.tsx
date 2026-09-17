@@ -1,6 +1,6 @@
 export default function ModuleLoading() {
   return (
-    <div className="mx-auto max-w-6xl animate-pulse space-y-6 pb-12">
+    <div className="w-full animate-pulse space-y-6 pb-12">
       {/* Header Skeleton */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-ink-100 pb-4">
         <div className="space-y-2">

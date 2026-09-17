@@ -28,7 +28,7 @@ export default async function Dashboard() {
   const published = templates.filter((t) => t.active_version_id);
 
   return (
-    <div className="mx-auto max-w-6xl pb-16">
+    <div className="w-full pb-16">
       <PageHeader
         title={`Welcome, ${session.user.name || session.user.email}`}
         description="Certificate of Conformity automation for HydraSpecma."
