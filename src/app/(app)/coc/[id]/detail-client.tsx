@@ -87,7 +87,7 @@ export function CocDetailClient({
     <div className="mx-auto max-w-6xl pb-16">
       <div className="mb-4">
         <Link href="/coc/history" className="inline-flex items-center gap-1 text-xs font-medium text-ink-500 hover:text-ink-900">
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to COC History
+          <ArrowLeft className="h-3.5 w-3.5" /> Back to Completed COCs
         </Link>
       </div>
 

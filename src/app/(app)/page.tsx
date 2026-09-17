@@ -79,9 +79,9 @@ export default async function Dashboard() {
 
         <Link href="/coc/history" className="group rounded-lg border border-ink-200 bg-white p-5 hover:border-brand-500 hover:shadow-sm transition-all">
           <History className="h-6 w-6 text-brand-600" />
-          <div className="mt-3 font-semibold text-ink-900">COC History</div>
-          <div className="mt-1 text-sm text-ink-500">Search and download issued certificates with tracking pipelines.</div>
-          <div className="mt-3 flex items-center gap-1 text-xs font-medium text-brand-700 group-hover:underline">View History <ArrowRight className="h-3 w-3" /></div>
+          <div className="mt-3 font-semibold text-ink-900">Completed COCs</div>
+          <div className="mt-1 text-sm text-ink-500">Search, view cards, and download completed certificates across production orders.</div>
+          <div className="mt-3 flex items-center gap-1 text-xs font-medium text-brand-700 group-hover:underline">View Completed COCs <ArrowRight className="h-3 w-3" /></div>
         </Link>
 
         {can(session.user.role, "viewTemplates") && (

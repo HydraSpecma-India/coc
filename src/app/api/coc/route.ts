@@ -138,6 +138,7 @@ export const POST = route(async (req) => {
       unitOfMeasure: parsed.unitOfMeasure,
       customerPartNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
       externalItemNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
+      dataAreaId: parsed.customerAccount || "HSIN",
     },
     userId: session.user.id,
   });

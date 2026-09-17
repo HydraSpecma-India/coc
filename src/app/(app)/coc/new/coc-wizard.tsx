@@ -228,9 +228,13 @@ export function CocWizard({
   }, []);
 
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL_ACTIVE");
+  const [showOnlyPending, setShowOnlyPending] = useState<boolean>(true);
   const [poQuery, setPoQuery] = useState("");
   const [searchResults, setSearchResults] = useState<D365ProductionOrder[]>([]);
   const [selectedPO, setSelectedPO] = useState<D365ProductionOrder | null>(null);
+
+  const fullyCertifiedCount = searchResults.filter((o) => o.isFullyCertified).length;
+  const displayedResults = searchResults.filter((order) => !showOnlyPending || !order.isFullyCertified);
   const [searching, setSearching] = useState(false);
   const [d365Mode, setD365Mode] = useState<"mock" | "live">("mock");
   const [d365Error, setD365Error] = useState<string | null>(null);
@@ -1222,9 +1226,29 @@ export function CocWizard({
                       {st.label}
                     </button>
                   ))}
-                  <span className="ml-auto text-[11px] font-medium text-brand-800 bg-brand-50 px-2 py-0.5 rounded border border-brand-200">
-                    Sorted: Last to First &darr;
-                  </span>
+                  <div className="ml-auto flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowOnlyPending((prev) => !prev)}
+                      className={`px-2.5 py-0.5 rounded text-[11px] font-medium border transition-colors flex items-center gap-1.5 ${
+                        showOnlyPending
+                          ? "bg-emerald-50 text-emerald-800 border-emerald-300 font-bold shadow-2xs"
+                          : "bg-white text-ink-600 border-ink-200 hover:bg-ink-100"
+                      }`}
+                      title={showOnlyPending ? "Currently showing only open orders pending COC certification" : "Showing all orders including certified"}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${showOnlyPending ? "bg-emerald-600" : "bg-ink-400"}`} />
+                      {showOnlyPending ? "Pending COC Only" : "Show All Orders"}
+                      {fullyCertifiedCount > 0 && (
+                        <span className={`text-[10px] px-1.5 py-0 rounded-full font-semibold ${showOnlyPending ? "bg-emerald-200 text-emerald-900" : "bg-ink-100 text-ink-600"}`}>
+                          {showOnlyPending ? `${fullyCertifiedCount} certified hidden` : `${fullyCertifiedCount} certified`}
+                        </span>
+                      )}
+                    </button>
+                    <span className="text-[11px] font-medium text-brand-800 bg-brand-50 px-2 py-0.5 rounded border border-brand-200">
+                      Sorted: Last to First &darr;
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -1402,39 +1426,76 @@ export function CocWizard({
               )}
 
               {/* Order Cards / Empty State */}
-              {searchResults.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-ink-300 p-8 text-center bg-ink-50/50">
-                  <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-ink-100 text-ink-500">
-                    <Search className="h-5 w-5" />
+              {displayedResults.length === 0 ? (
+                searchResults.length > 0 && fullyCertifiedCount > 0 && showOnlyPending ? (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-8 text-center animate-in fade-in">
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 mb-3 shadow-2xs">
+                      <FileCheck className="h-6 w-6" />
+                    </div>
+                    <h4 className="text-base font-bold text-ink-900">
+                      All {searchResults.length} Production Orders in this view are already certified
+                    </h4>
+                    <p className="mt-1.5 text-xs text-ink-600 max-w-lg mx-auto">
+                      All matching production orders have completed Certificates of Conformity issued. You can find and view them anytime in the <strong>Completed COCs</strong> module.
+                    </p>
+                    <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+                      <Link
+                        href="/coc/history"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-xs transition-colors"
+                      >
+                        <FileCheck className="h-4 w-4" />
+                        Go to Completed COCs &rarr;
+                      </Link>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setShowOnlyPending(false)}
+                      >
+                        Show All {searchResults.length} Orders Here
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openManualOrder(poQuery)}
+                      >
+                        + Create Manual Order
+                      </Button>
+                    </div>
                   </div>
-                  <h4 className="mt-3 text-sm font-semibold text-ink-900">
-                    {poQuery ? `No orders found matching "${poQuery}"` : "No production orders available"}
-                  </h4>
-                  <p className="mt-1 text-xs text-ink-500 max-w-md mx-auto">
-                    {d365Mode === "mock"
-                      ? "No matching orders found in the standard catalog. You can click below to use this number directly, or connect Live ERP in Admin Settings."
-                      : "Dynamics 365 did not return any records for this query. You can enter details manually to continue."}
-                  </p>
-                  <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-                    <Button
-                      size="sm"
-                      onClick={() => openManualOrder(poQuery)}
-                      className="gap-1.5"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Use &quot;{poQuery || "1071.0747"}&quot; as Production Order
-                    </Button>
-                    <Link
-                      href="/admin/settings"
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:text-brand-800 underline"
-                    >
-                      D365 Settings <ExternalLink className="h-3 w-3" />
-                    </Link>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-ink-300 p-8 text-center bg-ink-50/50">
+                    <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-ink-100 text-ink-500">
+                      <Search className="h-5 w-5" />
+                    </div>
+                    <h4 className="mt-3 text-sm font-semibold text-ink-900">
+                      {poQuery ? `No orders found matching "${poQuery}"` : "No production orders available"}
+                    </h4>
+                    <p className="mt-1 text-xs text-ink-500 max-w-md mx-auto">
+                      {d365Mode === "mock"
+                        ? "No matching orders found in the standard catalog. You can click below to use this number directly, or connect Live ERP in Admin Settings."
+                        : "Dynamics 365 did not return any records for this query. You can enter details manually to continue."}
+                    </p>
+                    <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                      <Button
+                        size="sm"
+                        onClick={() => openManualOrder(poQuery)}
+                        className="gap-1.5"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Use &quot;{poQuery || "1071.0747"}&quot; as Production Order
+                      </Button>
+                      <Link
+                        href="/admin/settings"
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:text-brand-800 underline"
+                      >
+                        D365 Settings <ExternalLink className="h-3 w-3" />
+                      </Link>
+                    </div>
                   </div>
-                </div>
+                )
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
-                  {searchResults.map((order) => {
+                  {displayedResults.map((order) => {
                     const isSelected = selectedPO?.ProductionOrder === order.ProductionOrder;
                     const entityBadge = order.dataAreaId || (order.CustomerAccount ? order.CustomerAccount.toUpperCase() : selectedCompany);
                     const status = order.ProductionOrderStatus;

@@ -24,7 +24,7 @@ const nav = (role: Role, capabilities?: string[]) => [
     items: [
       { href: "/", label: "Dashboard", icon: LayoutDashboard, show: can(role, "viewDashboard", capabilities) },
       { href: "/coc/new", label: "New COC", icon: FilePlus2, show: can(role, "createCoc", capabilities) },
-      { href: "/coc/history", label: "COC History", icon: History, show: can(role, "viewCoc", capabilities) },
+      { href: "/coc/history", label: "Completed COCs", icon: History, show: can(role, "viewCoc", capabilities) },
     ],
   },
   {
