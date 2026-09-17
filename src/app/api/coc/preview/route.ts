@@ -16,6 +16,7 @@ export async function POST(req: Request) {
     customerPartNumber: body.customerPartNumber || body.manualValues?.["CustomerPartNo"] || "160072",
     salesOrder: body.salesOrder,
     batchNumber: body.batchNumber,
+    deliveryDate: body.deliveryDate || body.manualValues?.["DeliveryDate"] || "",
     serialNumber: body.serialNumber || body.manualValues?.["SerialNumber"] || "",
     quantity: body.quantity || 1,
     unitOfMeasure: body.unitOfMeasure || "Pcs",

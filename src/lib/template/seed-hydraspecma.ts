@@ -132,7 +132,7 @@ export function buildHydraSpecmaSeed(backgroundAssetId: string, pageCount: numbe
       }),
 
       // Labels for Order Details
-      text("p1-lbl-batch", "Batch number:", 60, 317, 200, 14, {
+      text("p1-lbl-delivery-date", "Production order delivery date:", 60, 317, 200, 14, {
         style: { fontFamily: "Helvetica", fontSize: 9, bold: true },
       }),
       text("p1-lbl-qty", "Quantity / Unit:", 60, 338, 200, 14, {
@@ -153,7 +153,7 @@ export function buildHydraSpecmaSeed(backgroundAssetId: string, pageCount: numbe
       field("p1-hsre-part", "HSREPartNumber", 60, 282, 150, 14, { name: "HSRE part no." }),
       field("p1-cust-part", "CustomerPartNumber", 230, 282, 150, 14, { name: "Customer part no." }),
       field("p1-desc", "ItemDescription", 395, 282, 155, 14, { name: "Description" }),
-      field("p1-batch", "BatchNumber", 374, 317, 176, 14, { name: "Batch number" }),
+      field("p1-delivery-date", "DeliveryDate", 374, 317, 176, 14, { name: "Production order delivery date" }),
       field("p1-qty", "Quantity", 374, 338, 176, 14, { name: "Quantity / Unit" }),
       field("p1-customer-po", "CustomerPO", 374, 358, 176, 15, { name: "Customer Purchase order" }),
       field("p1-top-serial", "TopLevelSerialNumber", 430, 379, 120, 14, { name: "Top level Serial number", binding: { required: true } }),

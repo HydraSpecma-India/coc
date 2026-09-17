@@ -13,6 +13,7 @@ export interface RenderContext {
   customerPartNumber?: string;
   salesOrder?: string;
   batchNumber?: string;
+  deliveryDate?: string;
   serialNumber?: string;
   quantity?: number;
   unitOfMeasure?: string;
@@ -64,8 +65,27 @@ function resolveFieldValue(fieldName: string, context: RenderContext, element?: 
   if (fn === "salesorder") {
     return context.salesOrder || "";
   }
+  if (
+    fn === "deliverydate" ||
+    fn === "productionorderdeliverydate" ||
+    fn === "prodorderdeliverydate" ||
+    fn === "orderdeliverydate"
+  ) {
+    return (
+      context.deliveryDate ||
+      context.manualValues?.["DeliveryDate"] ||
+      context.manualValues?.["ProductionOrderDeliveryDate"] ||
+      context.manualValues?.["Delivery Date"] ||
+      ""
+    );
+  }
   if (fn === "batchnumber") {
-    return context.batchNumber || "";
+    return (
+      context.deliveryDate ||
+      context.manualValues?.["DeliveryDate"] ||
+      context.batchNumber ||
+      ""
+    );
   }
   if (fn === "productionquantity" || fn === "quantity") {
     return context.quantity !== undefined ? String(context.quantity) : "";

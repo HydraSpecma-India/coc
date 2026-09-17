@@ -29,6 +29,7 @@ export const POST = route(async (_req, { params }) => {
         } catch {}
       }
 
+      const ctx = (doc.d365_context_json as Record<string, any>) || {};
       await TeamsService.sendCocToTeams({
         cocId: doc.id,
         cocNumber: doc.coc_number || `COC-${doc.id.slice(0, 8)}`,
@@ -36,6 +37,8 @@ export const POST = route(async (_req, { params }) => {
         itemNumber: doc.item_number || "",
         itemDescription: doc.item_description || "",
         customerPO: doc.customer_po,
+        customerName: ctx.customerName,
+        deliveryDate: ctx.deliveryDate,
         salesOrder: doc.sales_order,
         serialNumber: doc.serial_number,
         quantity: doc.quantity,

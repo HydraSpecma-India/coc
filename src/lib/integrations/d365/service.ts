@@ -90,7 +90,8 @@ export class D365Service {
             po.CustomerPartNumber?.toLowerCase().includes(q) ||
             po.CustomerName.toLowerCase().includes(q) ||
             po.CustomerPO.toLowerCase().includes(q) ||
-            po.BatchNumber.toLowerCase().includes(q) ||
+            (po.DeliveryDate && po.DeliveryDate.toLowerCase().includes(q)) ||
+            (po.BatchNumber && po.BatchNumber.toLowerCase().includes(q)) ||
             po.DrawingNumber?.toLowerCase().includes(q)
         );
       }
@@ -264,7 +265,8 @@ export class D365Service {
             po.ItemDescription.toLowerCase().includes(qLow) ||
             po.CustomerPO.toLowerCase().includes(qLow) ||
             po.CustomerName.toLowerCase().includes(qLow) ||
-            po.BatchNumber.toLowerCase().includes(qLow)
+            (po.DeliveryDate && po.DeliveryDate.toLowerCase().includes(qLow)) ||
+            (po.BatchNumber && po.BatchNumber.toLowerCase().includes(qLow))
         );
         filteredOrders = inMem;
       }

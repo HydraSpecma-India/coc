@@ -221,7 +221,7 @@ export function CocWizard({
     dataAreaId: "HSIN",
     SalesOrder: "",
     SalesLine: "1.0",
-    BatchNumber: "",
+    DeliveryDate: "",
     SerialNumber: "",
     DrawingNumber: "",
     Revision: "Rev 01",
@@ -476,7 +476,7 @@ export function CocWizard({
       dataAreaId: comp,
       SalesOrder: defaultItem === "1070.0049" ? "SO-1070-01" : "SO-002859",
       SalesLine: "1.0",
-      BatchNumber: "HS-B24-0747",
+      DeliveryDate: new Date().toISOString().slice(0, 10),
       SerialNumber: `SN-${defaultItem}-01`,
       DrawingNumber: `DWG-${defaultItem}`,
       Revision: "Rev 02",
@@ -498,6 +498,7 @@ export function CocWizard({
     CustomerPartNo: "160072",
     CustomerPO: "4509008214",
     CustomerName: "VESTAS WIND TECHNOLOGYS INDIA PVT LTD",
+    DeliveryDate: "",
     SerialNumber: "",
     CustomerSpec: "0068-7211 / 0069-2093 - Latest version",
     Comments: "All test criteria satisfied. Conforms to ISO 9001:2015 / HydraSpecma requirements.",
@@ -568,6 +569,7 @@ export function CocWizard({
       CustomerPartNo: initialExtPart,
       CustomerPO: order.CustomerPO || prev.CustomerPO || "4509008214",
       CustomerName: custName,
+      DeliveryDate: order.DeliveryDate ? order.DeliveryDate.slice(0, 10) : prev.DeliveryDate || "",
       SerialNumber: order.SerialNumber || `${order.ItemNumber || order.ProductionOrder} - SN001`,
     }));
     fetchSalesOrdersForPO(order.ItemNumber, order.dataAreaId || selectedCompany, order);
@@ -694,7 +696,7 @@ export function CocWizard({
           customerPO: manualFields.CustomerPO || selectedPO.CustomerPO || "4509008214",
           customerPartNumber: manualFields.CustomerPartNo || selectedPO.CustomerPartNumber || "160072",
           salesOrder: selectedPO.SalesOrder || "",
-          batchNumber: selectedPO.BatchNumber || "HS-B24-0747",
+          deliveryDate: manualFields.DeliveryDate || selectedPO.DeliveryDate || "",
           serialNumber: manualFields.SerialNumber || selectedPO.SerialNumber || "",
           quantity: selectedPO.Quantity || 1,
           unitOfMeasure: selectedPO.UnitOfMeasure || "Pcs",
@@ -754,7 +756,7 @@ export function CocWizard({
           customerAccount: selectedPO.CustomerAccount || selectedCompany || "HSIN",
           quantity: selectedPO.Quantity || 1,
           unitOfMeasure: selectedPO.UnitOfMeasure || "Pcs",
-          batchNumber: selectedPO.BatchNumber || "HS-B24-0747",
+          deliveryDate: manualFields.DeliveryDate || selectedPO.DeliveryDate || "",
           serialNumber: manualFields.SerialNumber || selectedPO.SerialNumber || "",
           manualValues: manualFields,
           signatureBase64: signatureDataUrl,
@@ -1010,7 +1012,7 @@ export function CocWizard({
           <Card>
             <CardHeader
               title="2. Lookup Dynamics 365 Production Order"
-              description="Search by Production Order Number, Item Number, Customer PO, or Batch."
+              description="Search by Production Order Number, Item Number, Customer PO, or Delivery Date."
               actions={
                 <div className="flex items-center gap-2">
                   <Badge tone={d365Mode === "live" ? "success" : "neutral"}>
@@ -1237,11 +1239,11 @@ export function CocWizard({
                         placeholder="e.g. PO-HSIN-74721"
                       />
                     </Field>
-                    <Field label="Batch Number">
+                    <Field label="Production Order Delivery Date">
                       <Input
-                        value={manualOrder.BatchNumber}
-                        onChange={(e) => setManualOrder({ ...manualOrder, BatchNumber: e.target.value })}
-                        placeholder="e.g. HS-B24-0747"
+                        type="date"
+                        value={manualOrder.DeliveryDate || ""}
+                        onChange={(e) => setManualOrder({ ...manualOrder, DeliveryDate: e.target.value })}
                       />
                     </Field>
                     <Field label="Quantity">
@@ -1764,7 +1766,7 @@ export function CocWizard({
                     <div>Customer: <strong className="text-ink-900">{selectedPO.CustomerName || "—"}</strong></div>
                     <div>Customer PO: <strong className="font-mono text-ink-900">{selectedPO.CustomerPO || "—"}</strong></div>
                     <div>Qty: <strong className="text-ink-900">{selectedPO.Quantity} {selectedPO.UnitOfMeasure}</strong></div>
-                    <div>Batch: <span className="font-mono text-ink-800">{selectedPO.BatchNumber || "—"}</span></div>
+                    <div>Delivery Date: <span className="font-mono text-ink-800">{manualFields.DeliveryDate || selectedPO.DeliveryDate || "—"}</span></div>
                   </div>
                 </div>
               )}
@@ -1879,6 +1881,15 @@ export function CocWizard({
                   <Input
                     value={manualFields.CustomerName || selectedPO?.CustomerName || "VESTAS WIND TECHNOLOGYS INDIA PVT LTD"}
                     onChange={(e) => setManualFields({ ...manualFields, CustomerName: e.target.value })}
+                    className="bg-white font-medium text-ink-900"
+                  />
+                </Field>
+
+                <Field label="Production Order Delivery Date">
+                  <Input
+                    type="date"
+                    value={manualFields.DeliveryDate || (selectedPO?.DeliveryDate ? selectedPO.DeliveryDate.slice(0, 10) : "")}
+                    onChange={(e) => setManualFields({ ...manualFields, DeliveryDate: e.target.value })}
                     className="bg-white font-medium text-ink-900"
                   />
                 </Field>
@@ -2473,8 +2484,8 @@ export function CocWizard({
                   <span className="font-semibold text-ink-900">{selectedPO.Quantity} {selectedPO.UnitOfMeasure}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-ink-500 text-[11px]">Batch Number:</span>
-                  <span className="font-mono text-ink-800">{selectedPO.BatchNumber || "—"}</span>
+                  <span className="text-ink-500 text-[11px]">Delivery Date:</span>
+                  <span className="font-mono text-ink-800">{manualFields.DeliveryDate || selectedPO.DeliveryDate || "—"}</span>
                 </div>
                 {selectedPO.dataAreaId && (
                   <div className="flex items-center justify-between">

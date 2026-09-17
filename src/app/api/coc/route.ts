@@ -26,6 +26,7 @@ const createCocSchema = z.object({
   quantity: z.number().default(1),
   unitOfMeasure: z.string().default("Pcs"),
   batchNumber: z.string().optional(),
+  deliveryDate: z.string().optional(),
   serialNumber: z.string().optional(),
   manualValues: z.record(z.string(), z.string()).optional(),
   signatureBase64: z.string().optional(),
@@ -121,6 +122,7 @@ export const POST = route(async (req) => {
     serial_number: parsed.serialNumber,
     d365_context_json: {
       customerName: parsed.customerName,
+      deliveryDate: parsed.deliveryDate || parsed.manualValues?.["DeliveryDate"],
       batchNumber: parsed.batchNumber,
       unitOfMeasure: parsed.unitOfMeasure,
       customerPartNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
@@ -136,6 +138,11 @@ export const POST = route(async (req) => {
       parsed.customerName ||
       parsed.manualValues?.["CustomerName"] ||
       (parsed.customerAccount === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
+
+    const resolvedDeliveryDate =
+      parsed.deliveryDate ||
+      parsed.manualValues?.["DeliveryDate"] ||
+      "";
 
     // Step 1: D365 Fetch & Context verification
     await logProcessStep(doc.id, "D365_FETCH", "OK", { productionOrder: prodOrder });
@@ -153,7 +160,8 @@ export const POST = route(async (req) => {
       customerPO: parsed.customerPO || parsed.manualValues?.["CustomerPO"] || "4509008214",
       customerPartNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
       salesOrder: parsed.salesOrder || "",
-      batchNumber: parsed.batchNumber || "HS-B24-0747",
+      batchNumber: parsed.batchNumber || "",
+      deliveryDate: resolvedDeliveryDate,
       serialNumber: parsed.serialNumber || parsed.manualValues?.["SerialNumber"] || "",
       quantity: parsed.quantity,
       unitOfMeasure: parsed.unitOfMeasure,
@@ -191,6 +199,7 @@ export const POST = route(async (req) => {
         salesOrder: parsed.salesOrder,
         serialNumber: parsed.serialNumber,
         batchNumber: parsed.batchNumber,
+        deliveryDate: resolvedDeliveryDate,
         quantity: parsed.quantity,
         unitOfMeasure: parsed.unitOfMeasure,
         issuedBy: session.user.email || "System",
@@ -214,6 +223,7 @@ export const POST = route(async (req) => {
         SalesOrder: parsed.salesOrder || "",
         SerialNumber: parsed.serialNumber,
         BatchNumber: parsed.batchNumber,
+        DeliveryDate: resolvedDeliveryDate,
         DocumentURL: storagePath,
         IssuedBy: session.user.email || "System",
         IssueDate: new Date().toISOString(),

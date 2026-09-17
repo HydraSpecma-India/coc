@@ -232,6 +232,12 @@ export function CocDetailClient({
                 <span className="text-ink-500">Quantity:</span>
                 <span className="font-bold text-ink-900">{doc.quantity ?? 1}</span>
               </div>
+              {Boolean(doc.d365_context_json?.deliveryDate) && (
+                <div className="flex justify-between py-1 border-b border-ink-100">
+                  <span className="text-ink-500">Delivery Date:</span>
+                  <span className="font-mono text-ink-900">{String(doc.d365_context_json?.deliveryDate)}</span>
+                </div>
+              )}
               <div className="flex justify-between py-1">
                 <span className="text-ink-500">Status:</span>
                 <Badge tone={doc.status === "COMPLETED" ? "success" : "warning"}>{doc.status}</Badge>

@@ -7,7 +7,7 @@ export interface D365ProductionOrder {
   CustomerPO: string;
   SalesOrder: string;
   SalesLine: string;
-  BatchNumber: string;
+  BatchNumber?: string;
   CustomerPartNumber?: string;
   dataAreaId?: string;
   ProductionOrderStatus?: string;
@@ -41,6 +41,7 @@ export interface D365COCDocumentRecord {
   SalesOrder: string;
   SerialNumber?: string;
   BatchNumber?: string;
+  DeliveryDate?: string;
   DocumentURL: string;
   IssuedBy: string;
   IssueDate: string;

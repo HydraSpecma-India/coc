@@ -14,6 +14,7 @@ export interface SendCocTeamsParams {
   customerPartNumber?: string | null;
   salesOrder?: string | null;
   serialNumber?: string | null;
+  deliveryDate?: string | null;
   batchNumber?: string | null;
   quantity?: number | null;
   unitOfMeasure?: string | null;
@@ -141,6 +142,7 @@ export class TeamsService {
       `**Customer PO:** ${params.customerPO || "N/A"}`,
       `**Customer Part No:** ${params.customerPartNumber || "N/A"}`,
       `**Customer:** ${params.customerName || "N/A"}`,
+      `**Delivery Date:** ${params.deliveryDate || "N/A"}`,
       `**Quantity:** ${params.quantity ?? 1} ${params.unitOfMeasure || "Pcs"}`,
       `**Issued By:** ${issuedByStr}`,
       `**Date:** ${issueDateStr}`,
@@ -172,6 +174,7 @@ export class TeamsService {
             { title: "Customer:", value: params.customerName || "VESTAS WIND TECHNOLOGYS INDIA PVT LTD" },
             { title: "Customer PO:", value: params.customerPO || "N/A" },
             { title: "Customer Part:", value: params.customerPartNumber || "N/A" },
+            { title: "Delivery Date:", value: params.deliveryDate || "N/A" },
             { title: "Quantity:", value: `${params.quantity ?? 1} ${params.unitOfMeasure || "Pcs"}` },
             { title: "Issued By:", value: issuedByStr },
             { title: "Date:", value: issueDateStr },
@@ -193,7 +196,7 @@ export class TeamsService {
       customerPartNumber: params.customerPartNumber || "",
       salesOrder: params.salesOrder || "",
       serialNumber: params.serialNumber || "",
-      batchNumber: params.batchNumber || "",
+      deliveryDate: params.deliveryDate || "",
       quantity: params.quantity ?? 1,
       unitOfMeasure: params.unitOfMeasure || "Pcs",
       issuedBy: issuedByStr,
