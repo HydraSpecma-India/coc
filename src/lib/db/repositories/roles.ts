@@ -14,10 +14,21 @@ export interface RoleRow {
   user_count?: number;
 }
 
-// In-memory cache for fast capability checks
+// In-memory cache for fast capability checks & roles listing
 let cachedCapabilities: Record<string, Capability[]> | null = null;
 let lastCacheTime = 0;
 const CACHE_TTL_MS = 30_000; // 30 seconds
+
+let cachedRolesList: RoleRow[] | null = null;
+let lastRolesListFetch = 0;
+const ROLES_LIST_CACHE_TTL = 30_000; // 30 seconds
+
+export function invalidateRolesCache(): void {
+  cachedRolesList = null;
+  lastRolesListFetch = 0;
+  cachedCapabilities = null;
+  lastCacheTime = 0;
+}
 
 export async function getAllRoleCapabilitiesMap(force = false): Promise<Record<string, Capability[]>> {
   const now = Date.now();
@@ -68,7 +79,12 @@ export async function getCapabilitiesForRole(roleName: string): Promise<Capabili
   return [];
 }
 
-export async function listRoles(): Promise<RoleRow[]> {
+export async function listRoles(force = false): Promise<RoleRow[]> {
+  const now = Date.now();
+  if (!force && cachedRolesList && now - lastRolesListFetch < ROLES_LIST_CACHE_TTL) {
+    return cachedRolesList;
+  }
+
   const sb = supabaseAdmin();
   const [{ data: roles, error: rolesErr }, { data: users, error: usersErr }] = await Promise.all([
     sb.from("coc_roles").select("*").order("is_system", { ascending: false }).order("name", { ascending: true }),
@@ -86,10 +102,14 @@ export async function listRoles(): Promise<RoleRow[]> {
     }
   }
 
-  return (roles || []).map((r) => ({
+  const result = (roles || []).map((r) => ({
     ...r,
     user_count: counts[r.name] || 0,
   })) as RoleRow[];
+
+  cachedRolesList = result;
+  lastRolesListFetch = now;
+  return result;
 }
 
 export async function getRoleById(id: string): Promise<RoleRow | null> {
@@ -133,7 +153,7 @@ export async function createCustomRole(input: {
   if (error) throw error;
 
   // Invalidate cache
-  cachedCapabilities = null;
+  invalidateRolesCache();
 
   return data as RoleRow;
 }
@@ -177,7 +197,7 @@ export async function updateRole(
   if (error) throw error;
 
   // Invalidate cache
-  cachedCapabilities = null;
+  invalidateRolesCache();
 
   return data as RoleRow;
 }
@@ -208,5 +228,5 @@ export async function deleteRole(id: string): Promise<void> {
   if (error) throw error;
 
   // Invalidate cache
-  cachedCapabilities = null;
+  invalidateRolesCache();
 }

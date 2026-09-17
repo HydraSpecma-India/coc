@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/db/supabase-admin";
 import type { Role } from "@/lib/auth/roles";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { Errors } from "@/lib/errors";
+import { invalidateRolesCache } from "./roles";
 
 export interface UserRow {
   id: string;
@@ -15,6 +16,18 @@ export interface UserRow {
   last_login_at: string | null;
   created_at: string;
   allowed_companies?: string[] | null;
+}
+
+let cachedUsersList: UserRow[] | null = null;
+let lastUsersFetch = 0;
+const USERS_CACHE_TTL = 30_000; // 30 seconds
+
+export function invalidateUsersCache(): void {
+  cachedUsersList = null;
+  lastUsersFetch = 0;
+  try {
+    invalidateRolesCache();
+  } catch {}
 }
 
 export async function upsertUserOnSignIn(input: {
@@ -40,6 +53,7 @@ export async function upsertUserOnSignIn(input: {
     }
     const { data, error } = await db.from("coc_users").update(patch).eq("id", existing.id).select("*").single();
     if (error) throw error;
+    invalidateUsersCache();
     return data as UserRow;
   }
 
@@ -57,13 +71,21 @@ export async function upsertUserOnSignIn(input: {
     .select("*")
     .single();
   if (error) throw error;
+  invalidateUsersCache();
   return data as UserRow;
 }
 
-export async function listUsers(): Promise<UserRow[]> {
+export async function listUsers(force = false): Promise<UserRow[]> {
+  const now = Date.now();
+  if (!force && cachedUsersList && now - lastUsersFetch < USERS_CACHE_TTL) {
+    return cachedUsersList;
+  }
   const { data, error } = await supabaseAdmin().from("coc_users").select("*").order("created_at", { ascending: false });
   if (error) throw error;
-  return (data as UserRow[]) || [];
+  const res = (data as UserRow[]) || [];
+  cachedUsersList = res;
+  lastUsersFetch = now;
+  return res;
 }
 
 export async function getUserById(id: string): Promise<UserRow | null> {
@@ -111,6 +133,7 @@ export async function createUser(input: {
     .single();
 
   if (error) throw error;
+  invalidateUsersCache();
   return data as UserRow;
 }
 
@@ -128,6 +151,7 @@ export async function updateUser(
 
   const { data, error } = await supabaseAdmin().from("coc_users").update(updates).eq("id", id).select("*").single();
   if (error) throw error;
+  invalidateUsersCache();
   return data as UserRow;
 }
 
@@ -141,11 +165,13 @@ export async function resetUserPassword(id: string, newPassword: string): Promis
     .update({ password_hash: passwordHash, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) throw error;
+  invalidateUsersCache();
 }
 
 export async function deleteUser(id: string): Promise<void> {
   const { error } = await supabaseAdmin().from("coc_users").delete().eq("id", id);
   if (error) throw error;
+  invalidateUsersCache();
 }
 
 export async function verifyUserCredentials(email: string, password: string): Promise<UserRow | null> {

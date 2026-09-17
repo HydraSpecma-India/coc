@@ -37,31 +37,31 @@ export interface D365MappingRow {
   field?: FieldDefinitionRow;
 }
 
-let cachedFields: FieldDefinitionRow[] | null = null;
+let cachedAllFields: FieldDefinitionRow[] | null = null;
 let lastFieldsFetch = 0;
 const FIELDS_CACHE_TTL = 60_000; // 60s cache
 
 export function invalidateFieldsCache(): void {
-  cachedFields = null;
+  cachedAllFields = null;
   lastFieldsFetch = 0;
 }
 
 export async function listFieldDefinitions(opts: { includeInactive?: boolean; force?: boolean } = {}): Promise<FieldDefinitionRow[]> {
   const now = Date.now();
-  if (!opts.force && !opts.includeInactive && cachedFields && now - lastFieldsFetch < FIELDS_CACHE_TTL) {
-    return cachedFields;
+  if (!opts.force && cachedAllFields && now - lastFieldsFetch < FIELDS_CACHE_TTL) {
+    return opts.includeInactive ? cachedAllFields : cachedAllFields.filter((f) => f.active);
   }
 
-  let q = supabaseAdmin().from("coc_field_definitions").select("*").order("sort_order").order("display_name");
-  if (!opts.includeInactive) q = q.eq("active", true);
-  const { data, error } = await q;
+  const { data, error } = await supabaseAdmin()
+    .from("coc_field_definitions")
+    .select("*")
+    .order("sort_order")
+    .order("display_name");
   if (error) throw error;
-  const res = data as FieldDefinitionRow[];
-  if (!opts.includeInactive) {
-    cachedFields = res;
-    lastFieldsFetch = now;
-  }
-  return res;
+  const res = (data || []) as FieldDefinitionRow[];
+  cachedAllFields = res;
+  lastFieldsFetch = now;
+  return opts.includeInactive ? res : res.filter((f) => f.active);
 }
 
 export async function createFieldDefinition(
@@ -108,13 +108,29 @@ export async function deleteFieldDefinition(id: string): Promise<void> {
   invalidateFieldsCache();
 }
 
-export async function listD365Mappings(): Promise<D365MappingRow[]> {
+let cachedMappings: D365MappingRow[] | null = null;
+let lastMappingsFetch = 0;
+const MAPPINGS_CACHE_TTL = 60_000;
+
+export function invalidateMappingsCache(): void {
+  cachedMappings = null;
+  lastMappingsFetch = 0;
+}
+
+export async function listD365Mappings(force = false): Promise<D365MappingRow[]> {
+  const now = Date.now();
+  if (!force && cachedMappings && now - lastMappingsFetch < MAPPINGS_CACHE_TTL) {
+    return cachedMappings;
+  }
   const { data, error } = await supabaseAdmin()
     .from("coc_d365_field_mappings")
     .select("*, field:coc_field_definitions(*)")
     .order("created_at");
   if (error) throw error;
-  return data as D365MappingRow[];
+  const res = (data || []) as D365MappingRow[];
+  cachedMappings = res;
+  lastMappingsFetch = now;
+  return res;
 }
 
 export async function upsertD365Mapping(input: {
@@ -143,5 +159,6 @@ export async function upsertD365Mapping(input: {
     .select("*, field:coc_field_definitions(*)")
     .single();
   if (error) throw error;
+  invalidateMappingsCache();
   return data as D365MappingRow;
 }

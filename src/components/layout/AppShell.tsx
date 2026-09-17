@@ -53,7 +53,7 @@ export function AppShell({ user, d365Mode, storageMode, children }: Props) {
     <div className="flex h-screen overflow-hidden">
       {!isDesigner && (
         <aside className="flex w-64 shrink-0 flex-col border-r border-ink-200 bg-white">
-          <div className="flex h-14 items-center gap-2 border-b border-ink-200 px-4">
+          <Link href="/" prefetch={true} className="flex h-14 items-center gap-2 border-b border-ink-200 px-4 hover:bg-ink-50 transition-colors">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-400 font-bold text-ink-900">H</div>
             <div className="min-w-0 flex-1 leading-tight">
               <div className="flex items-center gap-1.5">
@@ -64,7 +64,7 @@ export function AppShell({ user, d365Mode, storageMode, children }: Props) {
               </div>
               <div className="text-[11px] text-ink-500">HydraSpecma India</div>
             </div>
-          </div>
+          </Link>
           <nav className="flex-1 overflow-y-auto px-3 py-4">
             {groups
               .filter((g) => g.items.some((i) => i.show))
@@ -79,9 +79,10 @@ export function AppShell({ user, d365Mode, storageMode, children }: Props) {
                       <Link
                         key={i.href}
                         href={i.href}
+                        prefetch={true}
                         className={cn(
-                          "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-ink-700 hover:bg-ink-100",
-                          active && "bg-ink-900 text-white hover:bg-ink-900",
+                          "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-ink-700 hover:bg-ink-100 transition-colors",
+                          active && "bg-ink-900 text-white hover:bg-ink-900 font-medium",
                         )}
                       >
                         <i.icon className="h-4 w-4 shrink-0" />

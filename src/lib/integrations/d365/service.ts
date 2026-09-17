@@ -46,6 +46,10 @@ export class D365Service {
   }
 
   private static async getAccessToken(config: Awaited<ReturnType<typeof getActiveConfig>>["d365"]): Promise<string> {
+    if (!config.tenantId || !config.clientId || !config.clientSecret || !config.baseUrl) {
+      throw new Error("D365 credentials incomplete (missing tenantId, clientId, clientSecret, or baseUrl)");
+    }
+
     const now = Date.now();
     if (cachedD365Token && now < cachedD365Token.expiresAt) {
       return cachedD365Token.token;
@@ -157,11 +161,11 @@ export class D365Service {
     }
 
     // Live D365FO OData
-    if (!config.baseUrl || !config.clientId || !config.tenantId) {
+    if (!config.baseUrl || !config.clientId || !config.tenantId || !config.clientSecret) {
       return {
         mode: "live",
         orders: [],
-        error: "Dynamics 365 credentials are not configured. Please go to Admin -> System Settings to configure Base URL, Tenant ID, and Client ID.",
+        error: "Dynamics 365 credentials are not configured. Please go to Admin -> System Settings to configure Base URL, Tenant ID, Client ID, and Client Secret.",
       };
     }
 
@@ -366,7 +370,7 @@ export class D365Service {
   static async getProductionOrder(id: string): Promise<D365ProductionOrder | null> {
     const config = (await getActiveConfig()).d365;
 
-    if (config.mode === "mock") {
+    if (config.mode === "mock" || !config.baseUrl || !config.clientId || !config.tenantId || !config.clientSecret) {
       const found = MOCK_PRODUCTION_ORDERS.find((p) => p.ProductionOrder.toLowerCase() === id.toLowerCase());
       return found || null;
     }
@@ -439,7 +443,7 @@ export class D365Service {
   static async registerCOCDocument(doc: D365COCDocumentRecord): Promise<{ ok: boolean; message: string }> {
     const config = (await getActiveConfig()).d365;
 
-    if (config.mode === "mock") {
+    if (config.mode === "mock" || !config.baseUrl || !config.clientId || !config.tenantId || !config.clientSecret) {
       logger.info("Catalog D365: Registered COC Document record", { doc });
       return { ok: true, message: `Standard catalog registered in D365: ${doc.COCDocumentNumber}` };
     }
@@ -507,7 +511,7 @@ export class D365Service {
     }
 
     // Live D365FO OData query
-    if (!config.baseUrl || !config.clientId || !config.tenantId) {
+    if (!config.baseUrl || !config.clientId || !config.tenantId || !config.clientSecret) {
       const fallback = getMockSalesOrders(cleanItem, targetCompany, salesOrder);
       return {
         mode: "live",
@@ -687,7 +691,7 @@ export class D365Service {
       { code: "HSBR", name: "HydraSpecma Brazil (Brazil)" },
     ];
 
-    if (config.mode === "mock" || !config.baseUrl || !config.clientId || !config.tenantId) {
+    if (config.mode === "mock" || !config.baseUrl || !config.clientId || !config.tenantId || !config.clientSecret) {
       cachedCompaniesList = { data: defaultCompanies, expiresAt: now + 300_000 };
       return defaultCompanies;
     }
