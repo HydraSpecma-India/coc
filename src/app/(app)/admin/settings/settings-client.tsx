@@ -16,8 +16,9 @@ import {
 } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
-import { KeyRound, Database, Share2, Cog, RefreshCw, CheckCircle2, AlertCircle, Hash, Send, Building2, Plus, Trash2 } from "lucide-react";
+import { KeyRound, Database, Share2, Cog, RefreshCw, CheckCircle2, AlertCircle, Hash, Send, Building2, Plus, Trash2, Network } from "lucide-react";
 import { NumberSequencesPanel } from "./number-sequences-panel";
+import { ArchitecturePanel } from "./architecture-panel";
 
 interface ConfigState {
   entra: {
@@ -71,7 +72,7 @@ interface ConfigState {
 
 export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }) {
   const [config, setConfig] = useState<ConfigState>(initialConfig);
-  const [activeTab, setActiveTab] = useState<"entra" | "d365" | "sharepoint" | "app" | "sequences" | "teams">("d365");
+  const [activeTab, setActiveTab] = useState<"entra" | "d365" | "sharepoint" | "app" | "sequences" | "teams" | "architecture">("d365");
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -215,6 +216,18 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
         >
           <Send className="h-4 w-4" />
           Teams Webhook
+        </button>
+
+        <button
+          onClick={() => { setActiveTab("architecture"); setTestResult(null); }}
+          className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            activeTab === "architecture"
+              ? "border-brand-500 text-brand-700 font-semibold"
+              : "border-transparent text-ink-600 hover:text-ink-900"
+          }`}
+        >
+          <Network className="h-4 w-4" />
+          System Architecture
         </button>
       </div>
 
@@ -874,6 +887,8 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
           </CardBody>
         </Card>
       )}
+
+      {activeTab === "architecture" && <ArchitecturePanel />}
     </div>
   );
 }
