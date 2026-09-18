@@ -22,6 +22,7 @@ interface SignatureRow {
   storage_path: string;
   is_default: boolean;
   created_at: string;
+  dataUrl?: string | null;
 }
 
 export function SignaturesClient({ initialSignatures }: { initialSignatures: SignatureRow[] }) {
@@ -93,7 +94,10 @@ export function SignaturesClient({ initialSignatures }: { initialSignatures: Sig
       });
 
       if (res.ok) {
-        setSignatures([res.signature, ...signatures]);
+        const nextList = isDefault
+          ? signatures.map((s) => ({ ...s, is_default: false }))
+          : signatures;
+        setSignatures([{ ...res.signature, dataUrl: base64Png }, ...nextList]);
         toast.success("Signature saved successfully");
         setModalOpen(false);
       }
@@ -101,6 +105,19 @@ export function SignaturesClient({ initialSignatures }: { initialSignatures: Sig
       toast.error("Failed to save signature", (e as Error).message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSetDefault = async (id: string) => {
+    try {
+      await api("/api/signatures", {
+        method: "PATCH",
+        json: { id, isDefault: true },
+      });
+      setSignatures(signatures.map((s) => ({ ...s, is_default: s.id === id })));
+      toast.success("Default signature updated");
+    } catch (e) {
+      toast.error("Failed to update default signature", (e as Error).message);
     }
   };
 
@@ -147,11 +164,33 @@ export function SignaturesClient({ initialSignatures }: { initialSignatures: Sig
                 }
               />
               <CardBody>
-                <div className="flex h-24 items-center justify-center rounded border border-ink-100 bg-ink-50/50 p-2">
-                  <span className="font-mono text-xs text-ink-500">[Stored Signature PNG]</span>
+                <div className="flex h-28 items-center justify-center rounded-lg border border-ink-200 bg-white p-2 shadow-inner">
+                  {sig.dataUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={sig.dataUrl}
+                      alt={sig.label || "Digital Signature"}
+                      className="max-h-24 max-w-full object-contain"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center gap-1 text-ink-400">
+                      <PenTool className="h-6 w-6 opacity-40" />
+                      <span className="font-mono text-xs text-ink-500">Stored Signature</span>
+                    </div>
+                  )}
                 </div>
-                <div className="mt-2 text-[11px] text-ink-400">
-                  Added: {new Date(sig.created_at).toLocaleDateString()}
+                <div className="mt-3 flex items-center justify-between text-[11px] text-ink-500">
+                  <span>Added: {new Date(sig.created_at).toLocaleDateString()}</span>
+                  {!sig.is_default && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleSetDefault(sig.id)}
+                      className="h-6 px-2 text-xs font-semibold text-brand-700 hover:text-brand-900 hover:bg-brand-50"
+                    >
+                      Set as Default
+                    </Button>
+                  )}
                 </div>
               </CardBody>
             </Card>

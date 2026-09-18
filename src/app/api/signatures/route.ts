@@ -9,15 +9,52 @@ const createSignatureSchema = z.object({
   isDefault: z.boolean().default(false),
 });
 
+const patchSignatureSchema = z.object({
+  id: z.string().uuid(),
+  isDefault: z.boolean().optional(),
+  label: z.string().optional(),
+});
+
 export const GET = route(async () => {
-  const session = await requireSession();
+  await requireSession();
   const sb = supabaseAdmin();
   const { data, error } = await sb
     .from("coc_signatures")
     .select("*")
+    .order("is_default", { ascending: false })
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return json({ ok: true, signatures: data || [] });
+
+  const signatures = await Promise.all(
+    (data || []).map(async (sig) => {
+      let dataUrl: string | null = null;
+      let signedUrl: string | null = null;
+      try {
+        if (sig.storage_path) {
+          const { data: fileBlob } = await sb.storage
+            .from(Buckets.signatures)
+            .download(sig.storage_path);
+          if (fileBlob) {
+            const buf = Buffer.from(await fileBlob.arrayBuffer());
+            dataUrl = `data:${sig.mime_type || "image/png"};base64,${buf.toString("base64")}`;
+          }
+          const { data: signed } = await sb.storage
+            .from(Buckets.signatures)
+            .createSignedUrl(sig.storage_path, 86400);
+          signedUrl = signed?.signedUrl || null;
+        }
+      } catch (e) {
+        console.warn(`Error loading signature ${sig.id}:`, e);
+      }
+      return {
+        ...sig,
+        dataUrl: dataUrl || signedUrl,
+        signedUrl,
+      };
+    })
+  );
+
+  return json({ ok: true, signatures });
 });
 
 export const POST = route(async (req) => {
@@ -30,6 +67,15 @@ export const POST = route(async (req) => {
   const fileName = `${session.user.id || "user"}_${Date.now()}.png`;
 
   const sb = supabaseAdmin();
+
+  if (parsed.isDefault) {
+    // Unset other default signatures
+    await sb
+      .from("coc_signatures")
+      .update({ is_default: false })
+      .neq("id", "00000000-0000-0000-0000-000000000000");
+  }
+
   const { error: uploadErr } = await sb.storage.from(Buckets.signatures).upload(fileName, buffer, {
     contentType: "image/png",
     upsert: true,
@@ -50,7 +96,39 @@ export const POST = route(async (req) => {
     .single();
 
   if (error) throw error;
-  return json({ ok: true, signature: data }, { status: 201 });
+  const fullDataUrl = parsed.base64Png.startsWith("data:")
+    ? parsed.base64Png
+    : `data:image/png;base64,${parsed.base64Png}`;
+  return json({ ok: true, signature: { ...data, dataUrl: fullDataUrl } }, { status: 201 });
+});
+
+export const PATCH = route(async (req) => {
+  await requireSession();
+  const body = await req.json();
+  const parsed = patchSignatureSchema.parse(body);
+
+  const sb = supabaseAdmin();
+
+  if (parsed.isDefault) {
+    await sb
+      .from("coc_signatures")
+      .update({ is_default: false })
+      .neq("id", parsed.id);
+  }
+
+  const updates: Record<string, unknown> = {};
+  if (parsed.isDefault !== undefined) updates.is_default = parsed.isDefault;
+  if (parsed.label !== undefined) updates.label = parsed.label;
+
+  const { data, error } = await sb
+    .from("coc_signatures")
+    .update(updates)
+    .eq("id", parsed.id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return json({ ok: true, signature: data });
 });
 
 export const DELETE = route(async (req) => {
@@ -59,6 +137,14 @@ export const DELETE = route(async (req) => {
   if (!id) return json({ ok: false, error: "Missing id" }, { status: 400 });
 
   const sb = supabaseAdmin();
+  const { data: sig } = await sb.from("coc_signatures").select("storage_path").eq("id", id).maybeSingle();
+  if (sig?.storage_path) {
+    try {
+      await sb.storage.from(Buckets.signatures).remove([sig.storage_path]);
+    } catch {
+      // ignore storage cleanup failure
+    }
+  }
   await sb.from("coc_signatures").delete().eq("id", id);
   return json({ ok: true });
 });

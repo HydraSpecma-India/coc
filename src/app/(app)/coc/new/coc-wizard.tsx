@@ -867,12 +867,72 @@ export function CocWizard({
     }
   }, [manualFields.SerialNumber, existingCocs]);
 
-  // Signature state: automated user signature (default) or manual draw
-  const [signatureMode, setSignatureMode] = useState<"auto" | "draw">("auto");
+  // Signature state: stored from signature module (default if present), automated user signature, or manual draw
+  interface StoredSignature {
+    id: string;
+    user_id: string;
+    label: string | null;
+    storage_path: string;
+    mime_type: string;
+    is_default: boolean;
+    created_at: string;
+    dataUrl?: string | null;
+    signedUrl?: string | null;
+  }
+
+  const [signatureMode, setSignatureMode] = useState<"stored" | "auto" | "draw">("stored");
+  const [storedSignatures, setStoredSignatures] = useState<StoredSignature[]>([]);
+  const [selectedSignatureId, setSelectedSignatureId] = useState<string | null>(null);
+  const [loadingSignatures, setLoadingSignatures] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(true);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string>("");
+
+  // Load stored signatures from the Signature Module (/api/signatures)
+  useEffect(() => {
+    let active = true;
+    async function loadSignatures() {
+      setLoadingSignatures(true);
+      try {
+        const res = await api<{ ok: boolean; signatures: StoredSignature[] }>("/api/signatures");
+        if (active && res.ok && res.signatures && res.signatures.length > 0) {
+          setStoredSignatures(res.signatures);
+          const def = res.signatures.find((s) => s.is_default) || res.signatures[0];
+          setSelectedSignatureId(def.id);
+          setSignatureMode("stored");
+          if (def.dataUrl) {
+            setSignatureDataUrl(def.dataUrl);
+            setHasSignature(true);
+          }
+        } else if (active) {
+          // No stored signature exists in the system, default to auto-sign
+          setSignatureMode("auto");
+          const autoSig = generateAutoSignature(userName);
+          if (autoSig) {
+            setSignatureDataUrl(autoSig);
+            setHasSignature(true);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load stored signatures, falling back to auto-sign:", err);
+        if (active) {
+          setSignatureMode("auto");
+          const autoSig = generateAutoSignature(userName);
+          if (autoSig) {
+            setSignatureDataUrl(autoSig);
+            setHasSignature(true);
+          }
+        }
+      } finally {
+        if (active) setLoadingSignatures(false);
+      }
+    }
+    loadSignatures();
+    return () => {
+      active = false;
+    };
+  }, [userName]);
 
   useEffect(() => {
     if (signatureMode === "auto" && typeof window !== "undefined") {
@@ -2737,9 +2797,30 @@ export function CocWizard({
         <Card>
           <CardHeader
             title="Authorized Digital Signature"
-            description="Sign off on quality verification using your authorized user credentials or draw manually."
+            description="Sign off on quality verification using your official signature from the Signature Module, authorized account credentials, or draw manually."
             actions={
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant={signatureMode === "stored" ? "primary" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setSignatureMode("stored");
+                    const found = storedSignatures.find((s) => s.id === selectedSignatureId) || storedSignatures[0];
+                    if (found?.dataUrl) {
+                      setSignatureDataUrl(found.dataUrl);
+                      setHasSignature(true);
+                    }
+                  }}
+                  className="gap-1.5 text-xs font-semibold"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Stored Signature
+                  {storedSignatures.length > 0 && (
+                    <span className="ml-1 rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-bold">
+                      {storedSignatures.length}
+                    </span>
+                  )}
+                </Button>
                 <Button
                   variant={signatureMode === "auto" ? "primary" : "outline"}
                   size="sm"
@@ -2772,7 +2853,128 @@ export function CocWizard({
             }
           />
           <CardBody className="space-y-4">
-            {signatureMode === "auto" ? (
+            {signatureMode === "stored" ? (
+              <div className="space-y-4">
+                {storedSignatures.length > 0 ? (
+                  <div className="rounded-xl border-2 border-brand-300 bg-gradient-to-br from-brand-50/60 to-amber-50/30 p-6">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div className="space-y-1.5 text-left">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                          <span className="font-bold text-sm text-ink-900">
+                            Official Signature from Signature Module
+                          </span>
+                          <Badge tone="success">Verified Quality Stamp</Badge>
+                        </div>
+                        <p className="text-xs text-ink-600">
+                          Signatory: <strong className="text-ink-900">{userName}</strong> ({userEmail})
+                        </p>
+                        <p className="text-[11px] text-ink-500">
+                          Authorized Quality Assurance Stamp &bull; Stored in Official Signatures Module
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge tone="brand" className="text-xs px-3 py-1 font-bold">
+                          ✓ Applied to Certificate
+                        </Badge>
+                        <Link
+                          href="/admin/signatures"
+                          target="_blank"
+                          className="inline-flex items-center gap-1 text-xs text-brand-700 hover:text-brand-900 font-semibold"
+                        >
+                          Manage Signatures <ExternalLink className="h-3 w-3" />
+                        </Link>
+                      </div>
+                    </div>
+
+                    {/* Selector if multiple stored signatures */}
+                    {storedSignatures.length > 1 && (
+                      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-brand-200/80 pt-3">
+                        <span className="text-xs font-semibold text-ink-700">Select Signature Stamp:</span>
+                        {storedSignatures.map((sig) => {
+                          const isSelected = sig.id === selectedSignatureId;
+                          return (
+                            <button
+                              key={sig.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedSignatureId(sig.id);
+                                if (sig.dataUrl) {
+                                  setSignatureDataUrl(sig.dataUrl);
+                                  setHasSignature(true);
+                                }
+                              }}
+                              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                                isSelected
+                                  ? "bg-brand-500 text-ink-900 shadow-sm ring-2 ring-brand-400 font-bold"
+                                  : "bg-white text-ink-700 border border-ink-200 hover:bg-ink-50"
+                              }`}
+                            >
+                              <PenTool className="h-3.5 w-3.5" />
+                              <span>{sig.label || "Quality Stamp"}</span>
+                              {sig.is_default && (
+                                <span className="ml-1 text-[10px] uppercase font-bold bg-white/70 px-1 py-0.2 rounded text-ink-800">
+                                  Default
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Active Signature Image Display */}
+                    {signatureDataUrl ? (
+                      <div className="mt-4 flex flex-col items-center justify-center rounded-lg border border-brand-200 bg-white p-4 shadow-inner">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={signatureDataUrl}
+                          alt="Official Quality Signature"
+                          className="max-h-28 object-contain"
+                        />
+                        <span className="mt-2 text-[11px] text-ink-500 font-mono">
+                          {storedSignatures.find((s) => s.id === selectedSignatureId)?.label || "Official Quality Signature"}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="mt-4 flex h-24 items-center justify-center rounded-lg border border-dashed border-ink-300 bg-white text-xs text-ink-500">
+                        {loadingSignatures ? "Loading signature..." : "No signature image available"}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border-2 border-dashed border-ink-300 bg-ink-50/50 p-6 text-center space-y-3">
+                    <PenTool className="mx-auto h-8 w-8 text-ink-400" />
+                    <div>
+                      <h4 className="text-sm font-semibold text-ink-800">No Stored Signatures Found</h4>
+                      <p className="text-xs text-ink-500 mt-1">
+                        You have not created any official signatures in the Signature Module yet.
+                      </p>
+                    </div>
+                    <div className="flex justify-center gap-3 pt-1">
+                      <Link
+                        href="/admin/signatures"
+                        target="_blank"
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold bg-brand-500 hover:bg-brand-600 text-ink-900 px-3 py-2 rounded-lg"
+                      >
+                        Create in Signature Module <ExternalLink className="h-3.5 w-3.5" />
+                      </Link>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSignatureMode("auto");
+                          const autoSig = generateAutoSignature(userName);
+                          if (autoSig) setSignatureDataUrl(autoSig);
+                        }}
+                      >
+                        Use Auto-Sign Instead
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : signatureMode === "auto" ? (
               <div className="rounded-xl border-2 border-brand-300 bg-gradient-to-br from-brand-50/60 to-sky-50/40 p-6">
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div className="space-y-1.5 text-left">
@@ -3269,7 +3471,13 @@ export function CocWizard({
                   )}
                   {step === 3 && (
                     <div className="text-[11px] text-sky-800">
-                      Signature: {hasSignature ? <strong className="text-emerald-700">Captured ✓</strong> : <strong className="text-amber-700">Pending drawing...</strong>}
+                      Signature: {hasSignature ? (
+                        <strong className="text-emerald-700">
+                          Captured ✓ ({signatureMode === "stored" ? "Stored Module" : signatureMode === "auto" ? "Auto-Sign" : "Manual Draw"})
+                        </strong>
+                      ) : (
+                        <strong className="text-amber-700">Pending drawing...</strong>
+                      )}
                     </div>
                   )}
                   {step === 4 && (
