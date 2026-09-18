@@ -8,10 +8,10 @@ export const metadata = { title: "Sign in - COC Platform" };
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
+  searchParams: Promise<{ callbackUrl?: string; error?: string; reason?: string }>;
 }) {
   const session = await auth();
-  const { callbackUrl = "/", error } = await searchParams;
+  const { callbackUrl = "/", error, reason } = await searchParams;
   if (session?.user?.email && session.user.id) redirect(callbackUrl);
 
   return (
@@ -38,6 +38,7 @@ export default async function SignInPage({
         <SignInForm
           callbackUrl={callbackUrl}
           initialError={error}
+          reason={reason}
           hasEntra={hasEntraProvider()}
         />
 

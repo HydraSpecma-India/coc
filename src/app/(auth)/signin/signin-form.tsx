@@ -2,15 +2,16 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Clock } from "lucide-react";
 
 interface Props {
   callbackUrl: string;
   initialError?: string;
+  reason?: string;
   hasEntra: boolean;
 }
 
-export function SignInForm({ callbackUrl, initialError, hasEntra }: Props) {
+export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -70,6 +71,20 @@ export function SignInForm({ callbackUrl, initialError, hasEntra }: Props) {
 
   return (
     <div>
+      {reason === "inactivity" && (
+        <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50/90 p-3.5 text-xs text-amber-900 flex items-start gap-2.5 animate-in fade-in shadow-xs">
+          <div className="rounded-full bg-amber-100 p-1 text-amber-700 shrink-0 mt-0.5 border border-amber-200">
+            <Clock className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="font-bold text-amber-950">Session Timed Out</p>
+            <p className="mt-0.5 text-amber-800 leading-relaxed">
+              Your session automatically expired after 30 minutes of inactivity. Please sign in to resume your work.
+            </p>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800 leading-relaxed">
           {error}
