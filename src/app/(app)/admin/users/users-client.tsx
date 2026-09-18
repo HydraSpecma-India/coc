@@ -17,7 +17,16 @@ import {
 } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
-import { CAPABILITY_DEFINITIONS, type Capability, type Role } from "@/lib/auth/roles";
+import {
+  PAGE_RESOURCES,
+  CAPABILITY_DEFINITIONS,
+  normalizePermissions,
+  canPermission,
+  type Capability,
+  type Role,
+  type PermissionAction,
+  type PageResourceDefinition,
+} from "@/lib/auth/roles";
 import type { UserRow } from "@/lib/db/repositories/users";
 import type { RoleRow } from "@/lib/db/repositories/roles";
 import {
@@ -35,6 +44,11 @@ import {
   CheckCircle2,
   Lock,
   Sparkles,
+  CheckSquare,
+  Square,
+  Eye,
+  Sliders,
+  X,
 } from "lucide-react";
 
 export function UsersClient({
@@ -115,18 +129,19 @@ export function UsersClient({
   const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // Role Create / Edit Modal state
+  // Role Create / Edit Modal state (D365FO Security Configuration)
   const [roleModalOpen, setRoleModalOpen] = useState(false);
   const [roleModalMode, setRoleModalMode] = useState<"create" | "edit" | "view">("create");
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [roleSearch, setRoleSearch] = useState("");
   const [roleForm, setRoleForm] = useState<{
     name: string;
     description: string;
-    capabilities: Capability[];
+    capabilities: string[];
   }>({
     name: "",
     description: "",
-    capabilities: ["viewDashboard", "viewCoc"],
+    capabilities: ["dashboard:read", "coc:read", "viewDashboard", "viewCoc"],
   });
   const [roleLoading, setRoleLoading] = useState(false);
 
@@ -244,10 +259,11 @@ export function UsersClient({
   const openCreateRole = () => {
     setRoleModalMode("create");
     setEditingRoleId(null);
+    setRoleSearch("");
     setRoleForm({
       name: "",
       description: "",
-      capabilities: ["viewDashboard", "viewCoc"],
+      capabilities: normalizePermissions(["dashboard:read", "coc:read"]),
     });
     setRoleModalOpen(true);
   };
@@ -256,40 +272,76 @@ export function UsersClient({
   const openEditRole = (role: RoleRow, viewOnly = false) => {
     setRoleModalMode(viewOnly ? "view" : "edit");
     setEditingRoleId(role.id);
+    setRoleSearch("");
     setRoleForm({
       name: role.name,
       description: role.description || "",
-      capabilities: role.capabilities || [],
+      capabilities: normalizePermissions(role.capabilities || []),
     });
     setRoleModalOpen(true);
   };
 
-  // Toggle capability checkbox
-  const toggleCapability = (cap: Capability) => {
+  // Toggle granular permission with D365FO dependency rules
+  const togglePerm = (resId: string, action: PermissionAction) => {
     if (roleModalMode === "view") return;
+    const token = `${resId}:${action}`;
     setRoleForm((prev) => {
-      const exists = prev.capabilities.includes(cap);
-      return {
-        ...prev,
-        capabilities: exists ? prev.capabilities.filter((c) => c !== cap) : [...prev.capabilities, cap],
-      };
+      const has = prev.capabilities.includes(token);
+      let next = [...prev.capabilities];
+      if (has) {
+        // Removing action
+        next = next.filter((c) => c !== token);
+        // D365FO Rule: If removing 'read', also remove create, update, delete for this resource
+        if (action === "read") {
+          next = next.filter((c) => !c.startsWith(`${resId}:`));
+        }
+      } else {
+        // Adding action
+        next.push(token);
+        // D365FO Rule: If adding create, update, or delete, auto-add 'read'
+        if (action !== "read" && !next.includes(`${resId}:read`)) {
+          next.push(`${resId}:read`);
+        }
+      }
+      return { ...prev, capabilities: normalizePermissions(next) };
     });
   };
 
-  const selectAllCapabilities = () => {
+  // Set row preset (Full, Read, None)
+  const setRowPreset = (res: PageResourceDefinition, level: "full" | "read" | "none") => {
     if (roleModalMode === "view") return;
-    setRoleForm((prev) => ({
-      ...prev,
-      capabilities: CAPABILITY_DEFINITIONS.map((c) => c.key),
-    }));
+    setRoleForm((prev) => {
+      let next = prev.capabilities.filter((c) => !c.startsWith(`${res.id}:`));
+      if (level === "full") {
+        res.supportedActions.forEach((act) => next.push(`${res.id}:${act}`));
+      } else if (level === "read") {
+        next.push(`${res.id}:read`);
+      }
+      return { ...prev, capabilities: normalizePermissions(next) };
+    });
   };
 
-  const deselectAllCapabilities = () => {
+  // Grant Full Access across all resources
+  const grantFullAccess = () => {
     if (roleModalMode === "view") return;
-    setRoleForm((prev) => ({
-      ...prev,
-      capabilities: [],
-    }));
+    const allPerms: string[] = [];
+    PAGE_RESOURCES.forEach((r) => {
+      r.supportedActions.forEach((a) => allPerms.push(`${r.id}:${a}`));
+    });
+    setRoleForm((prev) => ({ ...prev, capabilities: normalizePermissions(allPerms) }));
+  };
+
+  // Grant Read-Only across all resources
+  const grantReadOnlyAccess = () => {
+    if (roleModalMode === "view") return;
+    const readPerms = PAGE_RESOURCES.map((r) => `${r.id}:read`);
+    setRoleForm((prev) => ({ ...prev, capabilities: normalizePermissions(readPerms) }));
+  };
+
+  // Clear all permissions
+  const clearAllPermissions = () => {
+    if (roleModalMode === "view") return;
+    setRoleForm((prev) => ({ ...prev, capabilities: [] }));
   };
 
   // Save Role handler (Create or Edit)
@@ -307,13 +359,14 @@ export function UsersClient({
 
     setRoleLoading(true);
     try {
+      const normalizedCaps = normalizePermissions(roleForm.capabilities);
       if (roleModalMode === "create") {
         await api("/api/roles", {
           method: "POST",
           json: {
             name: roleForm.name.trim(),
             description: roleForm.description.trim() || undefined,
-            capabilities: roleForm.capabilities,
+            capabilities: normalizedCaps,
           },
         });
         toast.success("Role created", `Custom role "${roleForm.name}" created successfully.`);
@@ -323,12 +376,15 @@ export function UsersClient({
           json: {
             name: roleForm.name.trim(),
             description: roleForm.description.trim() || undefined,
-            capabilities: roleForm.capabilities,
+            capabilities: normalizedCaps,
           },
         });
         toast.success("Role updated", `Role "${roleForm.name}" updated successfully.`);
       }
       setRoleModalOpen(false);
+      startTransition(() => {
+        router.refresh();
+      });
       refreshRoles();
     } catch (err) {
       toast.error("Failed to save role", (err as Error).message);
@@ -706,28 +762,43 @@ export function UsersClient({
                       {role.description || "No description provided for this role."}
                     </p>
 
-                    {/* Permissions list */}
-                    <div className="pt-2 border-t border-ink-100 space-y-1.5">
+                    {/* D365FO Permissions list */}
+                    <div className="pt-2 border-t border-ink-100 space-y-2">
                       <div className="text-[11px] font-semibold text-ink-700 flex items-center justify-between">
-                        <span>Granted Permissions:</span>
+                        <span>Configured Page Privileges:</span>
                         <span className="text-[10px] text-ink-400 font-mono">
-                          {roleCaps.length} / {CAPABILITY_DEFINITIONS.length} active
+                          {
+                            PAGE_RESOURCES.filter((res) =>
+                              roleCaps.some((c) => c === `${res.id}:read` || c.startsWith(`${res.id}:`))
+                            ).length
+                          }{" "}
+                          / {PAGE_RESOURCES.length} pages
                         </span>
                       </div>
 
-                      <div className="flex flex-wrap gap-1">
-                        {CAPABILITY_DEFINITIONS.map((def) => {
-                          const hasCap = roleCaps.includes(def.key);
-                          if (!hasCap) return null;
+                      <div className="flex flex-wrap gap-1 max-h-[120px] overflow-y-auto pr-1">
+                        {PAGE_RESOURCES.map((res) => {
+                          const hasR = roleCaps.includes(`${res.id}:read`);
+                          const hasW = roleCaps.includes(`${res.id}:create`);
+                          const hasU = roleCaps.includes(`${res.id}:update`);
+                          const hasD = roleCaps.includes(`${res.id}:delete`);
+
+                          if (!hasR && !hasW && !hasU && !hasD) return null;
+
                           return (
-                            <span
-                              key={def.key}
-                              className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[10.5px] font-medium text-ink-800 border border-slate-200"
-                              title={def.description}
+                            <div
+                              key={res.id}
+                              className="inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-2 py-0.5 text-[10.5px] border border-slate-200"
+                              title={`${res.name}: ${res.description}`}
                             >
-                              <CheckCircle2 className="h-3 w-3 text-emerald-600 shrink-0" />
-                              {def.label}
-                            </span>
+                              <span className="font-semibold text-ink-800">{res.name}</span>
+                              <div className="flex items-center gap-0.5 font-mono text-[9.5px] font-bold">
+                                {hasR && <span className="text-sky-700 bg-sky-100 px-1 rounded" title="Read">R</span>}
+                                {hasW && <span className="text-emerald-700 bg-emerald-100 px-1 rounded" title="Write / Create">W</span>}
+                                {hasU && <span className="text-amber-700 bg-amber-100 px-1 rounded" title="Update">U</span>}
+                                {hasD && <span className="text-rose-700 bg-rose-100 px-1 rounded" title="Delete">D</span>}
+                              </div>
+                            </div>
                           );
                         })}
                         {roleCaps.length === 0 && (
@@ -868,110 +939,360 @@ export function UsersClient({
         </form>
       </Dialog>
 
-      {/* 2. Create / Edit Role Modal */}
+      {/* 2. Create / Edit Role Modal (D365FO Security Configuration) */}
       <Dialog
         open={roleModalOpen}
         onClose={() => setRoleModalOpen(false)}
         title={
           roleModalMode === "create"
-            ? "Create New Custom Role"
+            ? "Create New Custom Role (D365FO Security Configuration)"
             : roleModalMode === "edit"
-            ? `Edit Role: ${roleForm.name}`
-            : `Role Permissions: ${roleForm.name}`
+            ? `Edit Role: ${roleForm.name} (Security Configuration)`
+            : `Role Permissions: ${roleForm.name} (Security Configuration)`
         }
+        width="max-w-5xl w-11/12"
       >
-        <form onSubmit={handleSaveRole} className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
-          <Field label="Role Name *" hint="Unique name for this role (e.g. Supervisor, Inspector, Auditor)">
-            <Input
-              disabled={roleModalMode === "view"}
-              required
-              value={roleForm.name}
-              onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })}
-              placeholder="e.g. Quality Inspector"
-            />
-          </Field>
+        <form onSubmit={handleSaveRole} className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
+          {/* Top Banner / Explainer */}
+          <div className="rounded-lg border border-brand-200 bg-brand-50/50 p-3 flex items-start gap-2.5 text-xs text-brand-900">
+            <ShieldCheck className="h-4 w-4 text-brand-700 mt-0.5 shrink-0" />
+            <div className="space-y-0.5">
+              <span className="font-bold">Dynamics 365 F&amp;O Security Configuration Model:</span>
+              <p className="text-brand-800 text-[11px] leading-relaxed">
+                Configure granular <strong>Read (R)</strong>, <strong>Write / Create (W)</strong>, <strong>Update (U)</strong>, and <strong>Delete (D)</strong> permissions for every menu and page.
+                Granting Write, Update, or Delete automatically enables Read access. Unchecking Read automatically removes modification privileges for that page.
+              </p>
+            </div>
+          </div>
 
-          <Field label="Description" hint="Brief explanation of responsibilities and scope">
-            <Input
-              disabled={roleModalMode === "view"}
-              value={roleForm.description}
-              onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })}
-              placeholder="e.g. Authorized to inspect orders, verify checklists, and generate COCs"
-            />
-          </Field>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label="Role Name *" hint="Unique role name (e.g. Quality Auditor, Warehouse Lead)">
+              <Input
+                disabled={roleModalMode === "view"}
+                required
+                value={roleForm.name}
+                onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })}
+                placeholder="e.g. Quality Inspector"
+              />
+            </Field>
 
-          {/* Capabilities Selector */}
-          <div className="space-y-2 pt-2 border-t border-ink-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-xs font-bold text-ink-900">
-                  Access Permissions (What this role can see & do)
-                </label>
-                <p className="text-[11px] text-ink-500">
-                  Unchecked options will be hidden from the sidebar navigation and blocked from access.
-                </p>
-              </div>
+            <Field label="Description" hint="Brief explanation of duties &amp; operational scope">
+              <Input
+                disabled={roleModalMode === "view"}
+                value={roleForm.description}
+                onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })}
+                placeholder="e.g. Authorized to inspect orders, verify checklists, and generate COCs"
+              />
+            </Field>
+          </div>
 
-              {roleModalMode !== "view" && (
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={selectAllCapabilities}
-                    className="text-[11px] text-brand-700 hover:underline font-semibold"
-                  >
-                    Select All
-                  </button>
-                  <span className="text-ink-300">&bull;</span>
-                  <button
-                    type="button"
-                    onClick={deselectAllCapabilities}
-                    className="text-[11px] text-ink-500 hover:underline"
-                  >
-                    Deselect All
-                  </button>
-                </div>
+          {/* D365FO Security Action Toolbar */}
+          <div className="pt-2 border-t border-ink-100 flex flex-wrap items-center justify-between gap-2.5">
+            {/* Search Filter */}
+            <div className="relative flex-1 min-w-[220px] max-w-sm">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-ink-400" />
+              <input
+                type="text"
+                value={roleSearch}
+                onChange={(e) => setRoleSearch(e.target.value)}
+                placeholder="Filter pages &amp; menus..."
+                className="w-full rounded-md border border-ink-200 bg-white py-1.5 pl-8 pr-7 text-xs text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+              {roleSearch && (
+                <button
+                  type="button"
+                  onClick={() => setRoleSearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               )}
             </div>
 
-            {/* Categories */}
+            {/* Presets & Column Actions */}
+            {roleModalMode !== "view" && (
+              <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={grantFullAccess}
+                  className="text-[11px] h-7 px-2 font-semibold text-emerald-700 hover:bg-emerald-50 border-emerald-200 gap-1"
+                >
+                  <CheckSquare className="h-3 w-3" /> Full Access
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={grantReadOnlyAccess}
+                  className="text-[11px] h-7 px-2 font-semibold text-sky-700 hover:bg-sky-50 border-sky-200 gap-1"
+                >
+                  <Eye className="h-3 w-3" /> Read Only
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={clearAllPermissions}
+                  className="text-[11px] h-7 px-2 text-ink-600 hover:bg-ink-50 gap-1"
+                >
+                  <Square className="h-3 w-3" /> Clear All
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* D365FO Security Matrix Table */}
+          <div className="space-y-4">
             {(["Documents & Operations", "Templates & Configuration", "Administration & Security"] as const).map(
               (category) => {
-                const groupItems = CAPABILITY_DEFINITIONS.filter((c) => c.category === category);
+                const filteredResources = PAGE_RESOURCES.filter(
+                  (res) =>
+                    res.category === category &&
+                    (!roleSearch ||
+                      res.name.toLowerCase().includes(roleSearch.toLowerCase()) ||
+                      res.route.toLowerCase().includes(roleSearch.toLowerCase()) ||
+                      res.description.toLowerCase().includes(roleSearch.toLowerCase()))
+                );
+
+                if (filteredResources.length === 0) return null;
+
                 return (
-                  <div key={category} className="rounded-lg border border-ink-200 p-3 space-y-2 bg-slate-50/50">
-                    <div className="text-[11px] font-bold text-ink-800 uppercase tracking-wider">
-                      {category}
+                  <div key={category} className="rounded-xl border border-ink-200 bg-white overflow-hidden shadow-2xs">
+                    {/* Category Header */}
+                    <div className="bg-ink-50/90 px-3.5 py-2 border-b border-ink-200 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold uppercase tracking-wider text-ink-800">
+                          {category}
+                        </span>
+                        <span className="text-[10px] font-mono text-ink-500 bg-ink-100 px-1.5 py-0.2 rounded">
+                          {filteredResources.length} {filteredResources.length === 1 ? "menu" : "menus"}
+                        </span>
+                      </div>
+
+                      {roleModalMode !== "view" && (
+                        <div className="flex items-center gap-2 text-[10.5px]">
+                          <span className="text-ink-400 font-medium">Batch:</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              filteredResources.forEach((res) => setRowPreset(res, "full"));
+                            }}
+                            className="text-emerald-700 hover:underline font-semibold"
+                          >
+                            All Full
+                          </button>
+                          <span className="text-ink-300">&bull;</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              filteredResources.forEach((res) => setRowPreset(res, "read"));
+                            }}
+                            className="text-sky-700 hover:underline font-semibold"
+                          >
+                            All Read
+                          </button>
+                          <span className="text-ink-300">&bull;</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              filteredResources.forEach((res) => setRowPreset(res, "none"));
+                            }}
+                            className="text-ink-500 hover:underline"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="grid gap-2">
-                      {groupItems.map((cap) => {
-                        const checked = roleForm.capabilities.includes(cap.key);
-                        return (
-                          <label
-                            key={cap.key}
-                            className={`flex items-start gap-2.5 p-2 rounded-md border text-xs cursor-pointer transition-colors ${
-                              checked
-                                ? "bg-brand-50/70 border-brand-300 text-ink-900"
-                                : "bg-white border-ink-200 text-ink-600 hover:bg-slate-50"
-                            } ${roleModalMode === "view" ? "cursor-default" : ""}`}
-                          >
-                            <input
-                              type="checkbox"
-                              disabled={roleModalMode === "view"}
-                              checked={checked}
-                              onChange={() => toggleCapability(cap.key)}
-                              className="mt-0.5 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
-                            />
-                            <div className="space-y-0.5">
-                              <div className="font-semibold text-ink-900 flex items-center gap-1">
-                                <span>{cap.label}</span>
-                                <code className="text-[10px] text-ink-400 font-mono">({cap.key})</code>
-                              </div>
-                              <div className="text-[11px] text-ink-500">{cap.description}</div>
-                            </div>
-                          </label>
-                        );
-                      })}
+                    {/* Table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-ink-100 bg-slate-50/50 text-[11px] font-semibold text-ink-700">
+                            <th className="py-2 px-3 w-[40%]">Page / Menu Item</th>
+                            <th className="py-2 px-2 text-center w-[12%]">
+                              <span className="inline-flex items-center gap-1 text-sky-700 font-bold">
+                                Read (R)
+                              </span>
+                            </th>
+                            <th className="py-2 px-2 text-center w-[12%]">
+                              <span className="inline-flex items-center gap-1 text-emerald-700 font-bold">
+                                Write (W)
+                              </span>
+                            </th>
+                            <th className="py-2 px-2 text-center w-[12%]">
+                              <span className="inline-flex items-center gap-1 text-amber-700 font-bold">
+                                Update (U)
+                              </span>
+                            </th>
+                            <th className="py-2 px-2 text-center w-[12%]">
+                              <span className="inline-flex items-center gap-1 text-rose-700 font-bold">
+                                Delete (D)
+                              </span>
+                            </th>
+                            <th className="py-2 px-3 text-right w-[12%]">Quick Access</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-ink-100">
+                          {filteredResources.map((res) => {
+                            const hasRead = roleForm.capabilities.includes(`${res.id}:read`);
+                            const hasCreate = roleForm.capabilities.includes(`${res.id}:create`);
+                            const hasUpdate = roleForm.capabilities.includes(`${res.id}:update`);
+                            const hasDelete = roleForm.capabilities.includes(`${res.id}:delete`);
+
+                            const supportsCreate = res.supportedActions.includes("create");
+                            const supportsUpdate = res.supportedActions.includes("update");
+                            const supportsDelete = res.supportedActions.includes("delete");
+
+                            const isFull =
+                              hasRead &&
+                              (!supportsCreate || hasCreate) &&
+                              (!supportsUpdate || hasUpdate) &&
+                              (!supportsDelete || hasDelete);
+
+                            return (
+                              <tr
+                                key={res.id}
+                                className={`transition-colors ${
+                                  hasRead ? "bg-white hover:bg-slate-50/80" : "bg-slate-50/40 opacity-70 hover:opacity-100"
+                                }`}
+                              >
+                                {/* Resource name & description */}
+                                <td className="py-2.5 px-3">
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-bold text-ink-900 text-xs">{res.name}</span>
+                                      <code className="text-[10px] font-mono text-ink-500 bg-ink-100 px-1 py-0.2 rounded">
+                                        {res.route}
+                                      </code>
+                                    </div>
+                                    <p className="text-[11px] text-ink-500 line-clamp-1">{res.description}</p>
+                                  </div>
+                                </td>
+
+                                {/* Read Checkbox */}
+                                <td className="py-2 px-2 text-center">
+                                  <label className="inline-flex items-center justify-center cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      disabled={roleModalMode === "view"}
+                                      checked={hasRead}
+                                      onChange={() => togglePerm(res.id, "read")}
+                                      className="h-4 w-4 rounded border-sky-300 text-sky-600 focus:ring-sky-500"
+                                      title={res.actionLabels?.read || "Read permission"}
+                                    />
+                                  </label>
+                                </td>
+
+                                {/* Create / Write Checkbox */}
+                                <td className="py-2 px-2 text-center">
+                                  {supportsCreate ? (
+                                    <label className="inline-flex items-center justify-center cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        disabled={roleModalMode === "view"}
+                                        checked={hasCreate}
+                                        onChange={() => togglePerm(res.id, "create")}
+                                        className="h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                                        title={res.actionLabels?.create || "Write / Create permission"}
+                                      />
+                                    </label>
+                                  ) : (
+                                    <span className="text-ink-300 font-mono text-xs select-none">&mdash;</span>
+                                  )}
+                                </td>
+
+                                {/* Update Checkbox */}
+                                <td className="py-2 px-2 text-center">
+                                  {supportsUpdate ? (
+                                    <label className="inline-flex items-center justify-center cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        disabled={roleModalMode === "view"}
+                                        checked={hasUpdate}
+                                        onChange={() => togglePerm(res.id, "update")}
+                                        className="h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                                        title={res.actionLabels?.update || "Update permission"}
+                                      />
+                                    </label>
+                                  ) : (
+                                    <span className="text-ink-300 font-mono text-xs select-none">&mdash;</span>
+                                  )}
+                                </td>
+
+                                {/* Delete Checkbox */}
+                                <td className="py-2 px-2 text-center">
+                                  {supportsDelete ? (
+                                    <label className="inline-flex items-center justify-center cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        disabled={roleModalMode === "view"}
+                                        checked={hasDelete}
+                                        onChange={() => togglePerm(res.id, "delete")}
+                                        className="h-4 w-4 rounded border-rose-300 text-rose-600 focus:ring-rose-500"
+                                        title={res.actionLabels?.delete || "Delete permission"}
+                                      />
+                                    </label>
+                                  ) : (
+                                    <span className="text-ink-300 font-mono text-xs select-none">&mdash;</span>
+                                  )}
+                                </td>
+
+                                {/* Row Presets */}
+                                <td className="py-2 px-3 text-right">
+                                  {roleModalMode !== "view" ? (
+                                    <div className="inline-flex items-center rounded-md border border-ink-200 bg-ink-50 p-0.5 text-[10px]">
+                                      <button
+                                        type="button"
+                                        onClick={() => setRowPreset(res, "full")}
+                                        className={`px-1.5 py-0.5 rounded font-medium transition-colors ${
+                                          isFull
+                                            ? "bg-emerald-600 text-white shadow-2xs font-bold"
+                                            : "text-ink-600 hover:text-ink-900"
+                                        }`}
+                                        title="Grant full CRUD access to this page"
+                                      >
+                                        Full
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setRowPreset(res, "read")}
+                                        className={`px-1.5 py-0.5 rounded font-medium transition-colors ${
+                                          hasRead && !hasCreate && !hasUpdate && !hasDelete
+                                            ? "bg-sky-600 text-white shadow-2xs font-bold"
+                                            : "text-ink-600 hover:text-ink-900"
+                                        }`}
+                                        title="Grant read-only access to this page"
+                                      >
+                                        Read
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setRowPreset(res, "none")}
+                                        className={`px-1.5 py-0.5 rounded font-medium transition-colors ${
+                                          !hasRead
+                                            ? "bg-ink-400 text-white shadow-2xs font-bold"
+                                            : "text-ink-600 hover:text-ink-900"
+                                        }`}
+                                        title="Revoke all access to this page"
+                                      >
+                                        None
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[11px] font-mono text-ink-500 font-semibold">
+                                      {isFull ? "Full CRUD" : hasRead ? "Custom" : "No Access"}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 );
@@ -979,15 +1300,21 @@ export function UsersClient({
             )}
           </div>
 
-          <div className="flex justify-end gap-2 pt-4 border-t border-ink-100">
-            <Button variant="outline" type="button" onClick={() => setRoleModalOpen(false)}>
-              {roleModalMode === "view" ? "Close" : "Cancel"}
-            </Button>
-            {roleModalMode !== "view" && (
-              <Button variant="primary" type="submit" loading={roleLoading}>
-                {roleModalMode === "create" ? "Create Role" : "Save Changes"}
+          <div className="flex items-center justify-between pt-4 border-t border-ink-100 flex-wrap gap-2">
+            <span className="text-xs text-ink-500 font-mono">
+              {roleForm.capabilities.filter((c) => c.includes(":")).length} Granular Permissions Active
+            </span>
+
+            <div className="flex items-center gap-2">
+              <Button variant="outline" type="button" onClick={() => setRoleModalOpen(false)}>
+                {roleModalMode === "view" ? "Close" : "Cancel"}
               </Button>
-            )}
+              {roleModalMode !== "view" && (
+                <Button variant="primary" type="submit" loading={roleLoading}>
+                  {roleModalMode === "create" ? "Create Custom Role" : "Save Security Configuration"}
+                </Button>
+              )}
+            </div>
           </div>
         </form>
       </Dialog>

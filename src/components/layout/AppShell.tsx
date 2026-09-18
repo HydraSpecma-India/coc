@@ -23,22 +23,22 @@ const nav = (role: Role, capabilities?: string[]) => [
   {
     title: "Documents",
     items: [
-      { href: "/", label: "Dashboard", icon: LayoutDashboard, show: can(role, "viewDashboard", capabilities) },
-      { href: "/coc/new", label: "New COC", icon: FilePlus2, show: can(role, "createCoc", capabilities) },
-      { href: "/coc/history", label: "Completed COCs", icon: History, show: can(role, "viewCoc", capabilities) },
+      { href: "/", label: "Dashboard", icon: LayoutDashboard, show: can(role, "dashboard:read", capabilities) },
+      { href: "/coc/new", label: "New COC", icon: FilePlus2, show: can(role, "coc:create", capabilities) },
+      { href: "/coc/history", label: "Completed COCs", icon: History, show: can(role, "coc:read", capabilities) },
     ],
   },
   {
     title: "Administration",
     items: [
-      { href: "/admin/templates", label: "Templates", icon: FileText, show: can(role, "viewTemplates", capabilities) },
-      { href: "/admin/fields", label: "Field Definitions", icon: ListTree, show: can(role, "manageFields", capabilities) },
-      { href: "/admin/d365-mappings", label: "D365FO Field Mapping", icon: Database, show: can(role, "manageFields", capabilities) },
-      { href: "/admin/sharepoint", label: "SharePoint Configuration", icon: FolderCog, show: can(role, "manageSettings", capabilities) },
-      { href: "/admin/users", label: "Users & Roles", icon: Users, show: can(role, "manageUsers", capabilities) },
-      { href: "/admin/signatures", label: "Signatures", icon: PenTool, show: can(role, "manageSignatures", capabilities) },
-      { href: "/admin/audit", label: "Audit Logs", icon: ScrollText, show: can(role, "viewAudit", capabilities) },
-      { href: "/admin/settings", label: "System Settings", icon: Settings, show: can(role, "manageSettings", capabilities) },
+      { href: "/admin/templates", label: "Templates", icon: FileText, show: can(role, "templates:read", capabilities) },
+      { href: "/admin/fields", label: "Field Definitions", icon: ListTree, show: can(role, "fields:read", capabilities) },
+      { href: "/admin/d365-mappings", label: "D365FO Field Mapping", icon: Database, show: can(role, "d365_mappings:read", capabilities) },
+      { href: "/admin/sharepoint", label: "SharePoint Configuration", icon: FolderCog, show: can(role, "sharepoint:read", capabilities) },
+      { href: "/admin/users", label: "Users & Roles", icon: Users, show: can(role, "users:read", capabilities) || can(role, "roles:read", capabilities) },
+      { href: "/admin/signatures", label: "Signatures", icon: PenTool, show: can(role, "signatures:read", capabilities) },
+      { href: "/admin/audit", label: "Audit Logs", icon: ScrollText, show: can(role, "audit:read", capabilities) },
+      { href: "/admin/settings", label: "System Settings", icon: Settings, show: can(role, "settings:read", capabilities) },
     ],
   },
 ];

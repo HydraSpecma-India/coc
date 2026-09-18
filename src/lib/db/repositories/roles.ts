@@ -1,21 +1,21 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/db/supabase-admin";
 import { Errors } from "@/lib/errors";
-import { DEFAULT_ROLE_CAPABILITIES, type Capability } from "@/lib/auth/roles";
+import { DEFAULT_ROLE_CAPABILITIES, normalizePermissions } from "@/lib/auth/roles";
 
 export interface RoleRow {
   id: string;
   name: string;
   description: string | null;
   is_system: boolean;
-  capabilities: Capability[];
+  capabilities: string[];
   created_at: string;
   updated_at: string;
   user_count?: number;
 }
 
 // In-memory cache for fast capability checks & roles listing
-let cachedCapabilities: Record<string, Capability[]> | null = null;
+let cachedCapabilities: Record<string, string[]> | null = null;
 let lastCacheTime = 0;
 const CACHE_TTL_MS = 30_000; // 30 seconds
 
@@ -30,7 +30,7 @@ export function invalidateRolesCache(): void {
   lastCacheTime = 0;
 }
 
-export async function getAllRoleCapabilitiesMap(force = false): Promise<Record<string, Capability[]>> {
+export async function getAllRoleCapabilitiesMap(force = false): Promise<Record<string, string[]>> {
   const now = Date.now();
   if (!force && cachedCapabilities && now - lastCacheTime < CACHE_TTL_MS) {
     return cachedCapabilities;
@@ -45,10 +45,10 @@ export async function getAllRoleCapabilitiesMap(force = false): Promise<Record<s
       return DEFAULT_ROLE_CAPABILITIES;
     }
 
-    const map: Record<string, Capability[]> = { ...DEFAULT_ROLE_CAPABILITIES };
+    const map: Record<string, string[]> = { ...DEFAULT_ROLE_CAPABILITIES };
     for (const r of data) {
       if (r.name && Array.isArray(r.capabilities)) {
-        map[r.name] = r.capabilities as Capability[];
+        map[r.name] = normalizePermissions(r.capabilities as string[]);
       }
     }
 
@@ -60,7 +60,7 @@ export async function getAllRoleCapabilitiesMap(force = false): Promise<Record<s
   }
 }
 
-export async function getCapabilitiesForRole(roleName: string): Promise<Capability[]> {
+export async function getCapabilitiesForRole(roleName: string): Promise<string[]> {
   if (!roleName) return [];
   const map = await getAllRoleCapabilitiesMap();
   if (map[roleName]) return map[roleName];
@@ -104,6 +104,7 @@ export async function listRoles(force = false): Promise<RoleRow[]> {
 
   const result = (roles || []).map((r) => ({
     ...r,
+    capabilities: normalizePermissions(r.capabilities || []),
     user_count: counts[r.name] || 0,
   })) as RoleRow[];
 
@@ -115,19 +116,27 @@ export async function listRoles(force = false): Promise<RoleRow[]> {
 export async function getRoleById(id: string): Promise<RoleRow | null> {
   const { data, error } = await supabaseAdmin().from("coc_roles").select("*").eq("id", id).maybeSingle();
   if (error) throw error;
-  return (data as RoleRow) || null;
+  if (!data) return null;
+  return {
+    ...data,
+    capabilities: normalizePermissions(data.capabilities || []),
+  } as RoleRow;
 }
 
 export async function getRoleByName(name: string): Promise<RoleRow | null> {
   const { data, error } = await supabaseAdmin().from("coc_roles").select("*").eq("name", name).maybeSingle();
   if (error) throw error;
-  return (data as RoleRow) || null;
+  if (!data) return null;
+  return {
+    ...data,
+    capabilities: normalizePermissions(data.capabilities || []),
+  } as RoleRow;
 }
 
 export async function createCustomRole(input: {
   name: string;
   description?: string;
-  capabilities: Capability[];
+  capabilities: string[];
 }): Promise<RoleRow> {
   const cleanName = input.name.trim();
   if (!cleanName) {
@@ -139,13 +148,15 @@ export async function createCustomRole(input: {
     throw Errors.conflict(`A role named "${cleanName}" already exists.`);
   }
 
+  const normalizedCaps = normalizePermissions(input.capabilities);
+
   const { data, error } = await supabaseAdmin()
     .from("coc_roles")
     .insert({
       name: cleanName,
       description: input.description?.trim() || null,
       is_system: false,
-      capabilities: input.capabilities,
+      capabilities: normalizedCaps,
     })
     .select("*")
     .single();
@@ -155,7 +166,10 @@ export async function createCustomRole(input: {
   // Invalidate cache
   invalidateRolesCache();
 
-  return data as RoleRow;
+  return {
+    ...data,
+    capabilities: normalizedCaps,
+  } as RoleRow;
 }
 
 export async function updateRole(
@@ -163,7 +177,7 @@ export async function updateRole(
   patch: {
     name?: string;
     description?: string;
-    capabilities?: Capability[];
+    capabilities?: string[];
   }
 ): Promise<RoleRow> {
   const role = await getRoleById(id);
@@ -184,7 +198,7 @@ export async function updateRole(
   }
 
   if (patch.capabilities !== undefined) {
-    updates.capabilities = patch.capabilities;
+    updates.capabilities = normalizePermissions(patch.capabilities);
   }
 
   const { data, error } = await supabaseAdmin()
@@ -199,7 +213,10 @@ export async function updateRole(
   // Invalidate cache
   invalidateRolesCache();
 
-  return data as RoleRow;
+  return {
+    ...data,
+    capabilities: normalizePermissions(data.capabilities || []),
+  } as RoleRow;
 }
 
 export async function deleteRole(id: string): Promise<void> {

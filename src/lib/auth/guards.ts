@@ -1,6 +1,6 @@
 import "server-only";
 import { auth } from "@/lib/auth/auth";
-import { can, type Capability } from "@/lib/auth/roles";
+import { can, canPermission, type Capability, type PermissionAction } from "@/lib/auth/roles";
 import { getCapabilitiesForRole } from "@/lib/db/repositories/roles";
 import { Errors } from "@/lib/errors";
 import type { Session } from "next-auth";
@@ -14,12 +14,22 @@ export async function requireSession(): Promise<AppSession> {
   return session as AppSession;
 }
 
-/** Throws 403 unless the session role has the capability. Authorization lives here, never in the UI. */
-export async function requireCapability(capability: Capability): Promise<AppSession> {
+/** Throws 403 unless the session role has the capability or permission. */
+export async function requireCapability(capability: Capability | string): Promise<AppSession> {
   const session = await requireSession();
   const caps = session.user.capabilities || (await getCapabilitiesForRole(session.user.role));
   if (!can(session.user.role, capability, caps)) {
     throw Errors.forbidden(capability.replace(/([A-Z])/g, " $1").toLowerCase());
+  }
+  return session;
+}
+
+/** Throws 403 unless the session role has the specific D365FO CRUD permission on a resource. */
+export async function requirePermission(resource: string, action: PermissionAction): Promise<AppSession> {
+  const session = await requireSession();
+  const caps = session.user.capabilities || (await getCapabilitiesForRole(session.user.role));
+  if (!canPermission(session.user.role, resource, action, caps)) {
+    throw Errors.forbidden(`${action.toUpperCase()} permission required for ${resource}`);
   }
   return session;
 }

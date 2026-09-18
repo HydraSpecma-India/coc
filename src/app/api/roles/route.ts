@@ -7,6 +7,12 @@ import { CAPABILITY_DEFINITIONS, type Capability } from "@/lib/auth/roles";
 
 const VALID_CAPABILITIES = CAPABILITY_DEFINITIONS.map((c) => c.key);
 
+const isValidPermissionToken = (token: string): boolean => {
+  if (VALID_CAPABILITIES.includes(token as Capability)) return true;
+  if (/^[a-z0-9_]+:(read|create|update|delete)$/.test(token)) return true;
+  return false;
+};
+
 export const GET = route(async () => {
   // Allow anyone with manageUsers or viewDashboard to list roles (e.g. for dropdowns)
   await requireCapability("viewDashboard");
@@ -22,8 +28,8 @@ const CreateRoleSchema = z.object({
     .regex(/^[A-Za-z0-9 _-]+$/, "Role name can only contain letters, numbers, spaces, underscores, and hyphens"),
   description: z.string().max(255).optional(),
   capabilities: z.array(z.string()).refine(
-    (arr) => arr.every((c) => VALID_CAPABILITIES.includes(c as Capability)),
-    "One or more capabilities are invalid"
+    (arr) => arr.every(isValidPermissionToken),
+    "One or more permissions or capabilities are invalid"
   ),
 });
 
@@ -34,7 +40,7 @@ export const POST = route(async (req) => {
   const role = await createCustomRole({
     name: body.name,
     description: body.description,
-    capabilities: body.capabilities as Capability[],
+    capabilities: body.capabilities,
   });
 
   await audit({
