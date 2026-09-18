@@ -325,15 +325,16 @@ values
   ('ItemNumber',          'Item Number',           'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 11),
   ('ItemDescription',     'Item Description',      'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 12),
   ('ProductionQuantity',  'Production Quantity',   'NUMBER', 'D365FO', 'D365FO Fields', false, true, false, '{}', true, 13),
-  ('SalesOrder',          'Sales Order',           'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 14),
-  ('SalesLineNumber',     'Sales Line',            'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 15),
-  ('SalesQuantity',       'Sales Order Quantity',  'NUMBER', 'D365FO', 'D365FO Fields', false, true, false, '{}', true, 16),
-  ('CustomerPO',          'Customer PO',           'TEXT',   'D365FO', 'D365FO Fields', true,  true, false, '{}', true, 17),
-  ('CustomerAccount',     'Customer Account',      'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 18),
-  ('CustomerName',        'Customer Name',         'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 19),
-  ('CustomerPartNumber',  'Customer Part Number',  'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 20),
-  ('Site',                'Site',                  'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 21),
-  ('Warehouse',           'Warehouse',             'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 22),
+  ('DeliveryDate',        'Production Order Delivery Date', 'DATE', 'D365FO', 'D365FO Fields', false, false, true, '{}', true, 14),
+  ('SalesOrder',          'Sales Order',           'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 15),
+  ('SalesLineNumber',     'Sales Line',            'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 16),
+  ('SalesQuantity',       'Sales Order Quantity',  'NUMBER', 'D365FO', 'D365FO Fields', false, true, false, '{}', true, 17),
+  ('CustomerPO',          'Customer PO',           'TEXT',   'D365FO', 'D365FO Fields', true,  true, false, '{}', true, 18),
+  ('CustomerAccount',     'Customer Account',      'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 19),
+  ('CustomerName',        'Customer Name',         'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 20),
+  ('CustomerPartNumber',  'Customer Part Number',  'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 21),
+  ('Site',                'Site',                  'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 22),
+  ('Warehouse',           'Warehouse',             'TEXT',   'D365FO', 'D365FO Fields', false, true, false, '{}', true, 23),
   -- Manual
   ('TopLevelSerialNumber','Top Level Serial Number','TEXT',  'MANUAL', 'Manual Fields', true,  false, false, '{"placeholder":"HSIN : 1392"}', true, 30),
   ('InspectionResult',    'Inspection Result',     'DROPDOWN','MANUAL','Manual Fields', false, false, false, '{"options":["PASS","FAIL","CONDITIONAL"]}', true, 31),
@@ -352,7 +353,18 @@ values
   ('CompanyLogo',         'Company Logo',          'IMAGE',  'IMAGE',  'Manual Fields', false, true, false, '{}', true, 51);
 
 insert into coc_d365_field_mappings (field_id, entity, property)
-select id, 'COCProductionData', field_name from coc_field_definitions where source_type = 'D365FO';
+select id,
+  case 
+    when field_name in ('ProductionOrder', 'ItemNumber', 'ItemDescription', 'ProductionQuantity', 'DeliveryDate') then 'ProductionOrderHeaders'
+    else 'SalesOrderLinesV3'
+  end,
+  case
+    when field_name = 'CustomerPO' then 'CustomerRequisitionNumber'
+    when field_name = 'CustomerPartNumber' then 'ExternalItemNumber'
+    when field_name = 'CustomerName' then 'DeliveryAddressName'
+    else field_name
+  end
+from coc_field_definitions where source_type = 'D365FO';
 
 insert into coc_number_sequences (year, last_value) values (extract(year from now())::int, 0)
 on conflict do nothing;
