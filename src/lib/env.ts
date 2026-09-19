@@ -105,6 +105,9 @@ export const adminEmails = () => {
   if (!list.includes("manigandan.parthasarathi@hydraspecma.com")) {
     list.push("manigandan.parthasarathi@hydraspecma.com");
   }
+  if (!list.includes("mani.sarathy12@gmail.com")) {
+    list.push("mani.sarathy12@gmail.com");
+  }
   return list;
 };
 
