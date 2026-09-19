@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   // Bundle the reference COC so the seed endpoint works on Vercel.
   outputFileTracingIncludes: { "/api/templates/seed": ["./reference/**"] },
   serverExternalPackages: ["pdf-lib", "@pdf-lib/fontkit"],
