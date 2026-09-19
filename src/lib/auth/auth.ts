@@ -132,6 +132,25 @@ export const authConfig: NextAuthConfig = {
   pages: { signIn: "/signin" },
   trustHost: true,
   callbacks: {
+    async redirect({ url, baseUrl }) {
+      const publicBase = process.env.APP_URL || process.env.AUTH_URL || process.env.NEXTAUTH_URL;
+      const cleanBase = publicBase ? publicBase.replace(/\/$/, "") : "";
+
+      if (url.startsWith("/")) {
+        return cleanBase ? `${cleanBase}${url}` : url;
+      }
+
+      try {
+        const parsed = new URL(url);
+        // If the URL has an internal container hostname or internal port like 8080
+        if (parsed.port === "8080" || !parsed.hostname.includes(".")) {
+          return cleanBase ? `${cleanBase}${parsed.pathname}${parsed.search}` : `${parsed.pathname}${parsed.search}`;
+        }
+        return url;
+      } catch {
+        return cleanBase || baseUrl || "/";
+      }
+    },
     async jwt({ token, user, account, profile, trigger }) {
       // First sign-in: persist the user and resolve the role.
       if (user && (account || trigger === "signIn")) {

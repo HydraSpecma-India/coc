@@ -19,7 +19,13 @@ export async function proxy(req: NextRequest) {
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: { code: "UNAUTHORIZED", message: "You must be signed in." } }, { status: 401 });
   }
-  const url = new URL("/signin", req.url);
+  const forwardHost = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
+  const forwardProto = req.headers.get("x-forwarded-proto") || "https";
+  const isInternalHost = forwardHost.includes(":8080") || !forwardHost.includes(".");
+  const publicBase = process.env.APP_URL || process.env.AUTH_URL || process.env.NEXTAUTH_URL;
+  const base = (!isInternalHost && forwardHost) ? `${forwardProto}://${forwardHost}` : (publicBase || req.url);
+
+  const url = new URL("/signin", base);
   url.searchParams.set("callbackUrl", pathname + req.nextUrl.search);
   return NextResponse.redirect(url);
 }

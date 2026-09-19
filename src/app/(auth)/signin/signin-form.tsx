@@ -49,8 +49,25 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
         return;
       }
 
-      // Successful sign-in: navigate immediately to target page
-      window.location.href = res?.url || callbackUrl || "/";
+      // Successful sign-in: navigate safely to target page without container host leak
+      if (callbackUrl && callbackUrl.startsWith("/") && !callbackUrl.startsWith("//")) {
+        window.location.href = callbackUrl;
+        return;
+      }
+      if (res?.url) {
+        try {
+          const parsed = new URL(res.url);
+          if (parsed.port === "8080" || !parsed.hostname.includes(".")) {
+            window.location.href = parsed.pathname + parsed.search;
+            return;
+          }
+          window.location.href = res.url;
+          return;
+        } catch {
+          // ignore
+        }
+      }
+      window.location.href = "/";
     } catch (err) {
       setError((err as Error).message || "An unexpected error occurred during sign-in.");
       setLoading(false);
