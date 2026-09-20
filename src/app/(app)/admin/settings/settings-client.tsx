@@ -16,7 +16,7 @@ import {
 } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
-import { KeyRound, Database, Share2, Cog, RefreshCw, CheckCircle2, AlertCircle, Hash, Send, Building2, Plus, Trash2, Network, Users, ExternalLink } from "lucide-react";
+import { KeyRound, Database, Share2, Cog, RefreshCw, CheckCircle2, AlertCircle, Hash, Send, Building2, Plus, Trash2, Network } from "lucide-react";
 import { NumberSequencesPanel } from "./number-sequences-panel";
 import { ArchitecturePanel } from "./architecture-panel";
 
@@ -70,24 +70,6 @@ interface ConfigState {
   };
 }
 
-interface GraphUser {
-  id: string;
-  displayName: string;
-  mail: string | null;
-  userPrincipalName: string;
-  jobTitle: string | null;
-  department: string | null;
-}
-
-interface GraphTestResult {
-  ok: boolean;
-  users?: GraphUser[];
-  managerSample?: { displayName: string; mail: string | null } | null;
-  totalCount?: number;
-  error?: string;
-  permissionsLink?: string;
-}
-
 export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }) {
   const [config, setConfig] = useState<ConfigState>(initialConfig);
   const [activeTab, setActiveTab] = useState<"entra" | "d365" | "sharepoint" | "app" | "sequences" | "teams" | "architecture">("d365");
@@ -97,8 +79,6 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
   const [availableCompanies, setAvailableCompanies] = useState<{ code: string; name: string }[]>([]);
   const [newCompanyCode, setNewCompanyCode] = useState("");
   const [newCompanyWebhook, setNewCompanyWebhook] = useState("");
-  const [graphTesting, setGraphTesting] = useState(false);
-  const [graphResult, setGraphResult] = useState<GraphTestResult | null>(null);
 
   useEffect(() => {
     api<{ ok: boolean; companies: { code: string; name: string }[] }>("/api/d365/companies")
@@ -386,121 +366,7 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
                 />
               </Field>
             </div>
-
-            {/* Microsoft Graph API User Directory Test */}
-            <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2 font-semibold text-blue-900">
-                    <Users className="h-4 w-4" />
-                    Microsoft Graph API — Office User Directory Test
-                  </div>
-                  <div className="text-xs text-blue-700 mt-0.5">
-                    Tests whether this App Registration can read Office 365 user profiles (name, email, job title, manager) via Microsoft Graph.
-                    Uses the D365 Client ID / Secret / Tenant ID saved above.
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  loading={graphTesting}
-                  onClick={async () => {
-                    setGraphTesting(true);
-                    setGraphResult(null);
-                    try {
-                      const res = await api<GraphTestResult>("/api/admin/config/graph-test", { method: "POST", json: {} });
-                      setGraphResult(res);
-                      if (res.ok) {
-                        toast.success(`Graph API OK — found ${res.totalCount ?? res.users?.length ?? 0} users`);
-                      } else {
-                        toast.error("Graph API test failed", res.error);
-                      }
-                    } catch (e) {
-                      setGraphResult({ ok: false, error: (e as Error).message });
-                      toast.error("Graph API test error", (e as Error).message);
-                    } finally {
-                      setGraphTesting(false);
-                    }
-                  }}
-                >
-                  <Users className="h-3.5 w-3.5" />
-                  Test Graph Permissions
-                </Button>
-              </div>
-
-              {graphResult && (
-                <div className="space-y-3">
-                  {graphResult.ok ? (
-                    <>
-                      <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
-                        <CheckCircle2 className="h-4 w-4" />
-                        Permission granted — Graph API is accessible
-                        {graphResult.totalCount !== undefined && (
-                          <Badge tone="success">{graphResult.totalCount} total users in directory</Badge>
-                        )}
-                      </div>
-
-                      {graphResult.managerSample && (
-                        <div className="text-xs text-blue-800 bg-white rounded px-3 py-2 border border-blue-200">
-                          <span className="font-medium">Manager lookup ✓</span> — Manager of first user:{" "}
-                          <span className="font-semibold">{graphResult.managerSample.displayName}</span>
-                          {graphResult.managerSample.mail && ` (${graphResult.managerSample.mail})`}
-                        </div>
-                      )}
-
-                      {(graphResult.users?.length ?? 0) > 0 && (
-                        <div className="overflow-x-auto rounded border border-blue-200">
-                          <table className="w-full text-xs text-left">
-                            <thead className="bg-blue-100 text-blue-800">
-                              <tr>
-                                <th className="px-3 py-2 font-semibold">Display Name</th>
-                                <th className="px-3 py-2 font-semibold">Email</th>
-                                <th className="px-3 py-2 font-semibold">Job Title</th>
-                                <th className="px-3 py-2 font-semibold">Department</th>
-                              </tr>
-                            </thead>
-                            <tbody className="bg-white divide-y divide-blue-100">
-                              {graphResult.users!.map((u) => (
-                                <tr key={u.id}>
-                                  <td className="px-3 py-2 font-medium text-ink-900">{u.displayName || "—"}</td>
-                                  <td className="px-3 py-2 text-ink-600">{u.mail ?? u.userPrincipalName}</td>
-                                  <td className="px-3 py-2 text-ink-600">{u.jobTitle ?? "—"}</td>
-                                  <td className="px-3 py-2 text-ink-600">{u.department ?? "—"}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                          <div className="px-3 py-1.5 bg-blue-50 text-xs text-blue-600">Showing first 5 users</div>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="flex items-start gap-2 text-sm text-red-700">
-                        <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                        <div>
-                          <div className="font-medium">Graph API access denied</div>
-                          <div className="text-xs mt-0.5 text-red-600">{graphResult.error}</div>
-                        </div>
-                      </div>
-                      {graphResult.permissionsLink && (
-                        <a
-                          href={graphResult.permissionsLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-xs text-blue-700 hover:underline font-medium"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                          Open App Registration in Azure Portal → Add User.Read.All or Directory.Read.All permission
-                        </a>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
           </CardBody>
-
         </Card>
       )}
 
