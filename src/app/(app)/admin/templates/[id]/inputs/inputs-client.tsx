@@ -14,6 +14,8 @@ import {
   type InputFieldDef, type InputSection, type TemplateInputConfig,
 } from "@/lib/coc-inputs/types";
 import { INPUT_PRESETS } from "@/lib/coc-inputs/presets";
+import { countPlacements } from "@/lib/coc-inputs/placement";
+import { MapPinned } from "lucide-react";
 
 type PageInfo = { number: number; name: string; placedFields: string[] };
 
@@ -138,6 +140,34 @@ export function InputsEditorClient({
     }
   };
 
+  const [placing, setPlacing] = useState(false);
+  const placementCount = countPlacements(config);
+
+  /** Write the positions as designer elements into a draft version (optionally publish it). */
+  const placeOnTemplate = async (publish: boolean) => {
+    if (dirty) {
+      toast.error("Save first", "Save the data entry fields before placing them on the template.");
+      return;
+    }
+    if (publish && !confirm("Place all values on the template and publish it as the new active version?")) return;
+    setPlacing(true);
+    try {
+      const res = await api<{ ok: boolean; versionId: string; versionNumber: number; placed: number; published: boolean }>(
+        `/api/templates/${templateId}/inputs/place`,
+        { method: "POST", json: { publish } },
+      );
+      toast.success(
+        `${res.placed} value box(es) placed on version ${res.versionNumber}`,
+        res.published ? "Published – new COCs use it now." : "Opening the designer so you can check and publish…",
+      );
+      if (!res.published) window.location.href = `/admin/templates/${templateId}/designer/${res.versionId}`;
+    } catch (e) {
+      toast.error("Could not place the fields", (e as Error).message);
+    } finally {
+      setPlacing(false);
+    }
+  };
+
   const loadPreset = (presetId: string) => {
     const preset = INPUT_PRESETS.find((p) => p.id === presetId);
     if (!preset) return;
@@ -192,6 +222,29 @@ export function InputsEditorClient({
         )}
         {config.updatedAt && <span className="text-ink-400">Last saved {new Date(config.updatedAt).toLocaleString()} {config.updatedBy ? `by ${config.updatedBy}` : ""}</span>}
       </div>
+
+      {placementCount > 0 && (
+        <Card className="mb-4 border-brand-200">
+          <CardBody className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <MapPinned className="hidden h-6 w-6 shrink-0 text-brand-600 sm:block" />
+            <div className="min-w-0 flex-1 text-xs text-ink-700">
+              <div className="text-sm font-semibold text-ink-900">Stamp everything on the template pages</div>
+              {placementCount} position(s) are defined (measurements, check marks, serial no., date and the test print-out photo).
+              “Place on template” adds them to a draft version – no extra pages are created in the COC PDF.
+            </div>
+            {canManage && (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" loading={placing} onClick={() => placeOnTemplate(false)}>
+                  Place &amp; review in designer
+                </Button>
+                <Button size="sm" loading={placing} onClick={() => placeOnTemplate(true)}>
+                  Place &amp; publish
+                </Button>
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      )}
 
       {problem && dirty && (
         <div className="mb-4">
@@ -273,11 +326,11 @@ export function InputsEditorClient({
                     onChange={(e) => updateSection(s.id, { description: e.target.value })}
                   />
                   <Checkbox
-                    label="Print data sheet in PDF"
+                    label="Extra data sheet page"
                     checked={s.printSheet}
                     disabled={!canManage}
                     onChange={(e) => updateSection(s.id, { printSheet: e.target.checked })}
-                    title="Fields that are not placed on the template in the designer are printed on an appended data sheet"
+                    title="Off (recommended): values not placed in the designer are stamped in a small box at the bottom of this template page. On: they are printed on an extra data sheet page."
                   />
                 </div>
                 {pageInfo && pageInfo.placedFields.length > 0 && (
@@ -314,7 +367,11 @@ export function InputsEditorClient({
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
                             {f.qr && <QrCode className="h-3.5 w-3.5 text-brand-600" aria-label="QR enabled" />}
-                            {placed && <Badge tone="success" className="text-[10px]">placed</Badge>}
+                            {placed ? (
+                              <Badge tone="success" className="text-[10px]">on template</Badge>
+                            ) : f.placements?.length ? (
+                              <Badge tone="info" className="text-[10px]">{f.placements.length} position{f.placements.length > 1 ? "s" : ""}</Badge>
+                            ) : null}
                           </div>
                         </button>
                         {open && (

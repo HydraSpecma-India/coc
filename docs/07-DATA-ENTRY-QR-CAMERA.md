@@ -21,33 +21,35 @@ needed) and can be changed without publishing a new template version. Every issu
 snapshot of the fields and values in `coc_document_values` (`__measurements`), so later changes never
 alter historical certificates.
 
-### Preset for COC-1070.0049 (Baseframe Module)
+### Preset for COC-1070.0049 (Baseframe Module) – pre-mapped
 
-*Load preset…* on the Data entry fields page creates the 8-page layout of the paper pack:
-page 2 Appendix B flatness points 1–5 (max 4 mm), page 3 Appendix A interface holes 1–10
-(4/5/6 measured 727,4 ± 5, the rest Go/No-go), page 4 SN check list, page 5 component serial / batch
-numbers (barcode scan), page 6 air-leak result + **print-out photo**, page 7 fan test, page 8 pipe test.
-Review, save, then place the fields in the designer.
+*Load preset…* creates the fields **with their positions measured from the template PDF**:
+page 2 flatness points 1–5 (result row), page 3 interface holes 1–10 + signature rows, page 4
+check list (initials / date / check mark per row) and serial line, page 5 component serial / batch
+numbers, page 6 air-leak result + the **print-out photo in the glue area**, page 7 fan-test note,
+plus the serial no. and date on every page. Save, then press **Place & publish** (or *Place & review
+in designer*). The values are stamped on the original template pages – the COC PDF keeps its
+7 pages. Supplier reports that are not part of the template (e.g. the Ymer pipe-system test) are
+captured under *Supplier test reports* and added after the template pages.
 
 ## Map the fields onto the template (designer)
 
-Open the template version in the designer. Every data-entry field appears in the palette under
-**“Data entry · Page N”** – drag it onto the exact box on that page (e.g. the five cells under
-1–5 on Appendix B). Set font size / alignment in Properties. Also place *Top Level Serial Number*
-and *COC Date* on each page that has a “Serial no:” / date box.
+“Place on template” writes the positions into a draft version as ordinary designer elements
+(ids starting with `de-`; running it again replaces them, hand-placed elements are kept). You can
+move / resize them in the designer. For other templates, drag the fields from the palette group
+**“Data entry · Page N”** onto the page:
 
 * Text / number / OK-NOK / date fields → *Field* element (or a table cell bound to the key).
 * Checkbox fields → *Checkbox* element (ticked when the value is Yes/OK).
-* **Photo** fields → *Image* element bound to the key. The captured photo is drawn inside that
-  frame – e.g. the Lindab air-leak print-out in the “Glue the test result onto this page” area.
+* **Photo** fields → *Image* element bound to the key; the photo is drawn inside that frame.
 
 ## How values reach the PDF
 
-1. If the designer has a *Field* element whose field name equals the key, the value is printed there.
-2. All other fields of a section with *Print data sheet* are printed on an appended
-   **Measurement data sheet** (spec, value, OK/NOK, manual/QR source).
-3. Captured documents are appended after that: photos as full A4 pages, PDFs page by page, each
-   stamped with COC number, production order and serial number.
+1. Every value is stamped where a designer element with the same field name is placed.
+2. A value that is not placed anywhere is stamped in a small “Recorded values” box at the bottom of
+   its own template page (no extra pages). Tick *Extra data sheet page* on a section only if you
+   prefer a separate data sheet page for such values.
+3. Supplier documents (camera capture section) are added after the template pages.
 
 Note: the built-in PDF fonts support Western (WinAnsi) characters only – other scripts (e.g. Tamil)
 are printed as `?`.

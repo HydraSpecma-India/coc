@@ -215,6 +215,46 @@ function appendMeasurementSheets(pdf: PDFDocument, fonts: Fonts, ctx: ExtrasCont
   return pages;
 }
 
+/* ───────────────────────── unplaced values on their own page ───────────────────────── */
+
+function stampUnplacedOnPages(pdf: PDFDocument, fonts: Fonts, ctx: ExtrasContext, placed: Set<string>) {
+  const pageCount = pdf.getPageCount();
+  const byPage = new Map<number, MeasurementEntry[]>();
+  for (const m of ctx.measurements ?? []) {
+    if (m.printSheet || m.type === "photo" || !m.value || placed.has(m.key.toLowerCase())) continue;
+    const pg = m.pageNumber ?? 0;
+    if (pg < 2 || pg > pageCount) continue;
+    byPage.set(pg, [...(byPage.get(pg) ?? []), m]);
+  }
+  const safe = makeFontSafe(fonts.regular);
+  const size = 7.5;
+  const lineH = 9.5;
+  for (const [pg, items] of byPage) {
+    const page = pdf.getPage(pg - 1);
+    const { width } = page.getSize();
+    const boxW = width - 2 * MARGIN;
+    const colW = boxW / 2;
+    const rows = Math.ceil(items.length / 2);
+    const boxH = rows * lineH + 16;
+    const y0 = 50; // just above the page footer
+    page.drawRectangle({ x: MARGIN, y: y0, width: boxW, height: boxH, color: rgb(1, 1, 1), borderColor: LINE, borderWidth: 0.6, opacity: 0.95 });
+    page.drawText("Recorded values", { x: MARGIN + 4, y: y0 + boxH - 10, size: 7, font: fonts.bold, color: MUTED });
+    items.forEach((m, i) => {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const label = safe(`${m.label}: `);
+      const val = safe(`${m.value}${m.unit && m.type === "number" ? ` ${m.unit}` : ""}${m.status ? ` (${m.status})` : ""}`);
+      const x = MARGIN + 4 + col * colW;
+      const y = y0 + boxH - 22 - row * lineH;
+      let lab = label;
+      const valW = fonts.bold.widthOfTextAtSize(val, size);
+      while (lab.length > 4 && fonts.regular.widthOfTextAtSize(lab, size) + valW > colW - 10) lab = lab.slice(0, -4) + "…: ";
+      page.drawText(lab, { x, y, size, font: fonts.regular, color: INK });
+      page.drawText(val, { x: x + fonts.regular.widthOfTextAtSize(lab, size), y, size, font: fonts.bold, color: m.status === "NOK" ? NOK : rgb(0.04, 0.24, 0.57) });
+    });
+  }
+}
+
 /* ───────────────────────── attachments ───────────────────────── */
 
 async function appendOneAttachment(
@@ -287,6 +327,9 @@ export async function appendCocExtras(pdf: PDFDocument, ctx: ExtrasContext, temp
   const fonts: Fonts = { regular: await pdf.embedFont(StandardFonts.Helvetica), bold: await pdf.embedFont(StandardFonts.HelveticaBold) };
   const appended: PDFPage[] = [];
 
+  // Fields that were not placed in the designer are stamped on their own template page
+  // (sections with "print data sheet" off – the default), so no extra pages are created.
+  stampUnplacedOnPages(pdf, fonts, ctx, placed);
   appended.push(...appendMeasurementSheets(pdf, fonts, ctx, placed));
 
   for (let i = 0; i < atts.length; i++) {

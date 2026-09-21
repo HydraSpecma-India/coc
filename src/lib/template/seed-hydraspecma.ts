@@ -177,12 +177,12 @@ export function buildHydraSpecmaSeed(backgroundAssetId: string, pageCount: numbe
 
   // ── Appendix pages: serial number on each ─────────────────────────────────
   const serialPositions: Record<number, Array<[number, number, number?]>> = {
-    2: [], // Appendix B (flatness) – rotated layout, serial added by admin if needed
-    3: [[430, 148]],
-    4: [[434, 107]],
-    5: [[122, 90], [228, 523]],
-    6: [[438, 114]],
-    7: [[467, 115, 100]],
+    2: [[447, 115, 92]], // "Serial no :" box of Appendix B
+    3: [[427, 148, 110]],
+    4: [[437, 107]],
+    5: [[400, 41, 150]], // top-right, above the component table
+    6: [[442, 114, 95]],
+    7: [[471, 114, 85]],
   };
 
   for (let p = 2; p <= pageCount; p++) {

@@ -29,6 +29,22 @@ export const INPUT_FIELD_TYPE_LABELS: Record<InputFieldType, string> = {
 
 const keyRegex = /^[A-Za-z][A-Za-z0-9_]*$/;
 
+/**
+ * Where a value is stamped on the template PDF (points, top-left origin, page 1 = first page).
+ * Used by "Place on template" to create the designer elements automatically.
+ */
+export const PlacementSchema = z.object({
+  page: z.number().int().min(1).max(99),
+  x: z.number(),
+  y: z.number(),
+  w: z.number().positive(),
+  h: z.number().positive(),
+  fontSize: z.number().min(4).max(48).optional(),
+  align: z.enum(["left", "center", "right"]).optional(),
+  bold: z.boolean().optional(),
+});
+export type Placement = z.infer<typeof PlacementSchema>;
+
 export const InputFieldDefSchema = z.object({
   id: z.string().min(1),
   /** Stable key – also usable as a `fieldName` in the template designer to place the value on the page. */
@@ -47,6 +63,8 @@ export const InputFieldDefSchema = z.object({
   placeholder: z.string().max(200).optional(),
   help: z.string().max(400).optional(),
   defaultValue: z.string().max(400).optional(),
+  /** Optional preset positions on the template (one value can be stamped in several boxes) */
+  placements: z.array(PlacementSchema).max(40).optional(),
 });
 export type InputFieldDef = z.infer<typeof InputFieldDefSchema>;
 
@@ -56,8 +74,11 @@ export const InputSectionSchema = z.object({
   /** Template page this section belongs to (2 = second page …). Informational + used for grouping. */
   pageNumber: z.number().int().min(1).max(99).nullable().optional(),
   description: z.string().max(600).optional(),
-  /** Append an auto-generated data sheet to the PDF for fields that are not placed in the designer. */
-  printSheet: z.boolean().default(true),
+  /**
+   * Fields not placed in the designer: false (default) = stamped as a compact list on the section's
+   * own template page (no extra pages); true = printed on an appended data sheet page.
+   */
+  printSheet: z.boolean().default(false),
   fields: z.array(InputFieldDefSchema).default([]),
 });
 export type InputSection = z.infer<typeof InputSectionSchema>;
@@ -75,6 +96,11 @@ export const TemplateInputConfigSchema = z.object({
   version: z.literal(1).default(1),
   sections: z.array(InputSectionSchema).default([]),
   attachments: AttachmentSettingsSchema.prefault({}),
+  /** D365 / system values (serial no., COC date …) to stamp on pages 2+ with "Place on template" */
+  stamps: z
+    .array(PlacementSchema.extend({ fieldName: z.string().min(1).max(80) }))
+    .max(80)
+    .optional(),
   updatedAt: z.string().optional(),
   updatedBy: z.string().optional(),
 });
