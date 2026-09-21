@@ -25,7 +25,7 @@ export interface CapturedDoc {
 const MAX_EDGE = 2000;
 const JPEG_QUALITY = 0.82;
 
-const uid = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`);
+export const uid = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`);
 
 const b64Size = (b64: string) => Math.floor((b64.length * 3) / 4);
 
@@ -56,7 +56,7 @@ async function loadBitmap(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
 }
 
 /** Resize to ≤2000px, re-encode as JPEG, optionally boost contrast for paper documents. */
-async function processImage(src: Blob, opts: { enhance: boolean; rotate?: number }): Promise<string> {
+export async function processImage(src: Blob, opts: { enhance: boolean; rotate?: number }): Promise<string> {
   const bmp = await loadBitmap(src);
   const w0 = "naturalWidth" in bmp ? bmp.naturalWidth : bmp.width;
   const h0 = "naturalHeight" in bmp ? bmp.naturalHeight : bmp.height;

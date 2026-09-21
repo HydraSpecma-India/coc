@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Save, Undo2, Redo2, ZoomIn, ZoomOut, Maximize, Upload, Grid3X3, Magnet, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Rocket, Lock, Type, Minus } from "lucide-react";
+import { ArrowLeft, Save, Undo2, Redo2, ZoomIn, ZoomOut, Maximize, Upload, Grid3X3, Magnet, AlignLeft, AlignCenter, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, Rocket, Lock, Type, Minus, ClipboardList } from "lucide-react";
 import { useDesigner } from "./store";
 import type { FieldDef } from "./store";
 import { ElementPalette } from "./ElementPalette";
@@ -212,6 +212,14 @@ export function Designer(props: Props) {
         <Badge tone={props.versionStatus === "draft" ? "info" : props.versionStatus === "published" ? "success" : "neutral"}>{props.versionStatus}</Badge>
         {readOnly && <Badge tone="warning"><Lock className="mr-1 h-3 w-3" />read-only</Badge>}
         {dirty && <Badge tone="warning">unsaved</Badge>}
+        <Link
+          href={`/admin/templates/${props.templateId}/inputs`}
+          className="ml-1 flex items-center gap-1 rounded border border-ink-200 px-2 py-1 text-xs font-medium text-ink-700 hover:bg-ink-50"
+          title="Define the manual / QR fields for pages 2+ – they appear in the palette under “Data entry · Page N”"
+          onClick={(e) => dirty && !confirm("Discard unsaved changes?") && e.preventDefault()}
+        >
+          <ClipboardList className="h-3.5 w-3.5 text-brand-600" /> Data fields
+        </Link>
 
         <div className="mx-2 h-6 w-px bg-ink-200" />
         <ToolBtn title="Undo (Ctrl+Z)" disabled={!past.length || readOnly} onClick={undo}><Undo2 className="h-4 w-4" /></ToolBtn>

@@ -21,6 +21,26 @@ needed) and can be changed without publishing a new template version. Every issu
 snapshot of the fields and values in `coc_document_values` (`__measurements`), so later changes never
 alter historical certificates.
 
+### Preset for COC-1070.0049 (Baseframe Module)
+
+*Load preset…* on the Data entry fields page creates the 8-page layout of the paper pack:
+page 2 Appendix B flatness points 1–5 (max 4 mm), page 3 Appendix A interface holes 1–10
+(4/5/6 measured 727,4 ± 5, the rest Go/No-go), page 4 SN check list, page 5 component serial / batch
+numbers (barcode scan), page 6 air-leak result + **print-out photo**, page 7 fan test, page 8 pipe test.
+Review, save, then place the fields in the designer.
+
+## Map the fields onto the template (designer)
+
+Open the template version in the designer. Every data-entry field appears in the palette under
+**“Data entry · Page N”** – drag it onto the exact box on that page (e.g. the five cells under
+1–5 on Appendix B). Set font size / alignment in Properties. Also place *Top Level Serial Number*
+and *COC Date* on each page that has a “Serial no:” / date box.
+
+* Text / number / OK-NOK / date fields → *Field* element (or a table cell bound to the key).
+* Checkbox fields → *Checkbox* element (ticked when the value is Yes/OK).
+* **Photo** fields → *Image* element bound to the key. The captured photo is drawn inside that
+  frame – e.g. the Lindab air-leak print-out in the “Glue the test result onto this page” area.
+
 ## How values reach the PDF
 
 1. If the designer has a *Field* element whose field name equals the key, the value is printed there.
@@ -32,15 +52,17 @@ alter historical certificates.
 Note: the built-in PDF fonts support Western (WinAnsi) characters only – other scripts (e.g. Tamil)
 are printed as `?`.
 
-## QR codes
+## QR codes and barcodes
 
-Each QR-enabled field has a scan button; each section has *Scan to fill*. Supported payloads:
+Each scan-enabled field has a scan button that reads **QR codes and 1D barcodes** (Code 128/39/93,
+EAN-8/13, UPC, ITF, Codabar, Data Matrix). Each section also has *Scan to fill* for multi-value QR
+codes. Supported payloads:
 
 * plain text → the field whose button was pressed
 * JSON `{"Flatness":"0.32","PumpSerial":"P-778812"}` (keys or labels)
 * `Flatness=0.32;PumpSerial=P-778812` or `key: value` lines
 
-Scanning uses the native `BarcodeDetector` (Android Chrome / Edge) and falls back to `jsQR`
+Scanning uses the native `BarcodeDetector` (Android Chrome / Edge) and falls back to `jsQR` + ZXing
 (iOS Safari, Firefox). The camera requires **HTTPS**; on plain HTTP the user can take a photo of the
 QR code instead.
 
@@ -58,3 +80,10 @@ The app shell switches automatically: phone (< 768 px) top bar + drawer + bottom
 (768–1279 px) icon rail, desktop (≥ 1280 px) full sidebar. The New COC wizard shows a sticky
 action bar below 1024 px, and PDFs are rendered with PDF.js on touch devices (mobile browsers do not
 display PDFs inside iframes).
+
+## Sign-out / session-timeout redirect
+
+System Settings → Application Rules → **Login Redirect URL** (e.g. `https://coc.hydraspecma.com/signin`)
+and **Session Timeout (minutes)**. Sign-out and inactivity time-out now redirect the browser explicitly
+to that URL. When it is blank the browser's own origin + `/signin` is used, so the user never lands on
+the App Service's internal host name.

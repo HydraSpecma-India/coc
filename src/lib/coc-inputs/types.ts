@@ -13,7 +13,7 @@ import { z } from "zod";
  * Client-safe module (no server imports).
  */
 
-export const INPUT_FIELD_TYPES = ["text", "number", "passfail", "dropdown", "date", "multiline", "checkbox"] as const;
+export const INPUT_FIELD_TYPES = ["text", "number", "passfail", "dropdown", "date", "multiline", "checkbox", "photo"] as const;
 export type InputFieldType = (typeof INPUT_FIELD_TYPES)[number];
 
 export const INPUT_FIELD_TYPE_LABELS: Record<InputFieldType, string> = {
@@ -24,6 +24,7 @@ export const INPUT_FIELD_TYPE_LABELS: Record<InputFieldType, string> = {
   date: "Date",
   multiline: "Long text / remarks",
   checkbox: "Checkbox",
+  photo: "Photo / test print-out (camera)",
 };
 
 const keyRegex = /^[A-Za-z][A-Za-z0-9_]*$/;
@@ -126,6 +127,8 @@ export const AttachmentUploadSchema = z.object({
   name: z.string().max(200),
   mimeType: z.enum(["image/jpeg", "image/png", "application/pdf"]),
   caption: z.string().max(300).optional(),
+  /** Set for "photo" data-entry fields – drawn into the designer image slot bound to this key */
+  fieldKey: z.string().max(80).optional(),
   /** base64 (no data: prefix) */
   dataBase64: z.string().min(10),
 });
@@ -156,10 +159,18 @@ export function evaluateField(field: Pick<InputFieldDef, "type" | "min" | "max">
     return "";
   }
   if (field.type === "number") {
-    const n = Number(value.replace(",", "."));
-    if (!Number.isFinite(n)) return "NOK";
-    if (field.min != null && n < field.min) return "NOK";
-    if (field.max != null && n > field.max) return "NOK";
+    // Accept "0.32", "727,4", "0.3 mm", and bounded readings like "<1", "≤ 1mm", ">5"
+    const m = value.replace(/\s+/g, "").match(/^(<=|>=|≤|≥|<|>)?([-+]?\d+(?:[.,]\d+)?)/);
+    if (!m) return "";
+    const op = m[1] ?? "";
+    const n = Number(m[2].replace(",", "."));
+    if (!Number.isFinite(n)) return "";
+    const below = op === "<" || op === "<=" || op === "≤"; // reading is "less than n"
+    const above = op === ">" || op === ">=" || op === "≥"; // reading is "more than n"
+    if (field.max != null && !below && n > field.max) return "NOK";
+    if (field.max != null && below && n > field.max) return "NOK";
+    if (field.min != null && !above && !below && n < field.min) return "NOK";
+    if (field.min != null && below && n <= field.min) return "NOK";
     return field.min != null || field.max != null ? "OK" : "";
   }
   return "";

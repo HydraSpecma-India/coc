@@ -67,7 +67,9 @@ export function ElementPalette() {
       map.set(f.category, g);
     }
     const order = ["D365FO Fields", "Manual Fields", "System Fields", "Custom Fields"];
-    return [...map.entries()].sort((a, b) => (order.indexOf(a[0]) === -1 ? 99 : order.indexOf(a[0])) - (order.indexOf(b[0]) === -1 ? 99 : order.indexOf(b[0])));
+    // Template data-entry groups ("Data entry · Page 2" …) first, in page order
+    const rank = (c: string) => (c.startsWith("Data entry") ? -1 : order.indexOf(c) === -1 ? 99 : order.indexOf(c));
+    return [...map.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0], undefined, { numeric: true }));
   }, [fields, q]);
 
   const place = (item: PaletteItem) => {

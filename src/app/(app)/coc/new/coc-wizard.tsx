@@ -51,7 +51,7 @@ import {
   ClipboardList,
   SlidersHorizontal,
 } from "lucide-react";
-import { MeasurementSections, MeasurementEmptyHint, initMeasureValues, missingRequired, toMeasurementEntries, type MeasureValues } from "@/components/coc/MeasurementSections";
+import { MeasurementSections, MeasurementEmptyHint, initMeasureValues, missingRequired, photoUploads, toMeasurementEntries, type MeasureValues } from "@/components/coc/MeasurementSections";
 import { DocumentCapture, toAttachmentUploads, type CapturedDoc } from "@/components/coc/DocumentCapture";
 import { PdfViewer } from "@/components/coc/PdfViewer";
 import { EMPTY_INPUT_CONFIG, type TemplateInputConfig } from "@/lib/coc-inputs/types";
@@ -354,10 +354,10 @@ export function CocWizard({
 
   const extrasPayload = () => ({
     measurements: toMeasurementEntries(inputConfig.sections, measureValues),
-    attachments: toAttachmentUploads(capturedDocs),
+    attachments: [...photoUploads(inputConfig.sections, measureValues), ...toAttachmentUploads(capturedDocs)],
     measurementValues: Object.fromEntries(
       Object.entries(measureValues)
-        .filter(([, v]) => (v.value ?? "").trim())
+        .filter(([, v]) => !v.photo && (v.value ?? "").trim())
         .map(([k, v]) => [k, v.value]),
     ) as Record<string, string>,
   });

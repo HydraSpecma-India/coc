@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
-import { signOut } from "next-auth/react";
+import { signOutToLogin } from "@/lib/auth/login-redirect";
 import { Clock, LogOut } from "lucide-react";
 import { Button } from "@/components/ui";
 
@@ -29,12 +29,15 @@ interface SessionTimeoutProviderProps {
   children: React.ReactNode;
   timeoutMinutes?: number;
   warningSeconds?: number;
+  /** Admin-configured sign-in page (System Settings). Blank → current origin + /signin */
+  loginUrl?: string;
 }
 
 export function SessionTimeoutProvider({
   children,
   timeoutMinutes = DEFAULT_TIMEOUT_MINUTES,
   warningSeconds = WARNING_SECONDS,
+  loginUrl,
 }: SessionTimeoutProviderProps) {
   const timeoutMs = timeoutMinutes * 60 * 1000;
   const warningMs = warningSeconds * 1000;
@@ -61,8 +64,10 @@ export function SessionTimeoutProvider({
       // Ignore localStorage errors
     }
 
-    signOut({ callbackUrl: "/signin?reason=inactivity" });
-  }, [isLoggingOut]);
+    // Redirect explicitly to the configured login page (NextAuth's own callback URL can
+    // resolve to the internal container host on Azure App Service).
+    void signOutToLogin(loginUrl, "inactivity");
+  }, [isLoggingOut, loginUrl]);
 
   // Keep session alive - resets timer both in memory and localStorage
   const keepAlive = useCallback(() => {

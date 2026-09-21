@@ -62,6 +62,8 @@ interface ConfigState {
     numberAuthority: "app" | "d365";
     enforceRemainingQty: boolean;
     signatureRequired: boolean;
+    loginRedirectUrl: string;
+    sessionTimeoutMinutes: number;
   };
   teams?: {
     enabled: boolean;
@@ -596,6 +598,24 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
                   value={config.app.url}
                   placeholder="https://coc.hydraspecma.com"
                   onChange={(e) => setConfig({ ...config, app: { ...config.app, url: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Login Redirect URL" hint="Sign-out & session-timeout go here. Blank = this site's /signin">
+                <Input
+                  value={config.app.loginRedirectUrl ?? ""}
+                  placeholder="https://coc.hydraspecma.com/signin"
+                  onChange={(e) => setConfig({ ...config, app: { ...config.app, loginRedirectUrl: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Session Timeout (minutes)" hint="Inactivity auto sign-out, 5–480">
+                <Input
+                  type="number"
+                  min={5}
+                  max={480}
+                  value={config.app.sessionTimeoutMinutes ?? 30}
+                  onChange={(e) => setConfig({ ...config, app: { ...config.app, sessionTimeoutMinutes: Number(e.target.value) || 30 } })}
                 />
               </Field>
 

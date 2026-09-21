@@ -59,6 +59,8 @@ export async function GET() {
         numberAuthority: config.app.numberAuthority,
         enforceRemainingQty: config.app.enforceRemainingQty,
         signatureRequired: config.app.signatureRequired,
+        loginRedirectUrl: config.app.loginRedirectUrl,
+        sessionTimeoutMinutes: config.app.sessionTimeoutMinutes,
       },
       teams: {
         enabled: config.teams.enabled,
@@ -122,6 +124,17 @@ export async function PUT(req: Request) {
     if (app.numberAuthority !== undefined) updates.push({ key: "coc.numberAuthority", value: app.numberAuthority });
     if (app.enforceRemainingQty !== undefined) updates.push({ key: "coc.enforceRemainingQty", value: Boolean(app.enforceRemainingQty) });
     if (app.signatureRequired !== undefined) updates.push({ key: "signature.required", value: Boolean(app.signatureRequired) });
+    if (app.loginRedirectUrl !== undefined) {
+      const v = String(app.loginRedirectUrl).trim();
+      if (v && !/^https?:\/\//i.test(v) && !v.startsWith("/")) {
+        return NextResponse.json({ error: { code: "VALIDATION", message: "Login redirect URL must start with https:// or /" } }, { status: 400 });
+      }
+      updates.push({ key: "auth.loginRedirectUrl", value: v, description: "Browser redirect after sign-out / session timeout" });
+    }
+    if (app.sessionTimeoutMinutes !== undefined) {
+      const n = Math.round(Number(app.sessionTimeoutMinutes));
+      if (Number.isFinite(n)) updates.push({ key: "auth.sessionTimeoutMinutes", value: Math.min(480, Math.max(5, n)), description: "Inactivity timeout (minutes)" });
+    }
   }
 
   if (teams) {

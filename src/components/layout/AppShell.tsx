@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { signOut } from "next-auth/react";
+import { signOutToLogin } from "@/lib/auth/login-redirect";
 import {
   LayoutDashboard, FilePlus2, History, FileText, ListTree, Database, FolderCog, Users, PenTool, ScrollText, Settings, LogOut, ShieldCheck,
   Menu, X,
@@ -18,6 +18,8 @@ interface Props {
   user: { name?: string | null; email: string; role: Role; isDev?: boolean; capabilities?: string[] };
   d365Mode: string;
   storageMode: string;
+  /** Admin-configured sign-in page used after sign-out */
+  loginUrl?: string;
   children: React.ReactNode;
 }
 
@@ -55,7 +57,7 @@ const isActive = (pathname: string, href: string) => (href === "/" ? pathname ==
  *  • Tablet  (768–1279): compact icon rail
  *  • Desktop (≥ 1280px): full labelled sidebar
  */
-export function AppShell({ user, d365Mode, storageMode, children }: Props) {
+export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Props) {
   const pathname = usePathname();
   const isDesigner = pathname.includes("/designer/");
   const isCocNew = pathname.startsWith("/coc/new");
@@ -90,7 +92,7 @@ export function AppShell({ user, d365Mode, storageMode, children }: Props) {
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-ink-200 text-xs font-semibold text-ink-700" title={`${user.name || user.email} · ${user.role}`}>
             {initials}
           </div>
-          <button onClick={() => signOut({ callbackUrl: "/signin" })} className="rounded p-2 text-ink-500 hover:bg-ink-100" title="Sign out" aria-label="Sign out">
+          <button onClick={() => void signOutToLogin(loginUrl, "signout")} className="rounded p-2 text-ink-500 hover:bg-ink-100" title="Sign out" aria-label="Sign out">
             <LogOut className="h-4 w-4" />
           </button>
         </div>
@@ -104,7 +106,7 @@ export function AppShell({ user, d365Mode, storageMode, children }: Props) {
                 <ShieldCheck className="h-3 w-3" /> {user.role}
               </div>
             </div>
-            <button onClick={() => signOut({ callbackUrl: "/signin" })} className="rounded p-1.5 text-ink-500 hover:bg-ink-100" title="Sign out" aria-label="Sign out">
+            <button onClick={() => void signOutToLogin(loginUrl, "signout")} className="rounded p-1.5 text-ink-500 hover:bg-ink-100" title="Sign out" aria-label="Sign out">
               <LogOut className="h-4 w-4" />
             </button>
           </div>

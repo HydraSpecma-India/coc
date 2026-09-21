@@ -29,7 +29,7 @@ export interface RenderContext {
   attachments?: AttachmentUpload[];
 }
 
-import { appendCocExtras } from "@/lib/render/coc-extras";
+import { appendCocExtras, makeFontSafe } from "@/lib/render/coc-extras";
 import type { AttachmentUpload, MeasurementEntry } from "@/lib/coc-inputs/types";
 
 async function finalizeWithExtras(pdfDoc: PDFDocument, context: RenderContext, templateJson: unknown): Promise<Uint8Array> {
@@ -126,6 +126,120 @@ function resolveFieldValue(fieldName: string, context: RenderContext, element?: 
   }
 
   return "";
+}
+
+/* ───────── pages 2+: values mapped in the designer (fields, tables, checkboxes, photo slots) ───────── */
+
+type MappedEl = {
+  type: string;
+  hidden?: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fieldName?: string;
+  text?: string;
+  fit?: "contain" | "cover" | "stretch";
+  style?: { fontSize?: number; bold?: boolean; padding?: number; align?: "left" | "center" | "right"; color?: string };
+  columns?: Array<{ width: number }>;
+  rows?: Array<Array<{ fieldName?: string; text?: string; colSpan?: number; style?: { align?: "left" | "center" | "right"; bold?: boolean; fontSize?: number } }>>;
+  rowHeight?: number;
+  headerHeight?: number;
+  showHeader?: boolean;
+};
+
+function hexToRgb(hex?: string) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return rgb(0, 0, 0);
+  const n = parseInt(m[1], 16);
+  return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+}
+
+function drawTextInBox(
+  page: any,
+  raw: string,
+  box: { x: number; y: number; w: number; h: number },
+  opts: { font: any; size: number; align?: "left" | "center" | "right"; padding?: number; color?: any },
+) {
+  const safe = makeFontSafe(opts.font);
+  const pad = opts.padding ?? 2;
+  let text = safe(raw);
+  let size = opts.size;
+  // shrink to fit the box width (min 5pt), then truncate
+  while (size > 5 && opts.font.widthOfTextAtSize(text, size) > box.w - 2 * pad) size -= 0.5;
+  while (text.length > 1 && opts.font.widthOfTextAtSize(text, size) > box.w - 2 * pad) text = text.slice(0, -1);
+  const tw = opts.font.widthOfTextAtSize(text, size);
+  const x = opts.align === "center" ? box.x + (box.w - tw) / 2 : opts.align === "right" ? box.x + box.w - pad - tw : box.x + pad;
+  const y = box.y + Math.max(1.5, (box.h - size * 0.72) / 2);
+  page.drawText(text, { x, y, size, font: opts.font, color: opts.color ?? rgb(0, 0, 0) });
+}
+
+async function drawMappedElements(page: any, pdfDoc: PDFDocument, elements: MappedEl[], height: number, fonts: { regular: any; bold: any }, context: RenderContext) {
+  const photos = new Map<string, AttachmentUpload>();
+  for (const a of context.attachments ?? []) if (a.fieldKey) photos.set(a.fieldKey.toLowerCase(), a);
+
+  for (const el of elements) {
+    if (el.hidden) continue;
+    const pdfY = height - el.y - el.height;
+    const font = el.style?.bold ? fonts.bold : fonts.regular;
+    const size = el.style?.fontSize || 8.5;
+    try {
+      if (el.type === "field" && el.fieldName) {
+        const val = resolveFieldValue(el.fieldName, context);
+        if (val) drawTextInBox(page, val, { x: el.x, y: pdfY, w: el.width, h: el.height }, { font, size, align: el.style?.align, padding: el.style?.padding, color: hexToRgb(el.style?.color) });
+      } else if (el.type === "text" && el.text) {
+        drawTextInBox(page, el.text, { x: el.x, y: pdfY, w: el.width, h: el.height }, { font, size, align: el.style?.align, padding: el.style?.padding, color: hexToRgb(el.style?.color) });
+      } else if (el.type === "checkbox" && el.fieldName) {
+        const v = resolveFieldValue(el.fieldName, context).trim().toLowerCase();
+        if (["yes", "true", "ok", "x", "1", "pass", "passed", "conforms"].includes(v)) {
+          const s = Math.min(el.width, el.height);
+          page.drawLine({ start: { x: el.x + s * 0.15, y: pdfY + s * 0.5 }, end: { x: el.x + s * 0.4, y: pdfY + s * 0.15 }, thickness: 1.2, color: rgb(0, 0, 0) });
+          page.drawLine({ start: { x: el.x + s * 0.4, y: pdfY + s * 0.15 }, end: { x: el.x + s * 0.9, y: pdfY + s * 0.9 }, thickness: 1.2, color: rgb(0, 0, 0) });
+        }
+      } else if (el.type === "image" && el.fieldName) {
+        // Photo slot – e.g. the air-leak test print-out "glued" onto the test instruction page
+        const att = photos.get(el.fieldName.toLowerCase());
+        if (att && att.mimeType !== "application/pdf") {
+          const bytes = Buffer.from(att.dataBase64, "base64");
+          const img = att.mimeType === "image/png" ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
+          let w = el.width;
+          let h = el.height;
+          if (el.fit !== "stretch") {
+            const scale = Math.min(el.width / img.width, el.height / img.height);
+            w = img.width * scale;
+            h = img.height * scale;
+          }
+          page.drawImage(img, { x: el.x + (el.width - w) / 2, y: pdfY + (el.height - h) / 2, width: w, height: h });
+        }
+      } else if (el.type === "table" && Array.isArray(el.rows) && Array.isArray(el.columns)) {
+        const headerH = el.showHeader === false ? 0 : el.headerHeight ?? 18;
+        const rowH = el.rowHeight ?? 18;
+        el.rows.forEach((row, ri) => {
+          let cx = el.x;
+          let ci = 0;
+          for (const cell of row) {
+            const span = Math.max(1, cell.colSpan ?? 1);
+            const cw = el.columns!.slice(ci, ci + span).reduce((n, c) => n + c.width, 0);
+            if (cell.fieldName) {
+              const val = resolveFieldValue(cell.fieldName, context);
+              const top = el.y + headerH + ri * rowH;
+              if (val) {
+                drawTextInBox(page, val, { x: cx, y: height - top - rowH, w: cw, h: rowH }, {
+                  font: cell.style?.bold ? fonts.bold : font,
+                  size: cell.style?.fontSize || size,
+                  align: cell.style?.align ?? el.style?.align ?? "center",
+                });
+              }
+            }
+            cx += cw;
+            ci += span;
+          }
+        });
+      }
+    } catch (err) {
+      console.warn("Could not draw mapped element", el.type, el.fieldName, (err as Error).message);
+    }
+  }
 }
 
 async function renderSignatureBox(
@@ -441,21 +555,7 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
         } else {
           // Page 2+: Multi-page serial number and reference stamping
           if (Array.isArray(pageElements) && pageElements.length > 0) {
-            for (const el of pageElements) {
-              if (el.hidden) continue;
-              const pdfY = height - el.y - el.height;
-              const isBold = Boolean(el.style?.bold);
-              const font = isBold ? fontBold : fontRegular;
-              const fontSize = el.style?.fontSize || 8.5;
-              if (el.type === "field" && el.fieldName) {
-                const val = resolveFieldValue(el.fieldName, context, el);
-                if (val) {
-                  const textX = el.x + (el.style?.padding || 2);
-                  const textY = pdfY + Math.max(2, (el.height - fontSize * 0.85) / 2);
-                  page.drawText(val, { x: textX, y: textY, size: fontSize, font, color: rgb(0, 0, 0) });
-                }
-              }
-            }
+            await drawMappedElements(page, pdfDoc, pageElements, height, { regular: fontRegular, bold: fontBold }, context);
           } else {
             // Apply serial number elements from template setup onto subsequent pages
             const p0Elements = templateJson?.pages?.[0]?.elements;

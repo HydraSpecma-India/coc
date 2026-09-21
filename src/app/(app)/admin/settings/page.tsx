@@ -56,6 +56,8 @@ export default async function SettingsPage() {
       numberAuthority: config.app.numberAuthority,
       enforceRemainingQty: config.app.enforceRemainingQty,
       signatureRequired: config.app.signatureRequired,
+      loginRedirectUrl: config.app.loginRedirectUrl,
+      sessionTimeoutMinutes: config.app.sessionTimeoutMinutes,
     },
     teams: {
       enabled: config.teams.enabled,

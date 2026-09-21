@@ -40,6 +40,10 @@ export interface IntegrationConfig {
     numberAuthority: "app" | "d365";
     enforceRemainingQty: boolean;
     signatureRequired: boolean;
+    /** Where the browser goes after sign-out / session timeout (absolute or relative). */
+    loginRedirectUrl: string;
+    /** Inactivity timeout in minutes (5–480). */
+    sessionTimeoutMinutes: number;
   };
   teams: {
     enabled: boolean;
@@ -155,6 +159,11 @@ export async function getActiveConfig(): Promise<IntegrationConfig> {
       numberAuthority: (str("coc.numberAuthority", "app") as "app" | "d365") || "app",
       enforceRemainingQty: bool("coc.enforceRemainingQty", true),
       signatureRequired: bool("signature.required", true),
+      loginRedirectUrl: str("auth.loginRedirectUrl", ""),
+      sessionTimeoutMinutes: (() => {
+        const n = Number(db["auth.sessionTimeoutMinutes"]);
+        return Number.isFinite(n) && n >= 5 && n <= 480 ? Math.round(n) : 30;
+      })(),
     },
     teams: {
       enabled: bool("teams.enabled", true),

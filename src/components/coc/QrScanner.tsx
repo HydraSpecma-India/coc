@@ -13,7 +13,8 @@ async function getNativeDetector(): Promise<Detector | null> {
   try {
     const formats = (await BD.getSupportedFormats?.()) ?? ["qr_code"];
     if (!formats.includes("qr_code")) return null;
-    return new BD({ formats: ["qr_code", "data_matrix", "code_128"].filter((f) => formats.includes(f)) });
+    const wanted = ["qr_code", "data_matrix", "code_128", "code_39", "code_93", "ean_13", "ean_8", "upc_a", "upc_e", "itf", "codabar", "pdf417", "aztec"];
+    return new BD({ formats: wanted.filter((f) => formats.includes(f)) });
   } catch {
     return null;
   }
@@ -27,6 +28,48 @@ async function decodeCanvas(canvas: HTMLCanvasElement): Promise<string | null> {
   const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const res = jsQR(img.data, img.width, img.height, { inversionAttempts: "attemptBoth" });
   return res?.data || null;
+}
+
+type ZxingReader = { decode: (canvas: HTMLCanvasElement) => string | null };
+let zxingReader: Promise<ZxingReader> | null = null;
+
+/** 1D barcodes (Code 128/39, EAN, UPC, ITF …) + Data Matrix via ZXing – loaded only when needed. */
+function getZxing(): Promise<ZxingReader> {
+  if (!zxingReader) {
+    zxingReader = import("@zxing/library").then((z) => {
+      const hints = new Map();
+      hints.set(z.DecodeHintType.POSSIBLE_FORMATS, [
+        z.BarcodeFormat.CODE_128, z.BarcodeFormat.CODE_39, z.BarcodeFormat.CODE_93, z.BarcodeFormat.EAN_13, z.BarcodeFormat.EAN_8,
+        z.BarcodeFormat.UPC_A, z.BarcodeFormat.UPC_E, z.BarcodeFormat.ITF, z.BarcodeFormat.CODABAR, z.BarcodeFormat.DATA_MATRIX, z.BarcodeFormat.QR_CODE,
+      ]);
+      hints.set(z.DecodeHintType.TRY_HARDER, true);
+      const reader = new z.MultiFormatReader();
+      reader.setHints(hints);
+      return {
+        decode(canvas: HTMLCanvasElement) {
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          if (!ctx) return null;
+          const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const lum = new Uint8ClampedArray(width * height);
+          for (let i = 0, j = 0; i < lum.length; i++, j += 4) lum[i] = (data[j] * 299 + data[j + 1] * 587 + data[j + 2] * 114) / 1000;
+          try {
+            const bitmap = new z.BinaryBitmap(new z.HybridBinarizer(new z.RGBLuminanceSource(lum, width, height)));
+            return reader.decode(bitmap).getText() || null;
+          } catch {
+            return null;
+          } finally {
+            reader.reset();
+          }
+        },
+      };
+    });
+  }
+  return zxingReader;
+}
+
+/** QR first (fast), then barcodes. */
+async function decodeAny(canvas: HTMLCanvasElement): Promise<string | null> {
+  return (await decodeCanvas(canvas)) || (await getZxing()).decode(canvas);
 }
 
 async function decodeImageFile(file: File): Promise<string | null> {
@@ -45,7 +88,7 @@ async function decodeImageFile(file: File): Promise<string | null> {
     canvas.width = Math.round(img.naturalWidth * scale);
     canvas.height = Math.round(img.naturalHeight * scale);
     canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
-    return await decodeCanvas(canvas);
+    return await decodeAny(canvas);
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -69,7 +112,7 @@ export function QrScanner(props: {
 }
 
 function QrScannerDialog({
-  title = "Scan QR code",
+  title = "Scan QR code / barcode",
   subtitle,
   onClose,
   onResult,
@@ -128,8 +171,8 @@ function QrScannerDialog({
         setStatus("error");
         setError(
           window.isSecureContext
-            ? "This browser cannot open the camera. Use “Take photo of QR” below."
-            : "Camera access needs a secure (https) connection. Use “Take photo of QR” below.",
+            ? "This browser cannot open the camera. Use “Take photo of code” below."
+            : "Camera access needs a secure (https) connection. Use “Take photo of code” below.",
         );
         return;
       }
@@ -154,6 +197,8 @@ function QrScannerDialog({
 
         const native = await getNativeDetector();
         let last = 0;
+        let frame = 0;
+        if (!native) void getZxing(); // warm up the barcode decoder
         const tick = async (ts: number) => {
           if (cancelled || doneRef.current) return;
           if (ts - last > 220 && video.readyState >= 2) {
@@ -166,13 +211,17 @@ function QrScannerDialog({
                 const canvas = canvasRef.current!;
                 const vw = video.videoWidth;
                 const vh = video.videoHeight;
-                // Decode the central square (where the frame guide is) at reduced size for speed
-                const side = Math.min(vw, vh) * 0.8;
-                const size = Math.min(640, Math.round(side));
-                canvas.width = size;
-                canvas.height = size;
-                canvas.getContext("2d", { willReadFrequently: true })?.drawImage(video, (vw - side) / 2, (vh - side) / 2, side, side, 0, 0, size, size);
-                const text = await decodeCanvas(canvas);
+                // Decode the central area (where the frame guide is) at reduced size for speed.
+                // Alternate between QR (square crop) and 1D barcodes (wide crop).
+                frame++;
+                const barcodePass = frame % 2 === 0;
+                const cw = barcodePass ? vw * 0.9 : Math.min(vw, vh) * 0.8;
+                const ch = barcodePass ? vh * 0.5 : Math.min(vw, vh) * 0.8;
+                const scale = Math.min(1, (barcodePass ? 960 : 640) / cw);
+                canvas.width = Math.round(cw * scale);
+                canvas.height = Math.round(ch * scale);
+                canvas.getContext("2d", { willReadFrequently: true })?.drawImage(video, (vw - cw) / 2, (vh - ch) / 2, cw, ch, 0, 0, canvas.width, canvas.height);
+                const text = barcodePass ? (await getZxing()).decode(canvas) : await decodeCanvas(canvas);
                 if (text) return finish(text);
               }
             } catch {
@@ -218,7 +267,7 @@ function QrScannerDialog({
     try {
       const text = await decodeImageFile(file);
       if (text) finish(text);
-      else setError("No QR code was found in that photo. Hold the phone closer and make sure the code is sharp and well lit.");
+      else setError("No QR code or barcode was found in that photo. Hold the phone closer and make sure the code is sharp and well lit.");
     } finally {
       setDecodingPhoto(false);
     }
@@ -250,7 +299,7 @@ function QrScannerDialog({
           <canvas ref={canvasRef} className="hidden" />
           {status === "scanning" && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="relative aspect-square w-[70%] max-w-[320px] rounded-2xl border-2 border-white/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]">
+              <div className="relative aspect-[4/3] w-[80%] max-w-[380px] rounded-2xl border-2 border-white/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]">
                 <div className="absolute inset-x-4 top-1/2 h-0.5 animate-pulse bg-brand-400" />
               </div>
             </div>
@@ -278,11 +327,11 @@ function QrScannerDialog({
           )}
           <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3.5 text-sm font-medium hover:bg-white/20">
             {decodingPhoto ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageUp className="h-4 w-4" />}
-            Take photo of QR
+            Take photo of code
             <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => onPhoto(e.target.files?.[0])} />
           </label>
         </div>
-        <p className="px-4 pb-4 text-center text-[11px] text-white/50">Point the camera at the QR code – it is read automatically.</p>
+        <p className="px-4 pb-4 text-center text-[11px] text-white/50">Point the camera at the QR code or barcode – it is read automatically.</p>
       </div>
     </div>
   );

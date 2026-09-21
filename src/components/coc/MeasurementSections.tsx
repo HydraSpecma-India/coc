@@ -1,17 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { CheckCircle2, ClipboardList, QrCode, ScanLine, XCircle } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Camera, CheckCircle2, ClipboardList, Loader2, QrCode, RotateCw, ScanLine, Trash2, XCircle } from "lucide-react";
+import { processImage } from "./DocumentCapture";
 import { Badge, Card, CardBody, CardHeader, Input, Select, Textarea } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils/cn";
 import { QrScanner } from "./QrScanner";
 import {
   describeLimits, evaluateField, parseQrPayload,
-  type InputFieldDef, type InputSection, type MeasurementEntry,
+  type AttachmentUpload, type InputFieldDef, type InputSection, type MeasurementEntry,
 } from "@/lib/coc-inputs/types";
 
-export type MeasureValue = { value: string; source: "manual" | "qr" };
+export type FieldPhoto = { dataBase64: string; previewUrl: string; mimeType: "image/jpeg" };
+export type MeasureValue = { value: string; source: "manual" | "qr"; photo?: FieldPhoto };
 export type MeasureValues = Record<string, MeasureValue>;
 
 /** Initial values from field defaults. Keeps anything already typed. */
@@ -37,7 +39,7 @@ export function toMeasurementEntries(sections: InputSection[], values: MeasureVa
         key: f.key,
         label: f.label,
         type: f.type,
-        value: v.value ?? "",
+        value: f.type === "photo" ? (v.photo ? "Photo attached" : "") : v.value ?? "",
         unit: f.unit,
         nominal: f.nominal,
         min: f.min ?? null,
@@ -47,6 +49,83 @@ export function toMeasurementEntries(sections: InputSection[], values: MeasureVa
         printSheet: s.printSheet,
       };
     }),
+  );
+}
+
+/** Photos captured for "photo" fields → uploads drawn into the designer image slot with the same key. */
+export function photoUploads(sections: InputSection[], values: MeasureValues): AttachmentUpload[] {
+  return sections.flatMap((s) =>
+    s.fields
+      .filter((f) => f.type === "photo" && values[f.key]?.photo)
+      .map((f) => ({
+        name: `${f.key}.jpg`,
+        mimeType: "image/jpeg" as const,
+        caption: f.label,
+        fieldKey: f.key,
+        dataBase64: values[f.key]!.photo!.dataBase64,
+      })),
+  );
+}
+
+/** Camera capture for a single "photo" field (e.g. the air-leak test print-out glued on the test page). */
+function PhotoFieldInput({ f, value, onChange }: { f: InputFieldDef; value?: MeasureValue; onChange: (v: MeasureValue) => void }) {
+  const ref = useRef<HTMLInputElement | null>(null);
+  const [busy, setBusy] = useState(false);
+  const photo = value?.photo;
+
+  const take = async (file?: File) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const dataUrl = await processImage(file, { enhance: true });
+      onChange({ value: "Photo captured", source: "manual", photo: { dataBase64: dataUrl.slice(dataUrl.indexOf(",") + 1), previewUrl: dataUrl, mimeType: "image/jpeg" } });
+    } catch {
+      toast.error("Could not read the photo", "Please take the photo again.");
+    } finally {
+      setBusy(false);
+      if (ref.current) ref.current.value = "";
+    }
+  };
+
+  const rotate = async () => {
+    if (!photo) return;
+    const blob = await (await fetch(photo.previewUrl)).blob();
+    const dataUrl = await processImage(blob, { enhance: false, rotate: 90 });
+    onChange({ value: "Photo captured", source: "manual", photo: { dataBase64: dataUrl.slice(dataUrl.indexOf(",") + 1), previewUrl: dataUrl, mimeType: "image/jpeg" } });
+  };
+
+  return (
+    <div className="space-y-2">
+      <input ref={ref} id={`m-${f.key}`} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => take(e.target.files?.[0])} />
+      {photo ? (
+        <div className="overflow-hidden rounded-lg border border-ink-200 bg-ink-50">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={photo.previewUrl} alt={f.label} className="mx-auto max-h-56 w-auto object-contain" />
+          <div className="flex items-center gap-1 border-t border-ink-200 bg-white p-1.5">
+            <button type="button" onClick={() => ref.current?.click()} className="inline-flex h-9 items-center gap-1 rounded-md px-2.5 text-xs font-semibold text-ink-700 hover:bg-ink-100">
+              <Camera className="h-4 w-4" /> Retake
+            </button>
+            <button type="button" onClick={rotate} className="inline-flex h-9 items-center gap-1 rounded-md px-2.5 text-xs font-semibold text-ink-700 hover:bg-ink-100">
+              <RotateCw className="h-4 w-4" /> Rotate
+            </button>
+            <button type="button" onClick={() => onChange({ value: "", source: "manual" })} className="ml-auto inline-flex h-9 items-center gap-1 rounded-md px-2.5 text-xs font-semibold text-red-600 hover:bg-red-50">
+              <Trash2 className="h-4 w-4" /> Remove
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => ref.current?.click()}
+          className="flex h-24 w-full flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-ink-300 bg-white text-sm font-semibold text-ink-700 hover:border-brand-400 hover:bg-brand-50/40 disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5 text-brand-600" />}
+          Take photo
+          <span className="text-[11px] font-normal text-ink-500">Printed on the template page where the admin placed it</span>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -92,9 +171,12 @@ function FieldInput({ f, value, onChange }: { f: InputFieldDef; value: string; o
       );
     case "checkbox":
       return (
-        <label className="flex h-10 items-center gap-2 text-sm sm:h-9">
-          <input type="checkbox" className="h-5 w-5 accent-ink-900" checked={value === "Yes"} onChange={(e) => onChange(e.target.checked ? "Yes" : "No")} />
-          {value === "Yes" ? "Yes" : "No"}
+        <label className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-800 sm:min-h-9">
+          <input type="checkbox" className="h-5 w-5 shrink-0 accent-ink-900" checked={value === "Yes"} onChange={(e) => onChange(e.target.checked ? "Yes" : "No")} />
+          <span className="min-w-0 flex-1">
+            {f.label}
+            {f.required && <span className="ml-0.5 text-red-600">*</span>}
+          </span>
         </label>
       );
     default:
@@ -131,7 +213,7 @@ export function MeasurementSections({
     const parsed = parseQrPayload(text, scope, target.fieldKey);
     const keys = Object.keys(parsed);
     if (!keys.length) {
-      toast.error("QR code not recognised", `Scanned “${text.slice(0, 80)}” but it does not match any field. Scan it from the field's own QR button to use it as a value.`);
+      toast.error("Code not recognised", `Scanned “${text.slice(0, 80)}” but it does not match any field. Scan it from the field's own QR button to use it as a value.`);
       return;
     }
     const next = { ...values };
@@ -181,8 +263,8 @@ export function MeasurementSections({
                     const limits = describeLimits(f);
                     const missing = showErrors && f.required && !v.trim();
                     return (
-                      <div key={f.key} data-missing={missing ? "true" : undefined} className={cn(f.type === "multiline" && "sm:col-span-2 xl:col-span-3")}>
-                        <label htmlFor={`m-${f.key}`} className="mb-1 flex items-start justify-between gap-2 text-xs font-medium text-ink-700">
+                      <div key={f.key} data-missing={missing ? "true" : undefined} className={cn((f.type === "multiline" || f.type === "photo") && "sm:col-span-2 xl:col-span-3")}>
+                        <label htmlFor={`m-${f.key}`} className={cn("mb-1 flex items-start justify-between gap-2 text-xs font-medium text-ink-700", f.type === "checkbox" && "sr-only")}>
                           <span>
                             {f.label}
                             {f.required && <span className="ml-0.5 text-red-600">*</span>}
@@ -196,13 +278,17 @@ export function MeasurementSections({
                         </label>
                         <div className="flex items-stretch gap-2">
                           <div className={cn("min-w-0 flex-1", missing && "[&_input]:border-red-400 [&_select]:border-red-400 [&_textarea]:border-red-400")}>
-                            <FieldInput f={f} value={v} onChange={(nv) => set(f.key, nv)} />
+                            {f.type === "photo" ? (
+                              <PhotoFieldInput f={f} value={values[f.key]} onChange={(nv) => onChange({ ...values, [f.key]: nv })} />
+                            ) : (
+                              <FieldInput f={f} value={v} onChange={(nv) => set(f.key, nv)} />
+                            )}
                           </div>
-                          {f.qr && (
+                          {f.qr && f.type !== "photo" && (
                             <button
                               type="button"
-                              title={`Scan QR for ${f.label}`}
-                              aria-label={`Scan QR for ${f.label}`}
+                              title={`Scan QR / barcode for ${f.label}`}
+                              aria-label={`Scan QR / barcode for ${f.label}`}
                               onClick={() => setScan({ fieldKey: f.key, sectionId: s.id, title: `Scan · ${f.label}` })}
                               className="flex w-10 shrink-0 items-center justify-center rounded-md border border-ink-300 bg-white text-ink-700 hover:bg-ink-50 active:bg-ink-100 sm:w-9"
                             >
@@ -210,7 +296,7 @@ export function MeasurementSections({
                             </button>
                           )}
                         </div>
-                        <div className="mt-1 flex min-h-4 items-center gap-2 text-[11px]">
+                        <div className={cn("mt-1 flex min-h-4 items-center gap-2 text-[11px]", f.type === "checkbox" && !missing && "hidden")}>
                           {limits && <span className="text-ink-500">Spec: {limits}</span>}
                           {status === "OK" && (
                             <span className="inline-flex items-center gap-0.5 font-semibold text-emerald-700">
@@ -238,7 +324,7 @@ export function MeasurementSections({
       <QrScanner
         open={Boolean(scan)}
         title={scan?.title}
-        subtitle={scan?.fieldKey ? "Value is placed in this field" : "Multi-value QR codes fill several fields"}
+        subtitle={scan?.fieldKey ? "QR code or barcode – value goes into this field" : "Multi-value QR codes fill several fields"}
         onClose={() => setScan(null)}
         onResult={handleScan}
       />

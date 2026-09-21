@@ -13,6 +13,7 @@ import {
   INPUT_FIELD_TYPES, INPUT_FIELD_TYPE_LABELS, newId, validateInputConfig, describeLimits,
   type InputFieldDef, type InputSection, type TemplateInputConfig,
 } from "@/lib/coc-inputs/types";
+import { INPUT_PRESETS } from "@/lib/coc-inputs/presets";
 
 type PageInfo = { number: number; name: string; placedFields: string[] };
 
@@ -137,6 +138,14 @@ export function InputsEditorClient({
     }
   };
 
+  const loadPreset = (presetId: string) => {
+    const preset = INPUT_PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+    if (fieldCount > 0 && !confirm(`Replace the current ${fieldCount} field(s) with “${preset.name}”?`)) return;
+    update(() => preset.build());
+    toast.success("Preset loaded", "Review the fields, then Save. Place them on the pages in the designer.");
+  };
+
   const sampleQr = useMemo(() => {
     const first = config.sections.flatMap((s) => s.fields).filter((f) => f.qr).slice(0, 3);
     if (!first.length) return null;
@@ -168,6 +177,19 @@ export function InputsEditorClient({
         <Badge tone="brand">{config.sections.length} section(s)</Badge>
         <Badge tone="info">{fieldCount} field(s)</Badge>
         {config.attachments.enabled && <Badge tone="success">Camera capture on</Badge>}
+        {canManage && (
+          <select
+            className="h-8 rounded-md border border-ink-300 bg-white px-2 text-xs text-ink-700"
+            value=""
+            onChange={(e) => e.target.value && loadPreset(e.target.value)}
+            title="Start from a ready-made layout"
+          >
+            <option value="">Load preset…</option>
+            {INPUT_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        )}
         {config.updatedAt && <span className="text-ink-400">Last saved {new Date(config.updatedAt).toLocaleString()} {config.updatedBy ? `by ${config.updatedBy}` : ""}</span>}
       </div>
 
@@ -348,7 +370,7 @@ export function InputsEditorClient({
                             </Field>
                             <div className="flex flex-wrap items-center gap-4 sm:col-span-2 lg:col-span-3">
                               <Checkbox label="Required" checked={f.required} disabled={!canManage} onChange={(e) => updateField(s.id, f.id, { required: e.target.checked })} />
-                              <Checkbox label="Allow QR scan" checked={f.qr} disabled={!canManage} onChange={(e) => updateField(s.id, f.id, { qr: e.target.checked })} />
+                              <Checkbox label="Allow QR / barcode scan" checked={f.qr} disabled={!canManage} onChange={(e) => updateField(s.id, f.id, { qr: e.target.checked })} />
                               {canManage && (
                                 <div className="ml-auto flex items-center gap-1">
                                   <Button size="icon" variant="ghost" title="Move up" onClick={() => updateSection(s.id, { fields: move(s.fields, fi, -1) })}>
@@ -475,7 +497,7 @@ export function InputsEditorClient({
 
         {/* QR help */}
         <Card>
-          <CardHeader title="QR code format" description="A QR code can fill a single field, or many fields at once." />
+          <CardHeader title="QR code / barcode format" description="A barcode or QR code fills one field; a QR code can also fill many fields at once." />
           <CardBody className="space-y-2 text-xs text-ink-700">
             <p>
               <strong>Single value:</strong> any text – it is placed in the field whose scan button was pressed.

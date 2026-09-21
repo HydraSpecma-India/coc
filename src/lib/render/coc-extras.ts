@@ -38,7 +38,7 @@ const REPLACEMENTS: Record<string, string> = {
 };
 
 /** Standard 14 fonts use WinAnsi encoding – replace anything they cannot draw. */
-function makeSafe(font: PDFFont) {
+export function makeFontSafe(font: PDFFont) {
   const cache = new Map<string, boolean>();
   return (text: string): string => {
     let out = "";
@@ -130,7 +130,7 @@ const COLS = [
 function appendMeasurementSheets(pdf: PDFDocument, fonts: Fonts, ctx: ExtrasContext, placed: Set<string>): PDFPage[] {
   const entries = (ctx.measurements ?? []).filter((m) => m.printSheet !== false && !placed.has(m.key.toLowerCase()));
   if (!entries.length) return [];
-  const safe = makeSafe(fonts.regular);
+  const safe = makeFontSafe(fonts.regular);
   const pages: PDFPage[] = [];
 
   // group by section (keep order of appearance)
@@ -225,7 +225,7 @@ async function appendOneAttachment(
   index: number,
   total: number,
 ): Promise<PDFPage[]> {
-  const safe = makeSafe(fonts.regular);
+  const safe = makeFontSafe(fonts.regular);
   const bytes = Buffer.from(att.dataBase64, "base64");
   const label = `Attachment ${index + 1} of ${total}${att.caption ? ` – ${att.caption}` : ""}`;
 
@@ -278,21 +278,23 @@ export function placedFieldNames(templateJson: unknown): Set<string> {
 
 /** Append measurement sheets and attachments to an in-progress COC document. */
 export async function appendCocExtras(pdf: PDFDocument, ctx: ExtrasContext, templateJson?: unknown): Promise<void> {
+  const placed = placedFieldNames(templateJson);
   const hasMeasurements = (ctx.measurements ?? []).length > 0;
-  const atts = ctx.attachments ?? [];
+  // Photo fields placed in the designer are drawn on their page – everything else is appended
+  const atts = (ctx.attachments ?? []).filter((a) => !a.fieldKey || !placed.has(a.fieldKey.toLowerCase()));
   if (!hasMeasurements && !atts.length) return;
 
   const fonts: Fonts = { regular: await pdf.embedFont(StandardFonts.Helvetica), bold: await pdf.embedFont(StandardFonts.HelveticaBold) };
   const appended: PDFPage[] = [];
 
-  appended.push(...appendMeasurementSheets(pdf, fonts, ctx, placedFieldNames(templateJson)));
+  appended.push(...appendMeasurementSheets(pdf, fonts, ctx, placed));
 
   for (let i = 0; i < atts.length; i++) {
     try {
       appended.push(...(await appendOneAttachment(pdf, fonts, ctx, atts[i], i, atts.length)));
     } catch (e) {
       // A corrupt attachment must not block the certificate – record a placeholder page instead.
-      const safe = makeSafe(fonts.regular);
+      const safe = makeFontSafe(fonts.regular);
       const page = pdf.addPage(A4);
       const y = drawHeader(page, fonts, safe, ctx, `Attachment ${i + 1} of ${atts.length}`, atts[i].name);
       page.drawText(safe(`This attachment could not be merged: ${(e as Error).message}`), { x: MARGIN, y, size: 9, font: fonts.regular, color: NOK, maxWidth: A4[0] - 2 * MARGIN });
@@ -301,7 +303,7 @@ export async function appendCocExtras(pdf: PDFDocument, ctx: ExtrasContext, temp
   }
 
   const total = pdf.getPageCount();
-  const safe = makeSafe(fonts.regular);
+  const safe = makeFontSafe(fonts.regular);
   for (const p of appended) {
     if (ctx.isDraft) drawDraftMark(p, fonts);
     const idx = pdf.getPages().indexOf(p);
