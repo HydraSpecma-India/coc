@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { PencilRuler, Plus, Rocket, Ban, Trash2, RotateCcw, Eye } from "lucide-react";
+import { PencilRuler, Plus, Rocket, Ban, Trash2, RotateCcw, Eye, ClipboardList } from "lucide-react";
 import { Button, Badge, PageHeader, Table, Th, Td, Card, CardHeader, CardBody, Field, Input, Textarea } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
@@ -40,11 +40,18 @@ export function TemplateDetailClient({ template, canManage }: { template: T; can
         title={template.name}
         description={`${template.template_type} · ${template.versions.length} version(s)`}
         actions={
-          canManage && (
-            <Button onClick={() => run("newver", () => api(`${base}/versions`, { method: "POST", json: {} }), "New draft version created")} loading={busy === "newver"}>
-              <Plus className="h-4 w-4" /> New version
-            </Button>
-          )
+          <>
+            <Link href={`/admin/templates/${template.id}/inputs`}>
+              <Button variant="outline">
+                <ClipboardList className="h-4 w-4" /> Data entry fields
+              </Button>
+            </Link>
+            {canManage && (
+              <Button onClick={() => run("newver", () => api(`${base}/versions`, { method: "POST", json: {} }), "New draft version created")} loading={busy === "newver"}>
+                <Plus className="h-4 w-4" /> New version
+              </Button>
+            )}
+          </>
         }
       />
 

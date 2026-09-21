@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, Copy, Sparkles, Archive, Trash2, PencilRuler, Upload, FileUp, Target, Building2, Tag } from "lucide-react";
+import { Plus, Copy, Sparkles, Archive, Trash2, PencilRuler, Upload, FileUp, Target, Building2, Tag, ClipboardList } from "lucide-react";
 import { Button, Badge, Dialog, Field, Input, Select, Textarea, PageHeader, Table, Th, Td, EmptyState } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
@@ -310,6 +310,11 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
                           >
                             <PencilRuler className="h-3.5 w-3.5" /> Design
                           </Button>
+                          <Link href={`/admin/templates/${t.id}/inputs`}>
+                            <Button size="sm" variant="outline" className="h-8 text-xs gap-1" title="Manual fields for pages 2+ and camera capture">
+                              <ClipboardList className="h-3.5 w-3.5 text-brand-600" /> Data fields
+                            </Button>
+                          </Link>
                         </>
                       )}
                       {canManage && (

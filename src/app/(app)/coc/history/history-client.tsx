@@ -42,6 +42,15 @@ export function HistoryClient({
   const [docs, setDocs] = useState<COCDocumentRow[]>(initialDocs);
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
+  // Phones always get the card layout – the wide table is not usable below 640px
+  const [isPhone, setIsPhone] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const on = () => setIsPhone(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(initialDocs.length === HISTORY_PAGE_SIZE);
 
@@ -163,8 +172,8 @@ export function HistoryClient({
         description="Search, view, and download completed Certificates of Conformity issued across all production orders."
         actions={
           <div className="flex items-center gap-2">
-            {/* View Switcher: Grid vs Table */}
-            <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5 shadow-2xs">
+            {/* View Switcher: Grid vs Table (phones always use cards) */}
+            <div className="hidden sm:inline-flex rounded-lg border border-ink-200 bg-white p-0.5 shadow-2xs">
               <button
                 type="button"
                 onClick={() => setViewMode("grid")}
@@ -205,8 +214,8 @@ export function HistoryClient({
       <Card className="mb-6 shadow-xs border-ink-200">
         <CardBody className="space-y-3.5">
           {/* Company Quick-Select Tabs */}
-          <div className="flex items-center gap-1.5 text-xs text-ink-600 flex-wrap">
-            <div className="flex items-center gap-1 text-[11px] font-semibold text-ink-700 mr-1">
+          <div className="-mx-4 flex items-center gap-1.5 overflow-x-auto px-4 text-xs text-ink-600 no-scrollbar sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+            <div className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-ink-700 mr-1">
               <Building2 className="h-3.5 w-3.5 text-brand-600" />
               <span>Legal Entity:</span>
             </div>
@@ -216,7 +225,7 @@ export function HistoryClient({
                 type="button"
                 onClick={() => setSelectedCompany(ent.code)}
                 title={ent.label}
-                className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all border ${
+                className={`shrink-0 px-3 py-1.5 sm:px-2.5 sm:py-1 rounded text-[11px] font-semibold transition-all border ${
                   selectedCompany === ent.code
                     ? "bg-brand-600 text-white border-brand-600 shadow-xs"
                     : "bg-ink-50 text-ink-600 border-ink-200 hover:bg-ink-100"
@@ -225,7 +234,7 @@ export function HistoryClient({
                 {ent.code}
               </button>
             ))}
-            <span className="ml-auto text-[11px] font-mono text-ink-400">
+            <span className="ml-auto hidden text-[11px] font-mono text-ink-400 sm:inline">
               Entity: <strong>{selectedCompany === "ALL" ? "All Companies" : selectedCompany}</strong>
             </span>
           </div>
@@ -297,7 +306,7 @@ export function HistoryClient({
             </Link>
           </div>
         </div>
-      ) : viewMode === "grid" ? (
+      ) : viewMode === "grid" || isPhone ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
           {filtered.map((d) => {
             const docCtx = (d.d365_context_json || {}) as Record<string, unknown>;
@@ -407,7 +416,7 @@ export function HistoryClient({
                         href={`/api/coc/${d.id}/pdf`}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-[10px] font-semibold text-ink-700 hover:text-ink-900 bg-ink-100 hover:bg-ink-200 px-2 py-0.5 rounded transition-colors"
+                        className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] font-semibold text-ink-700 hover:text-ink-900 bg-ink-100 hover:bg-ink-200 px-2.5 py-1.5 sm:px-2 sm:py-0.5 rounded transition-colors"
                         title="Download PDF"
                       >
                         <Download className="h-3 w-3" /> PDF
@@ -416,7 +425,7 @@ export function HistoryClient({
                     <Link
                       href={`/coc/${d.id}`}
                       target="_blank"
-                      className="inline-flex items-center gap-1 text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-2.5 py-0.5 rounded shadow-2xs transition-colors shrink-0"
+                      className="inline-flex items-center gap-1 text-[11px] sm:text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 sm:px-2.5 sm:py-0.5 rounded shadow-2xs transition-colors shrink-0"
                     >
                       <Eye className="h-3 w-3" /> View COC ({d.coc_number || "View"})
                     </Link>

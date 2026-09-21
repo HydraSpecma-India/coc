@@ -55,7 +55,7 @@ const fieldBase =
   "w-full rounded-md border border-ink-300 bg-white px-2.5 text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-500 disabled:bg-ink-50 disabled:text-ink-500";
 
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function Input({ className, ...props }, ref) {
-  return <input ref={ref} className={cn(fieldBase, "h-9", className)} {...props} />;
+  return <input ref={ref} className={cn(fieldBase, "h-10 sm:h-9", className)} {...props} />;
 });
 
 export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, ...props }, ref) {
@@ -64,7 +64,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTML
 
 export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(function Select({ className, children, ...props }, ref) {
   return (
-    <select ref={ref} className={cn(fieldBase, "h-9 pr-8", className)} {...props}>
+    <select ref={ref} className={cn(fieldBase, "h-10 sm:h-9 pr-8", className)} {...props}>
       {children}
     </select>
   );
@@ -116,24 +116,24 @@ export function Card({ className, children }: { className?: string; children: Re
 }
 export function CardHeader({ title, description, actions }: { title: string; description?: string; actions?: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-ink-200 px-5 py-4">
-      <div>
-        <h2 className="text-base font-semibold text-ink-900">{title}</h2>
-        {description && <p className="mt-0.5 text-sm text-ink-500">{description}</p>}
+    <div className="flex flex-col gap-3 border-b border-ink-200 px-4 py-3.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-5 sm:py-4">
+      <div className="min-w-0">
+        <h2 className="text-[15px] font-semibold text-ink-900 sm:text-base">{title}</h2>
+        {description && <p className="mt-0.5 text-xs text-ink-500 sm:text-sm">{description}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2 sm:shrink-0">{actions}</div>}
     </div>
   );
 }
 export function CardBody({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <div className={cn("px-5 py-4", className)}>{children}</div>;
+  return <div className={cn("px-4 py-4 sm:px-5", className)}>{children}</div>;
 }
 
 /* ───────────────────────── Page header ───────────────────────── */
 export function PageHeader({ title, description, actions, crumbs }: { title: string; description?: string; actions?: React.ReactNode; crumbs?: { label: string; href?: string }[] }) {
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
+    <div className="mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-4">
+      <div className="min-w-0">
         {crumbs && (
           <div className="mb-1 flex items-center gap-1 text-xs text-ink-500">
             {crumbs.map((c, i) => (
@@ -150,10 +150,10 @@ export function PageHeader({ title, description, actions, crumbs }: { title: str
             ))}
           </div>
         )}
-        <h1 className="text-2xl font-semibold tracking-tight text-ink-900">{title}</h1>
-        {description && <p className="mt-1 text-sm text-ink-500">{description}</p>}
+        <h1 className="text-xl font-semibold tracking-tight text-ink-900 sm:text-2xl">{title}</h1>
+        {description && <p className="mt-1 text-xs text-ink-500 sm:text-sm">{description}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }
@@ -183,16 +183,21 @@ export function Dialog({ open, onClose, title, children, footer, width = "max-w-
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 p-4" onMouseDown={onClose}>
-      <div className={cn("w-full rounded-lg bg-white shadow-xl", width)} onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal>
-        <div className="flex items-center justify-between border-b border-ink-200 px-5 py-3">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink-900/40 sm:items-center sm:p-4" onMouseDown={onClose}>
+      <div
+        className={cn("flex w-full max-h-[92dvh] flex-col rounded-t-2xl bg-white shadow-xl sm:max-h-[90vh] sm:rounded-lg", width)}
+        onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-ink-200 px-4 py-3 sm:px-5">
           <h3 className="text-base font-semibold">{title}</h3>
           <button onClick={onClose} className="rounded p-1 text-ink-500 hover:bg-ink-100" aria-label="Close">
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="px-5 py-4">{children}</div>
-        {footer && <div className="flex justify-end gap-2 border-t border-ink-200 px-5 py-3">{footer}</div>}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">{children}</div>
+        {footer && <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-ink-200 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">{footer}</div>}
       </div>
     </div>
   );

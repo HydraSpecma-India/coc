@@ -1,6 +1,7 @@
 import { requireCapability } from "@/lib/auth/guards";
 import { listTemplates } from "@/lib/db/repositories/templates";
 import { CocWizard } from "./coc-wizard";
+import { can } from "@/lib/auth/roles";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "New COC" };
@@ -63,6 +64,7 @@ export default async function NewCocPage() {
       userName={session.user.name || "Manigandan Parthasarathi"}
       userEmail={session.user.email || "manigandan.parthasarathi@hydraspecma.com"}
       allowedCompanies={allowedCompanies}
+      canManageTemplates={can(session.user.role, "manageTemplates", session.user.capabilities)}
     />
   );
 }

@@ -23,7 +23,12 @@ import {
   Clock,
   RotateCw,
   Send,
+  Paperclip,
+  FileText,
+  QrCode,
 } from "lucide-react";
+import { PdfViewer } from "@/components/coc/PdfViewer";
+import type { MeasurementEntry, StoredAttachment } from "@/lib/coc-inputs/types";
 
 export function CocDetailClient({
   doc,
@@ -32,8 +37,20 @@ export function CocDetailClient({
 }: {
   doc: COCDocumentRow;
   steps: COCProcessStepRow[];
-  values: Array<{ field_name: string; value_text: string | null }>;
+  values: Array<{ field_name: string; value_text: string | null; value_json?: unknown }>;
 }) {
+  const measurements = (values.find((v) => v.field_name === "__measurements")?.value_json ?? []) as MeasurementEntry[];
+  const attachments = (values.find((v) => v.field_name === "__attachments")?.value_json ?? []) as StoredAttachment[];
+  const measuredKeys = new Set(Array.isArray(measurements) ? measurements.map((m) => m.key) : []);
+  const plainValues = values.filter((v) => !v.field_name.startsWith("__") && !measuredKeys.has(v.field_name));
+  const sections = Array.isArray(measurements)
+    ? measurements.reduce<Array<{ id: string; title: string; items: MeasurementEntry[] }>>((acc, m) => {
+        const g = acc.find((x) => x.id === m.sectionId);
+        if (g) g.items.push(m);
+        else acc.push({ id: m.sectionId, title: m.sectionTitle, items: [m] });
+        return acc;
+      }, [])
+    : [];
   const [steps, setSteps] = useState<COCProcessStepRow[]>(initialSteps);
   const [retrying, setRetrying] = useState(false);
   const [sendingTeams, setSendingTeams] = useState(false);
@@ -95,7 +112,7 @@ export function CocDetailClient({
         title={doc.coc_number || "Certificate of Conformity"}
         description={`Production Order: ${doc.production_order} • Part: ${doc.item_number || "—"}`}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {hasFailedStep && (
               <Button variant="outline" size="sm" loading={retrying} onClick={retryFailedStep}>
                 <RotateCw className="h-3.5 w-3.5" />
@@ -128,7 +145,7 @@ export function CocDetailClient({
       />
 
       {/* Process Pipeline Tracker */}
-      <Card className="mb-6">
+      <Card className="mb-4 sm:mb-6">
         <CardHeader title="Automated Processing Pipeline" description="Real-time execution steps recorded for this certificate." />
         <CardBody>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -173,7 +190,7 @@ export function CocDetailClient({
         </CardBody>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         {/* PDF Viewer */}
         <div className="lg:col-span-2">
           <Card>
@@ -192,13 +209,92 @@ export function CocDetailClient({
               }
             />
             <CardBody className="p-0">
-              <iframe
-                src={`/api/coc/${doc.id}/pdf`}
-                className="w-full h-[650px] rounded-b-lg border-0"
-                title="Generated COC PDF"
-              />
+              {doc.generated_pdf_path ? (
+                <PdfViewer
+                  src={`/api/coc/${doc.id}/pdf`}
+                  title="Generated COC PDF"
+                  downloadName={`${doc.coc_number || "certificate"}.pdf`}
+                  className="rounded-b-lg overflow-hidden"
+                />
+              ) : (
+                <div className="p-8 text-center text-sm text-ink-500">No PDF has been generated for this certificate.</div>
+              )}
             </CardBody>
           </Card>
+
+          {sections.map((sec) => (
+            <Card key={sec.id} className="mt-4 sm:mt-6">
+              <CardHeader
+                title={sec.title}
+                description="Values recorded for this template page"
+                actions={
+                  sec.items.some((m) => m.status === "NOK") ? (
+                    <Badge tone="danger">{sec.items.filter((m) => m.status === "NOK").length} out of tolerance</Badge>
+                  ) : (
+                    <Badge tone="success">{sec.items.length} value(s)</Badge>
+                  )
+                }
+              />
+              <CardBody className="p-0">
+                <ul className="divide-y divide-ink-100">
+                  {sec.items.map((m) => (
+                    <li key={m.key} className="flex items-start gap-3 px-4 py-2.5 sm:px-5">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-ink-900">{m.label}</div>
+                        {(m.nominal || m.min != null || m.max != null) && (
+                          <div className="text-[11px] text-ink-500">
+                            Spec: {m.nominal || [m.min, m.max].map((x) => (x == null ? "…" : x)).join(" – ")} {m.unit || ""}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <div className="font-mono text-sm font-semibold text-ink-900">
+                          {m.value || "—"} {m.value && m.type === "number" ? m.unit || "" : ""}
+                        </div>
+                        <div className="mt-0.5 flex items-center justify-end gap-1">
+                          {m.source === "qr" && <QrCode className="h-3 w-3 text-brand-600" aria-label="scanned" />}
+                          {m.status && <Badge tone={m.status === "OK" ? "success" : "danger"} className="text-[10px]">{m.status}</Badge>}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </CardBody>
+            </Card>
+          ))}
+
+          {attachments.length > 0 && (
+            <Card className="mt-4 sm:mt-6">
+              <CardHeader title="Supplier documents" description="Captured documents – also merged at the end of the certificate PDF." actions={<Paperclip className="h-4 w-4 text-ink-400" />} />
+              <CardBody className="p-0">
+                <ul className="divide-y divide-ink-100">
+                  {attachments.map((a) => (
+                    <li key={a.index} className="flex items-center gap-3 px-4 py-3 sm:px-5">
+                      <FileText className="h-5 w-5 shrink-0 text-ink-400" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium text-ink-900">{a.caption || a.name}</div>
+                        <div className="text-[11px] text-ink-500">
+                          {a.name} · {a.pageCount || 1} page(s) · {(a.sizeBytes / 1024).toFixed(0)} KB
+                        </div>
+                      </div>
+                      {a.storagePath ? (
+                        <a
+                          href={`/api/coc/${doc.id}/attachments/${a.index}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex h-9 items-center gap-1 rounded-md border border-ink-300 px-3 text-xs font-semibold text-ink-800 hover:bg-ink-50"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" /> Open
+                        </a>
+                      ) : (
+                        <Badge tone="warning">in PDF only</Badge>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </CardBody>
+            </Card>
+          )}
         </div>
 
         {/* Metadata & Quality Record Sidebar */}
@@ -254,10 +350,10 @@ export function CocDetailClient({
           <Card>
             <CardHeader title="Inspection Parameters" />
             <CardBody className="space-y-2 text-xs">
-              {values.length === 0 ? (
+              {plainValues.length === 0 ? (
                 <div className="text-ink-400 text-center py-4">Standard inspection values applied</div>
               ) : (
-                values.map((v) => {
+                plainValues.map((v) => {
                   let dispVal = v.value_text || "—";
                   if (v.field_name === "CustomerName" && dispVal.toLowerCase().includes("hydraspecma")) {
                     dispVal = String(doc.d365_context_json?.customerName || (doc.customer_account === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD"));

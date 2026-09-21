@@ -48,7 +48,13 @@ import {
   ChevronDown,
   Calendar,
   X,
+  ClipboardList,
+  SlidersHorizontal,
 } from "lucide-react";
+import { MeasurementSections, MeasurementEmptyHint, initMeasureValues, missingRequired, toMeasurementEntries, type MeasureValues } from "@/components/coc/MeasurementSections";
+import { DocumentCapture, toAttachmentUploads, type CapturedDoc } from "@/components/coc/DocumentCapture";
+import { PdfViewer } from "@/components/coc/PdfViewer";
+import { EMPTY_INPUT_CONFIG, type TemplateInputConfig } from "@/lib/coc-inputs/types";
 
 export type DatePreset = "ALL" | "CURRENT_MONTH" | "LAST_MONTH" | "LAST_3_MONTHS" | "LAST_6_MONTHS" | "NEXT_MONTH";
 
@@ -232,19 +238,47 @@ function generateAutoSignature(name: string): string {
   return canvas.toDataURL("image/png");
 }
 
+const QUALITY_WORKFLOW_STEPS = [
+  { step: 1, name: "Assembled.", spec: "According to AI-1071.0512 and AI-1070.0049, Latest revision." },
+  { step: 2, name: "Air leak test.", spec: "According to TI-1071.0512-1, Latest revision." },
+  { step: 3, name: "Air fan test", spec: "According to TI-1071.0512-2, Latest revision." },
+  { step: 4, name: "Interface dimension for cabinet.", spec: "According to TI-1071.0512-3, Latest revision." },
+  { step: 5, name: "Flatness of Baseframe.", spec: "According to TI-1071.0512-4, Latest revision." },
+  { step: 6, name: "Pipe system Air leak test or Helium leak test.", spec: "According to TI-1071.0267 / TI-1071.0267-1, Latest revision." },
+  { step: 7, name: "Part traceability.", spec: "According to SN-1070.0049, Latest revision." },
+  { step: 8, name: "Complete inspection.", spec: "Visual inspection of complete unit before packed." },
+  { step: 9, name: "Packing.", spec: "According to PI-1070.0049, Latest revision." },
+];
+
 export function CocWizard({
   templates,
   userName,
   userEmail,
   allowedCompanies = ["ALL"],
+  canManageTemplates = false,
 }: {
   templates: TemplateSummary[];
   userName: string;
   userEmail: string;
   allowedCompanies?: string[];
+  canManageTemplates?: boolean;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Admin-defined data entry fields for template pages 2+ and captured supplier documents
+  const [inputConfig, setInputConfig] = useState<TemplateInputConfig>(EMPTY_INPUT_CONFIG);
+  const [inputConfigFor, setInputConfigFor] = useState<string | null>(null);
+  const [measureValues, setMeasureValues] = useState<MeasureValues>({});
+  const [capturedDocs, setCapturedDocs] = useState<CapturedDoc[]>([]);
+  const [showStep2Errors, setShowStep2Errors] = useState(false);
+
+  // Always start a new step at the top (important on phones)
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [step]);
 
   // Template selection
   const [templateList, setTemplateList] = useState<TemplateSummary[]>(templates);
@@ -252,6 +286,81 @@ export function CocWizard({
     templates.find((t) => t.active_version_id)?.id || templates[0]?.id || ""
   );
   const selectedTemplate = templateList.find((t) => t.id === selectedTemplateId) || templateList[0];
+
+  useEffect(() => {
+    const tplId = selectedTemplate?.id;
+    if (!tplId) return;
+    let active = true;
+    api<{ ok: boolean; config: TemplateInputConfig }>(`/api/templates/${tplId}/inputs`)
+      .then((res) => {
+        if (!active) return;
+        const cfg = res.config ?? EMPTY_INPUT_CONFIG;
+        setInputConfig(cfg);
+        setMeasureValues((prev) => initMeasureValues(cfg.sections, prev));
+      })
+      .catch(() => {
+        if (active) setInputConfig(EMPTY_INPUT_CONFIG);
+      })
+      .finally(() => {
+        if (active) setInputConfigFor(tplId);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedTemplate?.id]);
+
+  const inputConfigLoading = Boolean(selectedTemplate?.id) && inputConfigFor !== selectedTemplate?.id;
+
+  const attachmentsNeeded = inputConfig.attachments.enabled
+    ? inputConfig.attachments.required
+      ? Math.max(1, inputConfig.attachments.minCount)
+      : inputConfig.attachments.minCount
+    : 0;
+
+  /** Returns a list of problems that block leaving step 2. */
+  const step2Problems = (): string[] => {
+    const problems: string[] = [];
+    const missing = missingRequired(inputConfig.sections, measureValues);
+    if (missing.length) problems.push(`${missing.length} required field(s) missing: ${missing.slice(0, 4).map((f) => f.label).join(", ")}${missing.length > 4 ? "…" : ""}`);
+    if (capturedDocs.length < attachmentsNeeded) problems.push(`Capture at least ${attachmentsNeeded} supplier document(s) (${capturedDocs.length} added)`);
+    return problems;
+  };
+
+  const scrollToFirstProblem = () => {
+    // wait for step 2 to render with error highlighting, then bring the first problem into view
+    window.setTimeout(() => {
+      const el = scrollRef.current?.querySelector<HTMLElement>("[data-missing='true']");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.querySelector<HTMLElement>("input,select,textarea,button")?.focus({ preventScroll: true });
+      }
+    }, 350);
+  };
+
+  const goToStep = (target: 1 | 2 | 3 | 4) => {
+    if (target > 2) {
+      const problems = step2Problems();
+      if (problems.length) {
+        setShowStep2Errors(true);
+        setStep(2);
+        toast.error("Complete the quality data first", problems.join(" • "));
+        scrollToFirstProblem();
+        return;
+      }
+    }
+    if (target === 4) generatePreview();
+    setStep(target);
+  };
+
+  const extrasPayload = () => ({
+    measurements: toMeasurementEntries(inputConfig.sections, measureValues),
+    attachments: toAttachmentUploads(capturedDocs),
+    measurementValues: Object.fromEntries(
+      Object.entries(measureValues)
+        .filter(([, v]) => (v.value ?? "").trim())
+        .map(([k, v]) => [k, v.value]),
+    ) as Record<string, string>,
+  });
   const [showUploadPdfModal, setShowUploadPdfModal] = useState(false);
   const [uploadPdfFile, setUploadPdfFile] = useState<File | null>(null);
   const [uploadPdfName, setUploadPdfName] = useState("");
@@ -1205,8 +1314,10 @@ export function CocWizard({
     if (!ctx) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = "touches" in e ? e.touches[0].clientX - rect.left : e.clientX - rect.left;
-    const y = "touches" in e ? e.touches[0].clientY - rect.top : e.clientY - rect.top;
+    const sx = canvas.width / (rect.width || canvas.width);
+    const sy = canvas.height / (rect.height || canvas.height);
+    const x = ("touches" in e ? e.touches[0].clientX - rect.left : e.clientX - rect.left) * sx;
+    const y = ("touches" in e ? e.touches[0].clientY - rect.top : e.clientY - rect.top) * sy;
 
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -1224,8 +1335,10 @@ export function CocWizard({
     if (!ctx) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = "touches" in e ? e.touches[0].clientX - rect.left : e.clientX - rect.left;
-    const y = "touches" in e ? e.touches[0].clientY - rect.top : e.clientY - rect.top;
+    const sx = canvas.width / (rect.width || canvas.width);
+    const sy = canvas.height / (rect.height || canvas.height);
+    const x = ("touches" in e ? e.touches[0].clientX - rect.left : e.clientX - rect.left) * sx;
+    const y = ("touches" in e ? e.touches[0].clientY - rect.top : e.clientY - rect.top) * sy;
 
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -1270,6 +1383,7 @@ export function CocWizard({
         ? rawCust
         : (selectedCompany === "HGCN" || selectedPO.dataAreaId === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
 
+    const extras = extrasPayload();
     try {
       const res = await fetch("/api/coc/preview", {
         method: "POST",
@@ -1288,8 +1402,10 @@ export function CocWizard({
           serialNumber: manualFields.SerialNumber || selectedPO.SerialNumber || "",
           quantity: selectedPO.Quantity || 1,
           unitOfMeasure: selectedPO.UnitOfMeasure || "Pcs",
-          manualValues: { ...manualFields, CustomerName: finalCustomerName },
+          manualValues: { ...manualFields, ...extras.measurementValues, CustomerName: finalCustomerName },
           signatureBase64: signatureDataUrl,
+          measurements: extras.measurements,
+          attachments: extras.attachments,
         }),
       });
 
@@ -1337,6 +1453,16 @@ export function CocWizard({
         ? rawCust
         : (selectedCompany === "HGCN" || selectedPO.dataAreaId === "HGCN" ? "VESTAS WIND TECHNOLOGY CHINA CO LTD" : "VESTAS WIND TECHNOLOGYS INDIA PVT LTD");
 
+    const problems = step2Problems();
+    if (problems.length) {
+      setShowStep2Errors(true);
+      setStep(2);
+      toast.error("Complete the quality data first", problems.join(" • "));
+      scrollToFirstProblem();
+      return;
+    }
+    const extras = extrasPayload();
+
     setGenerating(true);
     try {
       const res = await api<{ ok: boolean; documentId: string; cocNumber: string }>("/api/coc", {
@@ -1358,8 +1484,10 @@ export function CocWizard({
           unitOfMeasure: selectedPO.UnitOfMeasure || "Pcs",
           deliveryDate: manualFields.DeliveryDate || selectedPO.DeliveryDate || "",
           serialNumber: manualFields.SerialNumber || selectedPO.SerialNumber || "",
-          manualValues: { ...manualFields, CustomerName: finalCustomerName },
+          manualValues: { ...manualFields, ...extras.measurementValues, CustomerName: finalCustomerName },
           signatureBase64: signatureDataUrl,
+          measurements: extras.measurements,
+          attachments: extras.attachments,
         },
       });
 
@@ -1374,18 +1502,83 @@ export function CocWizard({
     }
   };
 
+  // Step navigation – shown in the right sidebar (desktop) and as a sticky bottom bar (phone / tablet)
+  const stepActions = (
+    step === 1 ? (
+            <div className="space-y-2">
+              {selectedPO?.isFullyCertified ? (
+                <>
+                  <div className="text-[11px] font-semibold text-emerald-950 bg-emerald-100/70 p-2 rounded border border-emerald-300 text-center">
+                    Fully certified ({selectedPO.certifiedQuantity}/{selectedPO.Quantity}). Not qualified for another COC.
+                  </div>
+                  {selectedPO.cocList?.[0] && (
+                    <Link
+                      href={`/coc/${selectedPO.cocList[0].id}`}
+                      target="_blank"
+                      className="flex items-center justify-center gap-1.5 w-full px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      View Certificate ({selectedPO.cocList[0].coc_number})
+                    </Link>
+                  )}
+                  <Button disabled className="w-full justify-center opacity-50 text-xs">
+                    Next: Quality Checks <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  disabled={!selectedPO}
+                  onClick={() => setStep(2)}
+                  className="w-full justify-center gap-2 font-bold py-2.5 shadow-sm text-sm"
+                >
+                  Next: Quality Checks <ArrowRight className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          ) : step === 2 ? (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setStep(1)} className="flex-1 justify-center text-xs">
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Orders
+              </Button>
+              <Button onClick={() => goToStep(3)} className="flex-1 justify-center text-xs font-bold">
+                Next: Sign <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
+          ) : step === 3 ? (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setStep(2)} className="flex-1 justify-center text-xs">
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Quality
+              </Button>
+              <Button onClick={() => goToStep(4)} className="flex-1 justify-center text-xs font-bold">
+                Next: Review <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setStep(3)} className="flex-1 justify-center text-xs">
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Sign
+              </Button>
+              <Button loading={generating} onClick={handleCreateCoc} className="flex-1 justify-center text-xs font-bold bg-brand-500 hover:bg-brand-600 text-ink-900">
+                Issue COC <FileCheck className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
+          )
+  );
+
   return (
     <div className="flex h-full w-full overflow-hidden">
       {/* Center Main Scrollable Workflow Canvas */}
-      <div className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="w-full space-y-6 pb-20">
-          <PageHeader
-            title="Create Certificate of Conformity"
-            description="Issue an official COC by selecting a production order, validating quality parameters, and applying an authorized digital signature."
-          />
+      <div ref={scrollRef} className="relative flex-1 min-w-0 overflow-y-auto overscroll-contain px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
+        <div className="w-full space-y-4 sm:space-y-6 pb-28 lg:pb-20">
+          <div className="hidden sm:block">
+            <PageHeader
+              title="Create Certificate of Conformity"
+              description="Issue an official COC by selecting a production order, validating quality parameters, and applying an authorized digital signature."
+            />
+          </div>
 
           {/* Step Progress Bar */}
-          <div className="mb-6 grid grid-cols-4 gap-2">
+          <div className="mb-4 grid grid-cols-4 gap-1.5 sm:mb-6 sm:gap-2">
         {[
           { num: 1, label: "Select Order", icon: FileCheck },
           { num: 2, label: "Quality Checks", icon: Sparkles },
@@ -1394,11 +1587,8 @@ export function CocWizard({
         ].map((s) => (
           <button
             key={s.num}
-            onClick={() => {
-              if (s.num === 4) generatePreview();
-              setStep(s.num as never);
-            }}
-            className={`flex items-center gap-2 rounded-lg border p-3 text-left transition-colors ${
+            onClick={() => goToStep(s.num as 1 | 2 | 3 | 4)}
+            className={`flex min-w-0 flex-col items-center gap-1 rounded-lg border p-2 text-center transition-colors sm:flex-row sm:gap-2 sm:p-3 sm:text-left ${
               step === s.num
                 ? "border-brand-500 bg-brand-50/50 text-ink-900"
                 : step > s.num
@@ -1417,8 +1607,8 @@ export function CocWizard({
             >
               {step > s.num ? <CheckCircle2 className="h-4 w-4" /> : s.num}
             </div>
-            <div className="hidden sm:block">
-              <div className="text-xs font-semibold leading-none">{s.label}</div>
+            <div className="min-w-0">
+              <div className="truncate text-[10px] font-semibold leading-tight sm:text-xs sm:leading-none">{s.label}</div>
             </div>
           </button>
         ))}
@@ -1471,7 +1661,7 @@ export function CocWizard({
                 })()}
               </div>
             </div>
-            <div className="flex items-center gap-1.5 ml-auto shrink-0">
+            <div className="flex flex-wrap items-center gap-1.5 ml-auto shrink-0">
               <Button
                 variant="outline"
                 size="sm"
@@ -1483,6 +1673,16 @@ export function CocWizard({
                 <PencilRuler className="h-3 w-3" />
                 <span>Designer</span>
               </Button>
+              {canManageTemplates && selectedTemplate && (
+                <Link
+                  href={`/admin/templates/${selectedTemplate.id}/inputs`}
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-ink-300 bg-white px-2.5 text-xs font-medium text-ink-700 hover:bg-ink-50 hover:text-ink-900"
+                  title="Manual fields for pages 2+ and camera capture"
+                >
+                  <ClipboardList className="h-3 w-3 text-brand-600" />
+                  <span>Data fields</span>
+                </Link>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -1648,10 +1848,10 @@ export function CocWizard({
                 </div>
               }
             />
-            <CardBody className="space-y-4">
+            <CardBody className="@container space-y-4">
               {/* Integration Status Notice */}
               {d365Mode === "mock" && (
-                <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-3.5 text-xs text-sky-900">
+                <div className="hidden sm:block rounded-lg border border-sky-200 bg-sky-50/70 p-3.5 text-xs text-sky-900">
                   <div className="flex items-start gap-2">
                     <Info className="h-4 w-4 shrink-0 text-sky-600 mt-0.5" />
                     <div className="flex-1">
@@ -1712,19 +1912,33 @@ export function CocWizard({
                       className="pl-9"
                     />
                   </div>
-                  <Button loading={searching} onClick={() => searchOrders(poQuery, selectedCompany, selectedStatus, deliveryDateFilter, fromDateFilter, toDateFilter, yearFilter, false)}>
-                    Search D365
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => openManualOrder(poQuery)}
-                    className="gap-1.5 shrink-0"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Custom Order
-                  </Button>
+                  <div className="grid grid-cols-3 gap-2 sm:contents">
+                    <Button className="justify-center" loading={searching} onClick={() => searchOrders(poQuery, selectedCompany, selectedStatus, deliveryDateFilter, fromDateFilter, toDateFilter, yearFilter, false)}>
+                      <Search className="h-4 w-4 sm:hidden" />
+                      <span className="sm:hidden">Search</span>
+                      <span className="hidden sm:inline">Search D365</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => openManualOrder(poQuery)}
+                      className="gap-1.5 shrink-0 justify-center"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span className="sm:hidden">Custom</span>
+                      <span className="hidden sm:inline">Custom Order</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowFilters((v) => !v)}
+                      className={`gap-1.5 justify-center sm:hidden ${showFilters ? "bg-ink-900 text-white border-ink-900 hover:bg-ink-800" : ""}`}
+                      aria-expanded={showFilters}
+                    >
+                      <SlidersHorizontal className="h-4 w-4" /> Filters
+                    </Button>
+                  </div>
                 </div>
 
+                <div className={showFilters ? "space-y-2" : "hidden space-y-2 sm:block"}>
                 {/* Quick Entity Switcher Tabs */}
                 <div className="flex items-center gap-1.5 text-xs text-ink-500 pt-1 flex-wrap">
                   <span className="text-[11px] font-medium text-ink-400">Legal Entity:</span>
@@ -1889,6 +2103,7 @@ export function CocWizard({
                       </button>
                     </div>
                   )}
+                </div>
                 </div>
               </div>
 
@@ -2139,7 +2354,7 @@ export function CocWizard({
                   </div>
                 )
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+                <div className="grid grid-cols-1 @lg:grid-cols-2 @4xl:grid-cols-3 @6xl:grid-cols-4 gap-3">
                   {displayedResults.map((order) => {
                     const isSelected = selectedPO?.ProductionOrder === order.ProductionOrder;
                     const entityBadge = order.dataAreaId || (order.CustomerAccount ? order.CustomerAccount.toUpperCase() : selectedCompany);
@@ -2693,6 +2908,36 @@ export function CocWizard({
             </CardBody>
           </Card>
 
+          {/* Admin-defined data entry for template pages 2+ (manual / QR) */}
+          {inputConfigLoading ? (
+            <div className="rounded-lg border border-ink-200 bg-white p-4 text-xs text-ink-500">Loading template data fields…</div>
+          ) : inputConfig.sections.length > 0 ? (
+            <>
+              <div className="flex items-center gap-2 px-1 pt-1">
+                <ClipboardList className="h-4 w-4 text-brand-600" />
+                <h3 className="text-sm font-semibold text-ink-900">Template pages – data entry</h3>
+                <span className="hidden sm:inline text-[11px] text-ink-500">Page 1 comes from D365FO · these pages are filled here</span>
+              </div>
+              <MeasurementSections
+                sections={inputConfig.sections}
+                values={measureValues}
+                onChange={setMeasureValues}
+                showErrors={showStep2Errors}
+              />
+            </>
+          ) : (
+            <MeasurementEmptyHint canManage={canManageTemplates} templateId={selectedTemplate?.id} />
+          )}
+
+          {inputConfig.attachments.enabled && (
+            <DocumentCapture
+              settings={inputConfig.attachments}
+              docs={capturedDocs}
+              onChange={setCapturedDocs}
+              showErrors={showStep2Errors}
+            />
+          )}
+
           {/* Official 9-Step Workflow Verification Card */}
           <Card>
             <CardHeader
@@ -2705,7 +2950,20 @@ export function CocWizard({
               }
             />
             <CardBody className="p-0">
-              <div className="overflow-x-auto">
+              {/* Phone: stacked list */}
+              <ul className="divide-y divide-ink-100 sm:hidden">
+                {QUALITY_WORKFLOW_STEPS.map((item) => (
+                  <li key={item.step} className="flex items-start gap-3 px-4 py-3">
+                    <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ink-100 font-mono text-[11px] font-bold text-ink-600">{item.step}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-ink-900">{item.name}</div>
+                      <div className="mt-0.5 font-mono text-[11px] text-ink-500">{item.spec}</div>
+                    </div>
+                    <Check className="mt-1 h-4 w-4 shrink-0 text-emerald-600 stroke-[3]" aria-label="Conforms" />
+                  </li>
+                ))}
+              </ul>
+              <div className="hidden overflow-x-auto sm:block">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="border-b border-ink-200 bg-ink-50/70 text-ink-700 font-semibold">
@@ -2716,17 +2974,7 @@ export function CocWizard({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100">
-                    {[
-                      { step: 1, name: "Assembled.", spec: "According to AI-1071.0512 and AI-1070.0049, Latest revision." },
-                      { step: 2, name: "Air leak test.", spec: "According to TI-1071.0512-1, Latest revision." },
-                      { step: 3, name: "Air fan test", spec: "According to TI-1071.0512-2, Latest revision." },
-                      { step: 4, name: "Interface dimension for cabinet.", spec: "According to TI-1071.0512-3, Latest revision." },
-                      { step: 5, name: "Flatness of Baseframe.", spec: "According to TI-1071.0512-4, Latest revision." },
-                      { step: 6, name: "Pipe system Air leak test or Helium leak test.", spec: "According to TI-1071.0267 / TI-1071.0267-1, Latest revision." },
-                      { step: 7, name: "Part traceability.", spec: "According to SN-1070.0049, Latest revision." },
-                      { step: 8, name: "Complete inspection.", spec: "Visual inspection of complete unit before packed." },
-                      { step: 9, name: "Packing.", spec: "According to PI-1070.0049, Latest revision." },
-                    ].map((item) => (
+                    {QUALITY_WORKFLOW_STEPS.map((item) => (
                       <tr key={item.step} className="hover:bg-ink-50/50 transition-colors">
                         <td className="py-2.5 px-4 font-mono font-bold text-ink-500 text-center">{item.step}</td>
                         <td className="py-2.5 px-4 font-semibold text-ink-900">{item.name}</td>
@@ -2779,11 +3027,11 @@ export function CocWizard({
                 </div>
               </div>
 
-              <div className="flex justify-between pt-6 border-t border-ink-200">
+              <div className="hidden lg:flex justify-between pt-6 border-t border-ink-200">
                 <Button variant="outline" onClick={() => setStep(1)} className="gap-2">
                   <ArrowLeft className="h-4 w-4" /> Back to Order Lookup
                 </Button>
-                <Button onClick={() => setStep(3)} className="gap-2">
+                <Button onClick={() => goToStep(3)} className="gap-2">
                   Next: Digital Signature <ArrowRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -3012,6 +3260,7 @@ export function CocWizard({
                   ref={canvasRef}
                   width={480}
                   height={160}
+                  style={{ width: "100%", maxWidth: 480, height: "auto", aspectRatio: "3 / 1" }}
                   onMouseDown={startDrawing}
                   onMouseMove={draw}
                   onMouseUp={stopDrawing}
@@ -3027,15 +3276,12 @@ export function CocWizard({
               </div>
             )}
 
-            <div className="flex justify-between pt-4 border-t border-ink-200">
+            <div className="hidden lg:flex justify-between pt-4 border-t border-ink-200">
               <Button variant="outline" onClick={() => setStep(2)} className="gap-2">
                 <ArrowLeft className="h-4 w-4" /> Back
               </Button>
               <Button
-                onClick={() => {
-                  generatePreview();
-                  setStep(4);
-                }}
+                onClick={() => goToStep(4)}
                 className="gap-2 bg-brand-500 hover:bg-brand-600 text-ink-900 font-semibold"
               >
                 Next: Preview & Issue <ArrowRight className="h-4 w-4" />
@@ -3092,7 +3338,7 @@ export function CocWizard({
               </div>
             ) : previewUrl ? (
               <div className="rounded-lg border border-ink-200 overflow-hidden shadow-sm">
-                <iframe src={previewUrl} className="w-full h-[650px]" title="COC Preview" />
+                <PdfViewer src={previewUrl} title="COC Preview" downloadName="coc-preview.pdf" />
               </div>
             ) : (
               <div className="flex h-64 items-center justify-center rounded-lg border border-ink-200 bg-ink-50">
@@ -3100,7 +3346,7 @@ export function CocWizard({
               </div>
             )}
 
-            <div className="flex justify-between pt-4 border-t border-ink-200">
+            <div className="hidden lg:flex justify-between pt-4 border-t border-ink-200">
               <Button variant="outline" onClick={() => setStep(3)} className="gap-2">
                 <ArrowLeft className="h-4 w-4" /> Back to Signature
               </Button>
@@ -3118,6 +3364,21 @@ export function CocWizard({
         </Card>
       )}
 
+        </div>
+
+        {/* Phone / tablet: sticky step actions (the right sidebar is hidden below lg) */}
+        <div className="lg:hidden sticky bottom-0 z-20 -mx-3 sm:-mx-6 border-t border-ink-200 bg-white/95 backdrop-blur px-3 sm:px-6 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_12px_rgba(15,23,42,0.06)]">
+          {selectedPO && (
+            <div className="mb-2 flex items-center gap-2 text-[11px] text-ink-600">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+              <span className="truncate">
+                <span className="font-mono font-bold text-ink-900">{selectedPO.ProductionOrder}</span> · {selectedPO.ItemNumber}
+                {manualFields.SerialNumber ? ` · SN ${manualFields.SerialNumber}` : ""}
+              </span>
+              {capturedDocs.length > 0 && <Badge tone="info" className="ml-auto shrink-0 text-[10px]">{capturedDocs.length} doc(s)</Badge>}
+            </div>
+          )}
+          {stepActions}
         </div>
       </div>
 
@@ -3512,65 +3773,7 @@ export function CocWizard({
 
         {/* Right Sidebar Pinned Footer */}
         <div className="border-t border-ink-200 p-4 bg-white shrink-0 space-y-2 shadow-xs">
-          {step === 1 ? (
-            <div className="space-y-2">
-              {selectedPO?.isFullyCertified ? (
-                <>
-                  <div className="text-[11px] font-semibold text-emerald-950 bg-emerald-100/70 p-2 rounded border border-emerald-300 text-center">
-                    Fully certified ({selectedPO.certifiedQuantity}/{selectedPO.Quantity}). Not qualified for another COC.
-                  </div>
-                  {selectedPO.cocList?.[0] && (
-                    <Link
-                      href={`/coc/${selectedPO.cocList[0].id}`}
-                      target="_blank"
-                      className="flex items-center justify-center gap-1.5 w-full px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors"
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                      View Certificate ({selectedPO.cocList[0].coc_number})
-                    </Link>
-                  )}
-                  <Button disabled className="w-full justify-center opacity-50 text-xs">
-                    Next: Quality Checks <ArrowRight className="h-3.5 w-3.5 ml-1" />
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  disabled={!selectedPO}
-                  onClick={() => setStep(2)}
-                  className="w-full justify-center gap-2 font-bold py-2.5 shadow-sm text-sm"
-                >
-                  Next: Quality Checks <ArrowRight className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          ) : step === 2 ? (
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setStep(1)} className="flex-1 justify-center text-xs">
-                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Orders
-              </Button>
-              <Button onClick={() => setStep(3)} className="flex-1 justify-center text-xs font-bold">
-                Next: Sign <ArrowRight className="h-3.5 w-3.5 ml-1" />
-              </Button>
-            </div>
-          ) : step === 3 ? (
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setStep(2)} className="flex-1 justify-center text-xs">
-                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Quality
-              </Button>
-              <Button onClick={() => { generatePreview(); setStep(4); }} className="flex-1 justify-center text-xs font-bold">
-                Next: Review <ArrowRight className="h-3.5 w-3.5 ml-1" />
-              </Button>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setStep(3)} className="flex-1 justify-center text-xs">
-                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Sign
-              </Button>
-              <Button loading={generating} onClick={handleCreateCoc} className="flex-1 justify-center text-xs font-bold bg-brand-500 hover:bg-brand-600 text-ink-900">
-                Issue COC <FileCheck className="h-3.5 w-3.5 ml-1" />
-              </Button>
-            </div>
-          )}
+          {stepActions}
         </div>
       </aside>
 

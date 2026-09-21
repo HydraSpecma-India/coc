@@ -153,6 +153,19 @@ export async function uploadGeneratedPdf(cocNumber: string, pdfBytes: Uint8Array
   return storagePath;
 }
 
+/** Store one captured supplier document (converted to PDF – the bucket only accepts PDFs). */
+export async function uploadAttachmentPdf(cocNumber: string, index: number, name: string, pdfBytes: Uint8Array): Promise<string> {
+  const safeName = name.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 60) || "document";
+  const safeCoc = cocNumber.replace(/[^A-Za-z0-9._-]+/g, "_");
+  const storagePath = `attachments/${new Date().getFullYear()}/${safeCoc}/${String(index + 1).padStart(2, "0")}-${safeName}.pdf`;
+  const { error } = await supabaseAdmin().storage.from(Buckets.cocGenerated).upload(storagePath, pdfBytes, {
+    contentType: "application/pdf",
+    upsert: true,
+  });
+  if (error) throw error;
+  return storagePath;
+}
+
 export async function getGeneratedPdfUrl(storagePath: string): Promise<string> {
   const sb = supabaseAdmin();
   const { data, error } = await sb.storage
@@ -203,7 +216,7 @@ export async function listCocDocuments(opts: {
 export async function getCocDocumentById(id: string): Promise<{
   doc: COCDocumentRow;
   steps: COCProcessStepRow[];
-  values: Array<{ field_name: string; value_text: string | null }>;
+  values: Array<{ field_name: string; value_text: string | null; value_json?: unknown }>;
 } | null> {
   const sb = supabaseAdmin();
   const { data: doc, error } = await sb.from("coc_documents").select("*").eq("id", id).maybeSingle();
@@ -211,7 +224,7 @@ export async function getCocDocumentById(id: string): Promise<{
 
   const [{ data: steps }, { data: values }] = await Promise.all([
     sb.from("coc_process_steps").select("*").eq("coc_document_id", id).order("started_at", { ascending: true }),
-    sb.from("coc_document_values").select("field_name, value_text").eq("coc_document_id", id),
+    sb.from("coc_document_values").select("field_name, value_text, value_json").eq("coc_document_id", id),
   ]);
 
   return {

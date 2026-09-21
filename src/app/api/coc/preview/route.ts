@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth/guards";
+import { z } from "zod";
 import { renderCOCPdf } from "@/lib/render/pdf-renderer";
+import { AttachmentUploadSchema, MeasurementEntrySchema, MAX_ATTACHMENTS } from "@/lib/coc-inputs/types";
+import { assertAttachmentSizes } from "@/lib/coc-inputs/server";
 
 export async function POST(req: Request) {
   await requireSession();
   const body = await req.json();
+  const measurements = z.array(MeasurementEntrySchema).max(500).safeParse(body.measurements ?? []);
+  const attachments = z.array(AttachmentUploadSchema).max(MAX_ATTACHMENTS).safeParse(body.attachments ?? []);
+  if (attachments.success) assertAttachmentSizes(attachments.data);
 
   const rawCustomer = body.customerName || body.manualValues?.["CustomerName"] || "";
   const resolvedCustomerName =
@@ -31,6 +37,8 @@ export async function POST(req: Request) {
     isDraft: true,
     templateId: body.templateId,
     templateVersionId: body.templateVersionId,
+    measurements: measurements.success ? measurements.data : undefined,
+    attachments: attachments.success ? attachments.data : undefined,
   });
 
   return new NextResponse(Buffer.from(pdfBytes), {

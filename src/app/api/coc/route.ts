@@ -1,6 +1,12 @@
 import { route, json } from "@/lib/api/handler";
 import { requireCapability, requireSession } from "@/lib/auth/guards";
-import { createCocDocument, listCocDocuments, logProcessStep, uploadGeneratedPdf } from "@/lib/db/repositories/coc";
+import { createCocDocument, listCocDocuments, logProcessStep, uploadGeneratedPdf, uploadAttachmentPdf } from "@/lib/db/repositories/coc";
+import { attachmentToPdf } from "@/lib/render/coc-extras";
+import { assertAttachmentSizes } from "@/lib/coc-inputs/server";
+import {
+  AttachmentUploadSchema, MeasurementEntrySchema, MAX_ATTACHMENTS,
+  type StoredAttachment,
+} from "@/lib/coc-inputs/types";
 import { renderCOCPdf } from "@/lib/render/pdf-renderer";
 import { D365Service } from "@/lib/integrations/d365/service";
 import { TeamsService } from "@/lib/integrations/teams/service";
@@ -30,7 +36,10 @@ const createCocSchema = z.object({
   serialNumber: z.string().optional(),
   manualValues: z.record(z.string(), z.string()).optional(),
   signatureBase64: z.string().optional(),
+  measurements: z.array(MeasurementEntrySchema).max(500).optional(),
+  attachments: z.array(AttachmentUploadSchema).max(MAX_ATTACHMENTS).optional(),
 });
+
 
 export const GET = route(async (req) => {
   await requireSession();
@@ -50,6 +59,7 @@ export const POST = route(async (req) => {
 
   const body = await req.json();
   const parsed = createCocSchema.parse(body);
+  assertAttachmentSizes(parsed.attachments);
 
   const prodOrder = (parsed.productionOrder || "").trim() || (parsed.itemNumber || "").trim() || "PO-HSIN-" + Date.now();
   const itemNum = (parsed.itemNumber || "").trim() || prodOrder;
@@ -176,8 +186,30 @@ export const POST = route(async (req) => {
       isDraft: false,
       templateId: tplId,
       templateVersionId: tplVerId,
+      measurements: parsed.measurements,
+      attachments: parsed.attachments,
     });
-    await logProcessStep(doc.id, "RENDER", "OK", { byteLength: pdfBytes.length });
+    await logProcessStep(doc.id, "RENDER", "OK", {
+      byteLength: pdfBytes.length,
+      measurements: parsed.measurements?.length ?? 0,
+      attachments: parsed.attachments?.length ?? 0,
+    });
+
+    // Store every captured supplier document individually as well (traceability / re-use)
+    const storedAttachments: StoredAttachment[] = [];
+    const atts = parsed.attachments ?? [];
+    for (let i = 0; i < atts.length; i++) {
+      const a = atts[i];
+      const entry: StoredAttachment = { index: i, name: a.name, caption: a.caption, mimeType: a.mimeType, storagePath: null, pageCount: 0, sizeBytes: Math.floor((a.dataBase64.length * 3) / 4) };
+      try {
+        const single = await attachmentToPdf(a, { cocNumber, productionOrder: prodOrder, itemNumber: itemNum, serialNumber: parsed.serialNumber }, i, atts.length);
+        entry.pageCount = single.pageCount;
+        entry.storagePath = await uploadAttachmentPdf(cocNumber, i, a.name, single.bytes);
+      } catch (attErr) {
+        logger.warn("Attachment storage failed", { cocNumber, index: i, error: (attErr as Error).message });
+      }
+      storedAttachments.push(entry);
+    }
 
     // Step 4: Storage / SharePoint Upload
     let storagePath: string | null = null;
@@ -255,6 +287,32 @@ export const POST = route(async (req) => {
       if (valueRows.length > 0) {
         await sb.from("coc_document_values").upsert(valueRows, { onConflict: "coc_document_id,field_name" });
       }
+    }
+
+    // Snapshot of the admin-defined page 2+ data and the captured documents
+    const snapshotRows: Array<Record<string, unknown>> = [];
+    if (parsed.measurements?.length) {
+      const nok = parsed.measurements.filter((m) => m.status === "NOK").length;
+      snapshotRows.push({
+        coc_document_id: doc.id,
+        field_name: "__measurements",
+        source_type: "MANUAL",
+        value_text: `${parsed.measurements.length} value(s)${nok ? `, ${nok} out of tolerance` : ""}`,
+        value_json: parsed.measurements,
+      });
+    }
+    if (storedAttachments.length) {
+      snapshotRows.push({
+        coc_document_id: doc.id,
+        field_name: "__attachments",
+        source_type: "MANUAL",
+        value_text: `${storedAttachments.length} document(s)`,
+        value_json: storedAttachments,
+      });
+    }
+    if (snapshotRows.length) {
+      const { error: snapErr } = await sb.from("coc_document_values").upsert(snapshotRows, { onConflict: "coc_document_id,field_name" });
+      if (snapErr) logger.warn("Could not store measurement/attachment snapshot", { error: snapErr.message });
     }
 
     // Finalize document status

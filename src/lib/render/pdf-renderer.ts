@@ -23,6 +23,30 @@ export interface RenderContext {
   isDraft?: boolean;
   templateId?: string;
   templateVersionId?: string;
+  /** Manual data for template pages 2+ (admin-defined fields) */
+  measurements?: MeasurementEntry[];
+  /** Captured supplier documents / test reports merged at the end of the PDF */
+  attachments?: AttachmentUpload[];
+}
+
+import { appendCocExtras } from "@/lib/render/coc-extras";
+import type { AttachmentUpload, MeasurementEntry } from "@/lib/coc-inputs/types";
+
+async function finalizeWithExtras(pdfDoc: PDFDocument, context: RenderContext, templateJson: unknown): Promise<Uint8Array> {
+  await appendCocExtras(
+    pdfDoc,
+    {
+      cocNumber: context.cocNumber,
+      productionOrder: context.productionOrder,
+      itemNumber: context.itemNumber,
+      serialNumber: context.serialNumber,
+      isDraft: context.isDraft,
+      measurements: context.measurements,
+      attachments: context.attachments,
+    },
+    templateJson,
+  );
+  return await pdfDoc.save();
 }
 
 import { supabaseAdmin, Buckets } from "@/lib/db/supabase-admin";
@@ -488,7 +512,7 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
         }
       }
 
-      return await pdfDoc.save();
+      return await finalizeWithExtras(pdfDoc, context, templateJson);
     } catch (e) {
       console.warn("Template PDF load failed, falling back to full vector render:", e);
     }
@@ -641,5 +665,5 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
     });
   }
 
-  return await pdfDoc.save();
+  return await finalizeWithExtras(pdfDoc, context, templateJson);
 }
