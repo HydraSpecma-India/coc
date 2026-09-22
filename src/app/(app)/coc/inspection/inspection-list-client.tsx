@@ -21,6 +21,11 @@ interface Row {
   customerName: string;
   created_at: string;
   mine: boolean;
+  yourTurn: boolean;
+  stepIndex: number;
+  stepCount: number;
+  stepName: string;
+  stepRoles: string[];
   workflow: WorkflowInfo;
 }
 
@@ -37,6 +42,7 @@ export function InspectionListClient({ canInspect }: { canInspect: boolean }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  const [onlyMine, setOnlyMine] = useState(true);
   const [now, setNow] = useState(0);
 
   const load = useCallback(async (which: "pending" | "rejected") => {
@@ -70,12 +76,14 @@ export function InspectionListClient({ canInspect }: { canInspect: boolean }) {
   };
 
   const needle = q.trim().toLowerCase();
+  const turnCount = rows.filter((r) => r.yourTurn).length;
   const shown = rows.filter(
     (r) =>
-      !needle ||
+      (tab !== "pending" || !onlyMine || r.yourTurn || r.mine) &&
+      (!needle ||
       [r.production_order, r.item_number, r.serial_number, r.sales_order, r.customer_po, r.customerName, r.workflow.submittedBy?.name, r.workflow.submittedBy?.email]
         .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(needle)),
+        .some((v) => String(v).toLowerCase().includes(needle))),
   );
 
   return (
@@ -84,8 +92,8 @@ export function InspectionListClient({ canInspect }: { canInspect: boolean }) {
         title="Pending Inspection"
         description={
           canInspect
-            ? "COCs prepared by production that wait for your quality inspection. Open one to enter the inspection data, sign and issue it."
-            : "COCs you and your colleagues sent to quality. They are issued by the quality inspector."
+            ? "COCs in a workflow. “Your step” means you do the current step – open it, enter the data and complete the step or sign and issue."
+            : "COCs in a workflow – the ones you sent and the ones waiting for your step."
         }
         actions={
           <Button variant="outline" size="sm" onClick={() => load(tab)} className="gap-1.5">
@@ -110,6 +118,12 @@ export function InspectionListClient({ canInspect }: { canInspect: boolean }) {
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-400" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search order, item, serial, user…" className="pl-8" />
         </div>
+        {tab === "pending" && (
+          <label className="inline-flex items-center gap-1.5 text-xs text-ink-700">
+            <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
+            Only my steps &amp; my submissions {turnCount ? `(${turnCount} for you)` : ""}
+          </label>
+        )}
         <Badge tone={tab === "pending" ? "warning" : "neutral"}>{shown.length}</Badge>
       </div>
 
@@ -133,6 +147,7 @@ export function InspectionListClient({ canInspect }: { canInspect: boolean }) {
                         <span className="font-mono text-sm font-bold text-ink-900">{r.production_order}</span>
                         <Badge tone="info">{r.company}</Badge>
                         {issuing && <Badge tone="brand">Being issued…</Badge>}
+                        {tab === "pending" && r.yourTurn && !issuing && <Badge tone="success">Your step</Badge>}
                         {r.mine && <Badge tone="neutral">Sent by you</Badge>}
                       </div>
                       <div className="mt-0.5 truncate text-xs text-ink-600">
@@ -151,6 +166,12 @@ export function InspectionListClient({ canInspect }: { canInspect: boolean }) {
                     <div className="col-span-2 sm:col-span-3"><dt className="text-ink-400">Customer</dt><dd className="truncate text-ink-800">{r.customerName || "—"}</dd></div>
                   </dl>
 
+                  {tab === "pending" && (
+                    <div className="rounded-md border border-ink-200 bg-ink-50 px-2 py-1 text-[11px] text-ink-700">
+                      Step {r.stepIndex + 1} of {r.stepCount}: <strong>{r.stepName}</strong>
+                      {r.stepRoles.length ? ` · ${r.stepRoles.join(", ")}` : ""}
+                    </div>
+                  )}
                   <div className="text-[11px] text-ink-500">
                     {r.workflow.ruleName} · sent by <strong className="text-ink-700">{r.workflow.submittedBy?.name || r.workflow.submittedBy?.email}</strong> · {fmt(r.workflow.submittedAt)}
                   </div>
@@ -171,8 +192,8 @@ export function InspectionListClient({ canInspect }: { canInspect: boolean }) {
                       </Button>
                     )}
                     <Link href={`/coc/inspection/${r.id}`}>
-                      <Button size="sm" className={`gap-1.5 text-xs ${tab === "pending" && canInspect ? "bg-brand-500 hover:bg-brand-600 text-ink-900 border-brand-500" : ""}`} variant={tab === "pending" && canInspect ? "primary" : "outline"}>
-                        <ClipboardCheck className="h-3.5 w-3.5" /> {tab === "pending" && canInspect ? "Inspect & issue" : "View"}
+                      <Button size="sm" className={`gap-1.5 text-xs ${tab === "pending" && r.yourTurn ? "bg-brand-500 hover:bg-brand-600 text-ink-900 border-brand-500" : ""}`} variant={tab === "pending" && r.yourTurn ? "primary" : "outline"}>
+                        <ClipboardCheck className="h-3.5 w-3.5" /> {tab === "pending" && r.yourTurn ? (r.stepIndex === r.stepCount - 1 ? "Sign & issue" : "Open step") : "View"}
                       </Button>
                     </Link>
                   </div>

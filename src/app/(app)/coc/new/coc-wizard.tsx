@@ -276,8 +276,13 @@ export function CocWizard({
   /** Returns a list of problems that block leaving step 2. */
   const step2Problems = (): string[] => {
     const problems: string[] = [];
-    // inspection workflow: quality completes the data entry, production only prepares the COC
-    if (workflowPending) return problems;
+    // workflow: step 1 only has to complete its own pages – the next steps do the rest
+    if (workflowPending) {
+      const own = missingRequired(step1Sections, measureValues);
+      if (own.length) problems.push(`${own.length} required field(s) missing: ${own.slice(0, 4).map((f) => f.label).join(", ")}`);
+      if (workflowMatch?.canStart === false) problems.push(`Step 1 of "${workflowRule?.name}" is done by ${wfFirst?.roles.join(", ")}`);
+      return problems;
+    }
     const missing = missingRequired(inputConfig.sections, measureValues);
     if (missing.length) problems.push(`${missing.length} required field(s) missing: ${missing.slice(0, 4).map((f) => f.label).join(", ")}${missing.length > 4 ? "…" : ""}`);
     if (capturedDocs.length < attachmentsNeeded) problems.push(`Capture at least ${attachmentsNeeded} supplier document(s) (${capturedDocs.length} added)`);
@@ -310,7 +315,7 @@ export function CocWizard({
     setStep(target);
   };
 
-  const extrasPayload = () => (!productionEntersData ? { measurements: [], attachments: [], measurementValues: {} as Record<string, string> } : {
+  const extrasPayload = () => ({
     measurements: toMeasurementEntries(inputConfig.sections, measureValues),
     attachments: [...photoUploads(inputConfig.sections, measureValues), ...toAttachmentUploads(capturedDocs)],
     // values stamped on the template – after each field's print format (e.g. "<1 mm")
@@ -446,24 +451,37 @@ export function CocWizard({
   const [searchResults, setSearchResults] = useState<D365ProductionOrder[]>([]);
   const [selectedPO, setSelectedPO] = useState<D365ProductionOrder | null>(null);
 
-  // Quality inspection workflow (admin setting per item number): production prepares, quality issues
+  // COC workflow (admin: System Settings → Workflow, per template + part number): step 1 is done here
   const [workflowMatch, setWorkflowMatch] = useState<{
     key: string;
     applies: boolean;
-    rule?: { id: string; name: string; instructions: string; productionCanEnterData: boolean };
+    canStart?: boolean;
+    rule?: {
+      id: string;
+      name: string;
+      instructions: string;
+      firstStep: { name: string; roles: string[]; pages: number[]; attachments: boolean; orderData: boolean; instructions?: string };
+      nextSteps: Array<{ name: string; roles: string[] }>;
+    };
   } | null>(null);
   const [workflowNote, setWorkflowNote] = useState("");
   const wfItem = selectedPO?.ItemNumber?.trim() || "";
   const wfCompany = (selectedPO?.dataAreaId || "").toUpperCase();
-  const wfKey = wfItem ? `${wfItem}|${wfCompany}` : "";
+  const wfKey = wfItem ? `${wfItem}|${wfCompany}|${selectedTemplateId}` : "";
   useEffect(() => {
     if (!wfKey) return;
     let active = true;
-    const [item, comp] = wfKey.split("|");
-    api<{ ok: boolean; applies: boolean; rule?: { id: string; name: string; instructions: string; productionCanEnterData: boolean } }>(
-      `/api/workflow/match?itemNumber=${encodeURIComponent(item)}&company=${encodeURIComponent(comp)}`,
+    const [item, comp, tpl] = wfKey.split("|");
+    api<{ ok: boolean; applies: boolean; canStart?: boolean; rule?: {
+      id: string;
+      name: string;
+      instructions: string;
+      firstStep: { name: string; roles: string[]; pages: number[]; attachments: boolean; orderData: boolean; instructions?: string };
+      nextSteps: Array<{ name: string; roles: string[] }>;
+    } }>(
+      `/api/workflow/match?itemNumber=${encodeURIComponent(item)}&company=${encodeURIComponent(comp)}&templateId=${encodeURIComponent(tpl)}`,
     )
-      .then((r) => active && setWorkflowMatch({ key: wfKey, applies: Boolean(r.applies), rule: r.rule }))
+      .then((r) => active && setWorkflowMatch({ key: wfKey, applies: Boolean(r.applies), canStart: r.canStart !== false, rule: r.rule }))
       .catch(() => active && setWorkflowMatch({ key: wfKey, applies: false }));
     return () => {
       active = false;
@@ -471,7 +489,13 @@ export function CocWizard({
   }, [wfKey]);
   const workflowPending = Boolean(wfKey && workflowMatch?.key === wfKey && workflowMatch.applies);
   const workflowRule = workflowPending ? workflowMatch?.rule : undefined;
-  const productionEntersData = !workflowPending || workflowRule?.productionCanEnterData !== false;
+  const wfFirst = workflowRule?.firstStep;
+  const wfNextName = workflowRule?.nextSteps?.[0]?.name || "the next step";
+  const wfNextRoles = workflowRule?.nextSteps?.[0]?.roles?.join(" / ") || "Quality";
+  // sections production fills in step 1 (all sections when no workflow applies)
+  const step1Sections = !workflowPending ? inputConfig.sections : inputConfig.sections.filter((sec) => (wfFirst?.pages ?? []).includes(sec.pageNumber ?? 0));
+  const showOrderData = !workflowPending || wfFirst?.orderData !== false;
+  const showDocuments = !workflowPending || Boolean(wfFirst?.attachments);
 
   // Pagination states for Production Orders
   const [pageSize] = useState<number>(50);
@@ -1510,7 +1534,7 @@ export function CocWizard({
       });
 
       if (res.ok && res.pending) {
-        toast.success("Sent to Quality inspection", `${prodOrder} · ${manualFields.SerialNumber || ""} is waiting in Pending Inspection.`);
+        toast.success(`Sent to ${wfNextName}`, `${prodOrder} · ${manualFields.SerialNumber || ""} is waiting in Pending Inspection.`);
         router.push(`/coc/inspection`);
       } else if (res.ok) {
         toast.success(`Generated ${res.cocNumber} successfully!`);
@@ -1580,7 +1604,7 @@ export function CocWizard({
                 <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Sign
               </Button>
               <Button loading={generating} onClick={handleCreateCoc} className="flex-1 justify-center text-xs font-bold bg-brand-500 hover:bg-brand-600 text-ink-900">
-                {workflowPending ? <>Send to Quality <Send className="h-3.5 w-3.5 ml-1" /></> : <>Issue COC <FileCheck className="h-3.5 w-3.5 ml-1" /></>}
+                {workflowPending ? <>Send to next step <Send className="h-3.5 w-3.5 ml-1" /></> : <>Issue COC <FileCheck className="h-3.5 w-3.5 ml-1" /></>}
               </Button>
             </div>
           )
@@ -2845,14 +2869,18 @@ export function CocWizard({
             <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 flex items-start gap-2.5">
               <GitBranch className="h-4 w-4 shrink-0 mt-0.5 text-sky-700" />
               <div className="space-y-0.5">
-                <p className="font-semibold text-sm">Quality inspection workflow · {workflowRule?.name}</p>
-                <p>This item is inspected by Quality before the COC is issued. Check the order and customer data; {productionEntersData ? "the inspection fields below are optional – Quality completes them." : "Quality enters the inspection data."}</p>
-                {workflowRule?.instructions && <p className="italic">“{workflowRule.instructions}”</p>}
+                <p className="font-semibold text-sm">Workflow · {workflowRule?.name} · step 1: {wfFirst?.name}</p>
+                <p>
+                  You only prepare this COC{step1Sections.length ? " and fill the fields below" : ""}. Then it goes to <strong>{wfNextName}</strong> ({wfNextRoles})
+                  {workflowRule && workflowRule.nextSteps.length > 1 ? ` and ${workflowRule.nextSteps.length - 1} more step(s)` : ""}.
+                </p>
+                {(wfFirst?.instructions || workflowRule?.instructions) && <p className="italic">“{wfFirst?.instructions || workflowRule?.instructions}”</p>}
+                {workflowMatch?.canStart === false && <p className="font-semibold text-red-700">Step 1 is done by {wfFirst?.roles.join(", ")} – you cannot start this COC.</p>}
               </div>
             </div>
           )}
           {/* Part & Order References Box */}
-          <Card>
+          {showOrderData && <Card>
             <CardHeader
               title="1. Order & Customer Part Identification"
               description="Verify customer part mapping and purchase order reference details as printed on the official COC."
@@ -2938,10 +2966,10 @@ export function CocWizard({
                 </div>
               </div>
             </CardBody>
-          </Card>
+          </Card>}
 
           {/* Admin-defined data entry for template pages 2+ (manual / QR) */}
-          {!productionEntersData ? null : inputConfigLoading ? (
+          {workflowPending && !step1Sections.length ? null : inputConfigLoading ? (
             <div className="rounded-lg border border-ink-200 bg-white p-4 text-xs text-ink-500">Loading template data fields…</div>
           ) : inputConfig.sections.length > 0 ? (
             <>
@@ -2951,7 +2979,7 @@ export function CocWizard({
                 <span className="hidden sm:inline text-[11px] text-ink-500">Page 1 comes from D365FO · these pages are filled here</span>
               </div>
               <MeasurementSections
-                sections={inputConfig.sections}
+                sections={step1Sections}
                 values={measureValues}
                 onChange={setMeasureValues}
                 showErrors={showStep2Errors}
@@ -2961,7 +2989,7 @@ export function CocWizard({
             <MeasurementEmptyHint canManage={canManageTemplates} templateId={selectedTemplate?.id} />
           )}
 
-          {productionEntersData && inputConfig.attachments.enabled && (
+          {showDocuments && inputConfig.attachments.enabled && (
             <DocumentCapture
               settings={inputConfig.attachments}
               docs={capturedDocs}
@@ -3079,8 +3107,8 @@ export function CocWizard({
             <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 flex items-start gap-2.5">
               <GitBranch className="h-4 w-4 shrink-0 mt-0.5 text-sky-700" />
               <div className="space-y-0.5">
-                <p className="font-semibold text-sm">Quality inspection workflow · {workflowRule?.name}</p>
-                <p>No signature is needed from production – the Quality inspector signs when issuing the COC. Continue to Review.</p>
+                <p className="font-semibold text-sm">Workflow · {workflowRule?.name}</p>
+                <p>No signature is needed in step 1 – the COC is signed in the last step of the workflow. Continue to Review.</p>
                 {workflowRule?.instructions && <p className="italic">“{workflowRule.instructions}”</p>}
               </div>
             </div>
@@ -3338,7 +3366,7 @@ export function CocWizard({
                 className="bg-brand-500 hover:bg-brand-600 text-ink-900 font-semibold gap-2 border-brand-500 disabled:opacity-50"
               >
                 {workflowPending ? <Send className="h-4 w-4" /> : <FileCheck className="h-4 w-4" />}
-                {workflowPending ? "Send to Quality Inspection" : "Generate & Issue Official COC"}
+                {workflowPending ? `Send to ${wfNextName}` : "Generate & Issue Official COC"}
               </Button>
             }
           />
@@ -3367,13 +3395,17 @@ export function CocWizard({
             <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 flex items-start gap-2.5">
               <GitBranch className="h-4 w-4 shrink-0 mt-0.5 text-sky-700" />
               <div className="space-y-0.5">
-                <p className="font-semibold text-sm">Quality inspection workflow · {workflowRule?.name}</p>
-                <p>“Send to Quality Inspection” puts this COC in Pending Inspection. Quality inspects, signs and issues it – the COC number is assigned then.</p>
+                <p className="font-semibold text-sm">Workflow · {workflowRule?.name}</p>
+                <p>
+                  “Send to {wfNextName}” puts this COC in Pending Inspection:{" "}
+                  {workflowRule?.nextSteps.map((st, i) => `${i + 2}. ${st.name}${st.roles.length ? ` (${st.roles.join(" / ")})` : ""}`).join(" → ")}.
+                  The COC number is assigned when it is issued.
+                </p>
                 {workflowRule?.instructions && <p className="italic">“{workflowRule.instructions}”</p>}
               </div>
             </div>
           )}
-                <Field label="Note for Quality (optional)">
+                <Field label="Note for the next step (optional)">
                   <Textarea
                     rows={2}
                     value={workflowNote}
@@ -3413,7 +3445,7 @@ export function CocWizard({
                 className="bg-brand-500 hover:bg-brand-600 text-ink-900 font-semibold gap-2 border-brand-500 disabled:opacity-50"
               >
                 {workflowPending ? <Send className="h-4 w-4" /> : <FileCheck className="h-4 w-4" />}
-                {workflowPending ? "Send to Quality Inspection" : "Confirm & Issue Official Certificate"}
+                {workflowPending ? `Send to ${wfNextName}` : "Confirm & Issue Official Certificate"}
               </Button>
             </div>
           </CardBody>

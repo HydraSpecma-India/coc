@@ -8,7 +8,8 @@ import { Errors } from "@/lib/errors";
 import { advanceProductSequence } from "@/lib/sequences/repository";
 import { createCocSchema, runIssuePipeline, uuidOrNull } from "@/lib/coc/issue";
 import { getWorkflowConfig, saveWorkflowPayload } from "@/lib/workflow/server";
-import { canIssueDirectly, matchWorkflowRule, type WorkflowInfo } from "@/lib/workflow/types";
+import { canIssueDirectly, matchWorkflowRule, pagesForStep, roleMatchesStep, stepsOf, type WorkflowInfo } from "@/lib/workflow/types";
+import { mergeStepData, pagesIn } from "@/lib/workflow/merge";
 
 export const GET = route(async (req) => {
   await requireSession();
@@ -145,8 +146,12 @@ export const POST = route(async (req) => {
   };
 
   // Inspection workflow: prepared by production, issued by quality
-  const rule = matchWorkflowRule(await getWorkflowConfig(), itemNum, companyCode);
+  const rule = matchWorkflowRule(await getWorkflowConfig(), itemNum, companyCode, tplId);
   if (rule && !canIssueDirectly(rule, session.user.role)) {
+    const steps = stepsOf(rule);
+    if (!roleMatchesStep(steps[0], session.user.role, true)) {
+      throw Errors.forbidden(`start "${rule.name}" – step 1 is done by ${steps[0].roles.join(", ")}`);
+    }
     const now = new Date().toISOString();
     const who = session.user.name || session.user.email || "User";
     const workflow: WorkflowInfo = {
@@ -154,11 +159,26 @@ export const POST = route(async (req) => {
       ruleId: rule.id,
       ruleName: rule.name,
       instructions: rule.instructions,
+      steps,
+      currentStep: 1,
       submittedBy: { id: session.user.id, email: session.user.email, name: session.user.name },
       submittedAt: now,
       note: parsed.workflowNote?.trim() || undefined,
-      history: [{ at: now, by: who, action: "SUBMITTED", note: parsed.workflowNote?.trim() || undefined }],
+      history: [{ at: now, by: who, action: "SUBMITTED", step: steps[0].name, note: parsed.workflowNote?.trim() || undefined }],
     };
+    // step 1 may only fill its own pages / documents – the rest is done by the next steps
+    const incomingMeasurements = parsed.measurements ?? [];
+    const firstStep = mergeStepData(
+      {
+        measurements: [],
+        attachments: [],
+        // page-1 values only – data-entry values come from the fields this step is allowed to fill
+        manualValues: Object.fromEntries(Object.entries(parsed.manualValues ?? {}).filter(([k]) => !incomingMeasurements.some((m) => m.key === k))),
+      },
+      { measurements: incomingMeasurements, attachments: parsed.attachments ?? [], measurementValues: parsed.manualValues ?? {} },
+      pagesForStep(steps, 0, pagesIn(incomingMeasurements)),
+      steps[0].attachments,
+    );
     const doc = await createCocDocument({ ...docInput, reserveNumber: false, d365_context_json: { ...d365Context, workflow } });
     try {
       await saveWorkflowPayload(doc.id, {
@@ -172,7 +192,9 @@ export const POST = route(async (req) => {
         templateId: tplId,
         templateVersionId: tplVerId,
         templateVersionNumber: tplVerNum,
-        ...(rule.productionCanEnterData ? {} : { measurements: [], attachments: [] }),
+        measurements: firstStep.measurements,
+        attachments: firstStep.attachments,
+        manualValues: firstStep.manualValues,
       });
     } catch (e) {
       await sb.from("coc_documents").delete().eq("id", doc.id);

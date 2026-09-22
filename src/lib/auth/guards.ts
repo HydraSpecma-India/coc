@@ -35,10 +35,10 @@ export async function requirePermission(resource: string, action: PermissionActi
 }
 
 /** Throws 403 unless the signed-in user has the Admin role (used for destructive template actions). */
-export async function requireAdmin(): Promise<AppSession> {
+export async function requireAdmin(what = "Only administrators can deactivate or delete templates"): Promise<AppSession> {
   const session = await requireSession();
   if (String(session.user.role || "").toLowerCase() !== "admin") {
-    throw Errors.forbidden("Only administrators can deactivate or delete templates");
+    throw Errors.forbidden(what);
   }
   return session;
 }

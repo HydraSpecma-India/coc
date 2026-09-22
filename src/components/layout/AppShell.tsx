@@ -51,7 +51,7 @@ const nav = (role: Role, capabilities: string[] | undefined, inspection: { enabl
       { href: "/admin/sharepoint", label: "SharePoint Configuration", short: "SharePoint", icon: FolderCog, show: can(role, "sharepoint:read", capabilities) },
       { href: "/admin/users", label: "Users & Roles", short: "Users", icon: Users, show: can(role, "users:read", capabilities) || can(role, "roles:read", capabilities) },
       { href: "/admin/signatures", label: "Signatures", short: "Signatures", icon: PenTool, show: can(role, "signatures:read", capabilities) },
-      { href: "/admin/audit", label: "Audit Logs", short: "Audit", icon: ScrollText, show: can(role, "audit:read", capabilities) },
+      { href: "/admin/audit", label: "Audit Logs", short: "Audit", icon: ScrollText, show: String(role || "").toLowerCase() === "admin" },
       { href: "/admin/settings", label: "System Settings", short: "Settings", icon: Settings, show: can(role, "settings:read", capabilities) },
     ],
   },

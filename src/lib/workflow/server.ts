@@ -1,4 +1,8 @@
 import "server-only";
+import { companyAllowed, sessionCan, type AppSession } from "@/lib/auth/guards";
+import { getCocDocumentById } from "@/lib/db/repositories/coc";
+import { Errors } from "@/lib/errors";
+import { currentStepIndex, roleMatchesStep, stepsOfInfo, type WorkflowStep } from "./types";
 import { supabaseAdmin } from "@/lib/db/supabase-admin";
 import { getSetting, setSetting } from "@/lib/db/repositories/settings";
 import type { COCDocumentRow } from "@/lib/db/repositories/coc";
@@ -130,12 +134,66 @@ export async function transitionWorkflow(
   if (!wf) return null;
   const nextWf = { ...wf, ...patch, history: event ? [...(wf.history || []), event] : wf.history || [] };
   const ctx = { ...((doc.d365_context_json || {}) as Record<string, unknown>), workflow: nextWf };
-  const { data, error } = await supabaseAdmin()
+  let q = supabaseAdmin()
     .from("coc_documents")
     .update({ d365_context_json: ctx, ...docPatch })
     .eq("id", doc.id)
-    .eq("d365_context_json->workflow->>state", from)
-    .select("*");
+    .eq("d365_context_json->workflow->>state", from);
+  // the step must still be the one the user saw (two people cannot complete the same step)
+  if (typeof wf.currentStep === "number") q = q.eq("d365_context_json->workflow->>currentStep", String(wf.currentStep));
+  const { data, error } = await q.select("*");
   if (error) throw error;
   return ((data || []) as COCDocumentRow[])[0] ?? null;
+}
+
+/* ── loading a COC in the workflow for the signed-in user ─────────────────────── */
+
+
+export interface LoadedInspection {
+  doc: COCDocumentRow;
+  wf: WorkflowInfo;
+  company: string;
+  steps: WorkflowStep[];
+  stepIndex: number;
+  step: WorkflowStep;
+  isFinal: boolean;
+  /** the signed-in user does the current step */
+  canAct: boolean;
+  mine: boolean;
+  canComplete: boolean;
+  canCreate: boolean;
+}
+
+export async function loadInspection(id: string, session: AppSession): Promise<LoadedInspection> {
+  const found = await getCocDocumentById(id);
+  const wf = found ? workflowOf(found.doc) : null;
+  if (!found || !wf) throw Errors.notFound("Inspection");
+  const doc = found.doc;
+  const company = String((doc.d365_context_json as Record<string, unknown> | null)?.dataAreaId || doc.customer_account || "HSIN").toUpperCase();
+  if (!companyAllowed(session, company)) throw Errors.forbidden(`company ${company}`);
+  const [canComplete, canCreate] = await Promise.all([sessionCan(session, "completeCoc"), sessionCan(session, "createCoc")]);
+  const steps = stepsOfInfo(wf);
+  const stepIndex = currentStepIndex(wf);
+  const step = steps[stepIndex];
+  const open = wf.state === "PENDING_INSPECTION" || wf.state === "ISSUING";
+  return {
+    doc,
+    wf,
+    company,
+    steps,
+    stepIndex,
+    step,
+    isFinal: stepIndex === steps.length - 1,
+    canAct: open && roleMatchesStep(step, session.user.role, canComplete),
+    mine: (wf.submittedBy?.email || "").toLowerCase() === (session.user.email || "").toLowerCase(),
+    canComplete,
+    canCreate,
+  };
+}
+
+/** Is it this user's turn on a pending COC (for the list + menu badge)? */
+export function isUsersTurn(wf: WorkflowInfo, role: string | undefined | null, canComplete: boolean): boolean {
+  if (wf.state !== "PENDING_INSPECTION") return false;
+  const steps = stepsOfInfo(wf);
+  return roleMatchesStep(steps[currentStepIndex(wf)], role, canComplete);
 }

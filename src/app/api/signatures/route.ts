@@ -1,6 +1,7 @@
 import { route, json } from "@/lib/api/handler";
 import { requireSession } from "@/lib/auth/guards";
 import { supabaseAdmin, Buckets } from "@/lib/db/supabase-admin";
+import { getOwnSignature, listOwnSignatures, signatureOwnerId } from "@/lib/signature/stored";
 import { z } from "zod";
 
 const createSignatureSchema = z.object({
@@ -15,136 +16,71 @@ const patchSignatureSchema = z.object({
   label: z.string().optional(),
 });
 
+/** Stored signatures are personal: every user only sees and uses their own. */
 export const GET = route(async () => {
-  await requireSession();
-  const sb = supabaseAdmin();
-  const { data, error } = await sb
-    .from("coc_signatures")
-    .select("*")
-    .order("is_default", { ascending: false })
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-
-  const signatures = await Promise.all(
-    (data || []).map(async (sig) => {
-      let dataUrl: string | null = null;
-      let signedUrl: string | null = null;
-      try {
-        if (sig.storage_path) {
-          const { data: fileBlob } = await sb.storage
-            .from(Buckets.signatures)
-            .download(sig.storage_path);
-          if (fileBlob) {
-            const buf = Buffer.from(await fileBlob.arrayBuffer());
-            dataUrl = `data:${sig.mime_type || "image/png"};base64,${buf.toString("base64")}`;
-          }
-          const { data: signed } = await sb.storage
-            .from(Buckets.signatures)
-            .createSignedUrl(sig.storage_path, 86400);
-          signedUrl = signed?.signedUrl || null;
-        }
-      } catch (e) {
-        console.warn(`Error loading signature ${sig.id}:`, e);
-      }
-      return {
-        ...sig,
-        dataUrl: dataUrl || signedUrl,
-        signedUrl,
-      };
-    })
-  );
-
-  return json({ ok: true, signatures });
+  const session = await requireSession();
+  return json({ ok: true, signatures: await listOwnSignatures(session.user.id) });
 });
 
 export const POST = route(async (req) => {
   const session = await requireSession();
-  const body = await req.json();
-  const parsed = createSignatureSchema.parse(body);
+  const owner = signatureOwnerId(session.user.id);
+  const parsed = createSignatureSchema.parse(await req.json());
 
   const cleanBase64 = parsed.base64Png.replace(/^data:image\/\w+;base64,/, "");
   const buffer = Buffer.from(cleanBase64, "base64");
-  const fileName = `${session.user.id || "user"}_${Date.now()}.png`;
-
+  const fileName = `${owner}_${Date.now()}.png`;
   const sb = supabaseAdmin();
 
-  if (parsed.isDefault) {
-    // Unset other default signatures
-    await sb
-      .from("coc_signatures")
-      .update({ is_default: false })
-      .neq("id", "00000000-0000-0000-0000-000000000000");
-  }
+  const { count } = await sb.from("coc_signatures").select("id", { count: "exact", head: true }).eq("user_id", owner);
+  const makeDefault = parsed.isDefault || !count;
+  if (makeDefault) await sb.from("coc_signatures").update({ is_default: false }).eq("user_id", owner);
 
-  const { error: uploadErr } = await sb.storage.from(Buckets.signatures).upload(fileName, buffer, {
-    contentType: "image/png",
-    upsert: true,
-  });
-
+  const { error: uploadErr } = await sb.storage.from(Buckets.signatures).upload(fileName, buffer, { contentType: "image/png", upsert: true });
   if (uploadErr) throw uploadErr;
 
   const { data, error } = await sb
     .from("coc_signatures")
-    .insert({
-      user_id: session.user.id && /^[0-9a-f-]{36}$/i.test(session.user.id) ? session.user.id : "00000000-0000-0000-0000-000000000001",
-      label: parsed.label,
-      storage_path: fileName,
-      mime_type: "image/png",
-      is_default: parsed.isDefault,
-    })
+    .insert({ user_id: owner, label: parsed.label, storage_path: fileName, mime_type: "image/png", is_default: makeDefault })
     .select()
     .single();
-
   if (error) throw error;
-  const fullDataUrl = parsed.base64Png.startsWith("data:")
-    ? parsed.base64Png
-    : `data:image/png;base64,${parsed.base64Png}`;
+  const fullDataUrl = parsed.base64Png.startsWith("data:") ? parsed.base64Png : `data:image/png;base64,${parsed.base64Png}`;
   return json({ ok: true, signature: { ...data, dataUrl: fullDataUrl } }, { status: 201 });
 });
 
 export const PATCH = route(async (req) => {
-  await requireSession();
-  const body = await req.json();
-  const parsed = patchSignatureSchema.parse(body);
+  const session = await requireSession();
+  const owner = signatureOwnerId(session.user.id);
+  const parsed = patchSignatureSchema.parse(await req.json());
+  await getOwnSignature(parsed.id, owner);
 
   const sb = supabaseAdmin();
-
-  if (parsed.isDefault) {
-    await sb
-      .from("coc_signatures")
-      .update({ is_default: false })
-      .neq("id", parsed.id);
-  }
+  if (parsed.isDefault) await sb.from("coc_signatures").update({ is_default: false }).eq("user_id", owner).neq("id", parsed.id);
 
   const updates: Record<string, unknown> = {};
   if (parsed.isDefault !== undefined) updates.is_default = parsed.isDefault;
   if (parsed.label !== undefined) updates.label = parsed.label;
-
-  const { data, error } = await sb
-    .from("coc_signatures")
-    .update(updates)
-    .eq("id", parsed.id)
-    .select()
-    .single();
-
+  const { data, error } = await sb.from("coc_signatures").update(updates).eq("id", parsed.id).eq("user_id", owner).select().single();
   if (error) throw error;
   return json({ ok: true, signature: data });
 });
 
 export const DELETE = route(async (req) => {
-  await requireSession();
+  const session = await requireSession();
+  const owner = signatureOwnerId(session.user.id);
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return json({ ok: false, error: "Missing id" }, { status: 400 });
+  const sig = await getOwnSignature(id, owner);
 
   const sb = supabaseAdmin();
-  const { data: sig } = await sb.from("coc_signatures").select("storage_path").eq("id", id).maybeSingle();
-  if (sig?.storage_path) {
+  if (sig.storage_path) {
     try {
       await sb.storage.from(Buckets.signatures).remove([sig.storage_path]);
     } catch {
       // ignore storage cleanup failure
     }
   }
-  await sb.from("coc_signatures").delete().eq("id", id);
+  await sb.from("coc_signatures").delete().eq("id", id).eq("user_id", owner);
   return json({ ok: true });
 });

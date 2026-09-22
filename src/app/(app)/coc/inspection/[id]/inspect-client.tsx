@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ClipboardList, Eye, FileCheck, GitBranch, History, PenTool, Undo2, XCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, ClipboardList, CornerUpLeft, Eye, FileCheck, GitBranch, History, PenTool, Undo2, XCircle } from "lucide-react";
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Dialog, Field, PageHeader, Textarea } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
@@ -13,7 +13,7 @@ import { SignaturePicker } from "@/components/coc/SignaturePicker";
 import { PdfViewer } from "@/components/coc/PdfViewer";
 import { EMPTY_INPUT_CONFIG, formatPrinted, type TemplateInputConfig } from "@/lib/coc-inputs/types";
 import type { CreateCocInput } from "@/lib/coc/issue";
-import type { WorkflowInfo } from "@/lib/workflow/types";
+import { pagesForStep, type WorkflowInfo, type WorkflowStep } from "@/lib/workflow/types";
 
 interface InspectionData {
   document: {
@@ -34,6 +34,9 @@ interface InspectionData {
     created_at: string;
   };
   workflow: WorkflowInfo;
+  steps: WorkflowStep[];
+  stepIndex: number;
+  isFinal: boolean;
   payload: CreateCocInput | null;
   canInspect: boolean;
   canWithdraw: boolean;
@@ -86,6 +89,8 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [rejecting, setRejecting] = useState(false);
+  const [dialogMode, setDialogMode] = useState<"reject" | "withdraw" | "return">("reject");
+  const [completing, setCompleting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -116,7 +121,16 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
     if (previewUrl) URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
 
-  const attachmentsNeeded = inputConfig.attachments.enabled
+  const allPages = useMemo(() => Array.from(new Set(inputConfig.sections.map((sec) => sec.pageNumber ?? 0))), [inputConfig]);
+  const stepPages = useMemo(
+    () => (data ? pagesForStep(data.steps, data.stepIndex, allPages) : new Set<number>()),
+    [data, allPages],
+  );
+  const mySections = inputConfig.sections.filter((sec) => stepPages.has(sec.pageNumber ?? 0));
+  const otherSections = inputConfig.sections.filter((sec) => !stepPages.has(sec.pageNumber ?? 0));
+  const stepDoesDocuments = Boolean(data?.steps[data.stepIndex]?.attachments);
+
+  const attachmentsNeeded = stepDoesDocuments && inputConfig.attachments.enabled
     ? inputConfig.attachments.required ? Math.max(1, inputConfig.attachments.minCount) : inputConfig.attachments.minCount
     : 0;
 
@@ -137,10 +151,10 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
 
   const problems = (): string[] => {
     const out: string[] = [];
-    const missing = missingRequired(inputConfig.sections, values);
+    const missing = missingRequired(mySections, values);
     if (missing.length) out.push(`${missing.length} required field(s) missing: ${missing.slice(0, 4).map((f) => f.label).join(", ")}${missing.length > 4 ? "…" : ""}`);
     if (docs.length < attachmentsNeeded) out.push(`Capture at least ${attachmentsNeeded} supplier document(s)`);
-    if (!signature) out.push("Sign the certificate");
+    if (data?.isFinal && !signature) out.push("Sign the certificate");
     return out;
   };
 
@@ -198,10 +212,46 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
     }
   };
 
+  const completeStep = async () => {
+    const list = problems();
+    if (list.length) {
+      setShowErrors(true);
+      toast.error("Complete this step first", list.join(" • "));
+      window.setTimeout(() => document.querySelector<HTMLElement>("[data-missing='true']")?.scrollIntoView({ behavior: "smooth", block: "center" }), 250);
+      return;
+    }
+    setCompleting(true);
+    try {
+      const res = await api<{ ok: boolean; nextStep: string | null }>(`/api/workflow/inspections/${id}/step`, {
+        method: "POST",
+        json: { ...extras, note: note.trim() || undefined },
+      });
+      toast.success("Step completed", res.nextStep ? `Sent to “${res.nextStep}”.` : undefined);
+      router.push("/coc/inspection");
+    } catch (e) {
+      toast.error("Could not complete the step", (e as Error).message);
+      void load();
+    } finally {
+      setCompleting(false);
+    }
+  };
+
+  const openDialog = (mode: "reject" | "withdraw" | "return") => {
+    setDialogMode(mode);
+    setRejectReason("");
+    setRejectOpen(true);
+  };
+
   const reject = async (withdraw: boolean) => {
     if (rejectReason.trim().length < 3) return toast.error("Enter a reason (at least 3 characters)");
     setRejecting(true);
     try {
+      if (dialogMode === "return") {
+        const r = await api<{ ok: boolean; step: string }>(`/api/workflow/inspections/${id}/return`, { method: "POST", json: { reason: rejectReason.trim() } });
+        toast.success(`Sent back to “${r.step}”`);
+        router.push("/coc/inspection");
+        return;
+      }
       await api(`/api/workflow/inspections/${id}/reject`, { method: "POST", json: { reason: rejectReason.trim(), withdraw } });
       toast.success(withdraw ? "Submission withdrawn" : "COC rejected – production can create it again");
       router.push("/coc/inspection");
@@ -222,15 +272,19 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
   }
   if (!data) return <div className="p-6 text-sm text-ink-500">Loading inspection…</div>;
 
-  const { document: doc, workflow: wf, payload } = data;
+  const { document: doc, workflow: wf, payload, steps, stepIndex, isFinal } = data;
   const state = wf.state;
   const readOnly = !data.canInspect;
+  const step = steps[stepIndex];
+  const nextStep = steps[stepIndex + 1];
+  const open = state === "PENDING_INSPECTION" || state === "ISSUING";
   const wfLabel: Record<string, { text: string; tone: "warning" | "brand" | "danger" | "success" }> = {
-    PENDING_INSPECTION: { text: "Waiting for inspection", tone: "warning" },
+    PENDING_INSPECTION: { text: `Step ${stepIndex + 1} of ${steps.length}: ${step?.name ?? ""}`, tone: "warning" },
     ISSUING: { text: "Being issued", tone: "brand" },
     REJECTED: { text: "Rejected", tone: "danger" },
     ISSUED: { text: "Issued", tone: "success" },
   };
+  const filled = (key: string) => values[key]?.photo ? "Photo attached" : values[key]?.value || "";
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 pb-24">
@@ -238,10 +292,31 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
         <ArrowLeft className="h-3.5 w-3.5" /> Pending Inspection
       </Link>
       <PageHeader
-        title={`Quality inspection · ${doc.production_order}`}
+        title={`${open ? step?.name : "COC workflow"} · ${doc.production_order}`}
         description={`${doc.item_number || ""} ${doc.item_description ? `· ${doc.item_description}` : ""}`}
         actions={<Badge tone={wfLabel[state]?.tone ?? "neutral"}>{wfLabel[state]?.text ?? state}</Badge>}
       />
+
+      {/* workflow progress */}
+      <ol className="flex flex-wrap items-center gap-1.5 text-[11px]">
+        {steps.map((st, i) => {
+          const done = state === "ISSUED" || i < stepIndex;
+          const now = open && i === stepIndex;
+          return (
+            <li key={st.id} className="flex items-center gap-1.5">
+              <span
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 font-medium ${
+                  now ? "border-brand-500 bg-brand-50 text-brand-900" : done ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-ink-200 bg-white text-ink-500"
+                }`}
+              >
+                {done ? <CheckCircle2 className="h-3 w-3" /> : <span className="font-bold">{i + 1}</span>} {st.name}
+                {st.roles.length > 0 && <span className="opacity-70">· {st.roles.join("/")}</span>}
+              </span>
+              {i < steps.length - 1 && <ArrowRight className="h-3 w-3 text-ink-300" />}
+            </li>
+          );
+        })}
+      </ol>
 
       {state === "ISSUED" && doc.coc_number && (
         <Alert tone="success" title={`Issued as ${doc.coc_number}`}>
@@ -255,7 +330,7 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
       )}
 
       <Card>
-        <CardHeader title="Prepared by production" description={`${wf.ruleName} · sent by ${wf.submittedBy?.name || wf.submittedBy?.email} · ${fmt(wf.submittedAt)}`} />
+        <CardHeader title="Order data (step 1)" description={`${wf.ruleName} · sent by ${wf.submittedBy?.name || wf.submittedBy?.email} · ${fmt(wf.submittedAt)}`} />
         <CardBody className="space-y-3">
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
             {[
@@ -285,27 +360,63 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
         </CardBody>
       </Card>
 
+      {open && step?.instructions && (
+        <div className="flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+          <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span><strong>{step.name}:</strong> {step.instructions}</span>
+        </div>
+      )}
+
+      {/* data from earlier steps (read only) */}
+      {otherSections.some((sec) => sec.fields.some((f) => filled(f.key))) && (
+        <Card>
+          <CardHeader title="Entered in other steps" description="Read only – each step changes only its own pages." />
+          <CardBody className="space-y-3">
+            {otherSections.map((sec) => {
+              const rows = sec.fields.filter((f) => filled(f.key));
+              if (!rows.length) return null;
+              return (
+                <div key={sec.id}>
+                  <div className="mb-1 text-[11px] font-semibold text-ink-700">{sec.title}</div>
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
+                    {rows.map((f) => (
+                      <div key={f.key} className="min-w-0">
+                        <dt className="truncate text-[11px] text-ink-400">{f.label}</dt>
+                        <dd className="truncate font-medium text-ink-900">{filled(f.key)}{f.unit && values[f.key]?.value && !values[f.key]?.photo ? ` ${f.unit}` : ""}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              );
+            })}
+            {!stepDoesDocuments && docs.length > 0 && (
+              <div className="text-[11px] text-ink-600">Supplier documents: {docs.map((d) => d.caption || d.name).join(", ")}</div>
+            )}
+          </CardBody>
+        </Card>
+      )}
+
       {readOnly ? (
-        <Alert tone="info" title={state === "PENDING_INSPECTION" ? "Waiting for Quality" : "Read only"}>
-          {state === "PENDING_INSPECTION"
-            ? "A quality inspector enters the inspection data, signs and issues this COC. You can withdraw it while it is waiting."
-            : "This inspection is closed."}
+        <Alert tone="info" title={open ? `Waiting for “${step?.name}”` : "Read only"}>
+          {open
+            ? `This step is done by ${step?.roles.length ? step.roles.join(", ") : "a user who may complete COCs"}.${data.canWithdraw ? " You can withdraw your submission while it is waiting." : ""}`
+            : "This workflow is closed."}
         </Alert>
       ) : (
         <>
-          {inputConfig.sections.length > 0 ? (
+          {mySections.length > 0 ? (
             <>
               <div className="flex items-center gap-2 px-1 pt-1">
                 <ClipboardList className="h-4 w-4 text-brand-600" />
-                <h3 className="text-sm font-semibold text-ink-900">Inspection data – template pages</h3>
+                <h3 className="text-sm font-semibold text-ink-900">{step?.name} – data entry</h3>
+                <span className="text-[11px] text-ink-500">pages {Array.from(stepPages).filter((p) => p > 0).sort((a, b) => a - b).join(", ") || "–"}</span>
               </div>
-              <MeasurementSections sections={inputConfig.sections} values={values} onChange={setValues} showErrors={showErrors} />
+              <MeasurementSections sections={mySections} values={values} onChange={setValues} showErrors={showErrors} />
             </>
           ) : (
-            <Alert tone="info">This template has no data-entry fields – check the order data and sign.</Alert>
+            <Alert tone="info">No template fields in this step{isFinal ? " – check the data and sign." : " – check the data and complete the step."}</Alert>
           )}
 
-          {(inputConfig.attachments.enabled || docs.length > 0) && (
+          {stepDoesDocuments && (
             <DocumentCapture
               settings={inputConfig.attachments.enabled ? inputConfig.attachments : { ...inputConfig.attachments, enabled: true, required: false, minCount: 0 }}
               docs={docs}
@@ -315,21 +426,34 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
           )}
 
           <Card>
-            <CardHeader title="Inspector signature" description="Your signature is stamped on the certificate when you issue it." />
-            <CardBody className="space-y-3">
-              <SignaturePicker userName={userName} onChange={setSignature} />
-              {showErrors && !signature && <div className="text-xs font-medium text-red-600" data-missing="true">Sign the certificate before issuing it.</div>}
-              <Field label="Inspection remark (optional, kept in the history)">
-                <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} />
-              </Field>
-            </CardBody>
+            {isFinal ? (
+              <>
+                <CardHeader title="Signature" description="Your own signature is stamped on the certificate when you issue it." />
+                <CardBody className="space-y-3">
+                  <SignaturePicker userName={userName} onChange={setSignature} />
+                  {showErrors && !signature && <div className="text-xs font-medium text-red-600" data-missing="true">Sign the certificate before issuing it.</div>}
+                  <Field label="Remark (optional, kept in the history)">
+                    <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} />
+                  </Field>
+                </CardBody>
+              </>
+            ) : (
+              <>
+                <CardHeader title="Hand over" description={`When you complete this step the COC goes to “${nextStep?.name}”${nextStep?.roles.length ? ` (${nextStep.roles.join(", ")})` : ""}.`} />
+                <CardBody>
+                  <Field label="Note for the next step (optional)">
+                    <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} />
+                  </Field>
+                </CardBody>
+              </>
+            )}
           </Card>
 
           {previewUrl && (
             <Card>
-              <CardHeader title="Preview" description="Draft preview – the COC number is assigned when you issue." />
+              <CardHeader title="Preview" description="Draft preview – the COC number is assigned when the COC is issued." />
               <CardBody>
-                <PdfViewer src={previewUrl} title="Inspection preview" downloadName={`${doc.production_order}-preview.pdf`} />
+                <PdfViewer src={previewUrl} title="Preview" downloadName={`${doc.production_order}-preview.pdf`} />
               </CardBody>
             </Card>
           )}
@@ -345,7 +469,7 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
                 <li key={i} className="flex items-start gap-2">
                   <History className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-400" />
                   <span>
-                    <strong>{h.action.replace(/_/g, " ").toLowerCase()}</strong> · {h.by} · {fmt(h.at)}
+                    <strong>{h.action.replace(/_/g, " ").toLowerCase()}</strong>{h.step ? ` (${h.step})` : ""} · {h.by} · {fmt(h.at)}
                     {h.note ? <span className="text-ink-600"> — {h.note}</span> : null}
                   </span>
                 </li>
@@ -359,21 +483,32 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
       {(data.canInspect || data.canWithdraw) && (
         <div className="sticky bottom-0 z-20 -mx-3 flex flex-wrap items-center justify-end gap-2 border-t border-ink-200 bg-white/95 px-3 py-2.5 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
           {data.canWithdraw && !data.canInspect && (
-            <Button variant="outline" onClick={() => { setRejectReason(""); setRejectOpen(true); }} className="gap-1.5">
+            <Button variant="outline" onClick={() => openDialog("withdraw")} className="gap-1.5">
               <Undo2 className="h-4 w-4" /> Withdraw
             </Button>
           )}
           {data.canInspect && (
             <>
-              <Button variant="outline" onClick={() => { setRejectReason(""); setRejectOpen(true); }} className="gap-1.5 text-red-700 border-red-200 hover:bg-red-50">
+              <Button variant="outline" onClick={() => openDialog("reject")} className="gap-1.5 text-red-700 border-red-200 hover:bg-red-50">
                 <XCircle className="h-4 w-4" /> Reject
               </Button>
+              {stepIndex >= 2 && (
+                <Button variant="outline" onClick={() => openDialog("return")} className="gap-1.5">
+                  <CornerUpLeft className="h-4 w-4" /> Send back
+                </Button>
+              )}
               <Button variant="outline" loading={previewing} onClick={preview} className="gap-1.5">
                 <Eye className="h-4 w-4" /> Preview
               </Button>
-              <Button loading={issuing} onClick={issue} className="gap-1.5 bg-brand-500 hover:bg-brand-600 text-ink-900 border-brand-500 font-semibold">
-                {signature ? <FileCheck className="h-4 w-4" /> : <PenTool className="h-4 w-4" />} Issue COC
-              </Button>
+              {isFinal ? (
+                <Button loading={issuing} onClick={issue} className="gap-1.5 bg-brand-500 hover:bg-brand-600 text-ink-900 border-brand-500 font-semibold">
+                  {signature ? <FileCheck className="h-4 w-4" /> : <PenTool className="h-4 w-4" />} Issue COC
+                </Button>
+              ) : (
+                <Button loading={completing} onClick={completeStep} className="gap-1.5 bg-brand-500 hover:bg-brand-600 text-ink-900 border-brand-500 font-semibold">
+                  Complete step <ArrowRight className="h-4 w-4" />
+                </Button>
+              )}
             </>
           )}
         </div>
@@ -382,19 +517,21 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
       <Dialog
         open={rejectOpen}
         onClose={() => setRejectOpen(false)}
-        title={data.canInspect ? "Reject this COC" : "Withdraw from inspection"}
+        title={dialogMode === "return" ? `Send back to “${steps[stepIndex - 1]?.name ?? ""}”` : dialogMode === "withdraw" ? "Withdraw from the workflow" : "Reject this COC"}
         footer={
           <>
             <Button variant="outline" onClick={() => setRejectOpen(false)}>Cancel</Button>
-            <Button variant="danger" loading={rejecting} onClick={() => reject(!data.canInspect)}>
-              {data.canInspect ? "Reject" : "Withdraw"}
+            <Button variant={dialogMode === "return" ? "primary" : "danger"} loading={rejecting} onClick={() => reject(dialogMode === "withdraw")}>
+              {dialogMode === "return" ? "Send back" : dialogMode === "withdraw" ? "Withdraw" : "Reject"}
             </Button>
           </>
         }
       >
         <div className="space-y-2 text-sm">
           <p className="text-ink-600">
-            The COC is cancelled and the serial number {doc.serial_number ? <strong>{doc.serial_number}</strong> : null} can be used again. Production sees the reason under “Rejected / withdrawn”.
+            {dialogMode === "return"
+              ? "The previous step gets the COC back with your reason and can correct its data."
+              : <>The COC is cancelled and the serial number {doc.serial_number ? <strong>{doc.serial_number}</strong> : null} can be used again. The reason is shown under “Rejected / withdrawn”.</>}
           </p>
           <Field label="Reason">
             <Textarea rows={3} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="e.g. Flatness point 3 out of tolerance – rework needed" />

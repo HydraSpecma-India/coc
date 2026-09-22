@@ -1,10 +1,9 @@
 import { route, json } from "@/lib/api/handler";
-import { requireRole, requireSession } from "@/lib/auth/guards";
+import { requireAdmin } from "@/lib/auth/guards";
 import { supabaseAdmin } from "@/lib/db/supabase-admin";
 
 export const GET = route(async (req) => {
-  const session = await requireSession();
-  requireRole(session, ["Admin", "Quality"]);
+  await requireAdmin("Only administrators can view the audit trail");
 
   const q = req.nextUrl.searchParams.get("q") || "";
   const sb = supabaseAdmin();

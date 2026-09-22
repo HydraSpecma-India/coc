@@ -1,13 +1,14 @@
 import { z } from "zod";
 import { route, json } from "@/lib/api/handler";
-import { companyAllowed, requireCapability } from "@/lib/auth/guards";
-import { getCocDocumentById } from "@/lib/db/repositories/coc";
+import { requireSession } from "@/lib/auth/guards";
 import { assertAttachmentSizes } from "@/lib/coc-inputs/server";
 import { AttachmentUploadSchema, MeasurementEntrySchema, MAX_ATTACHMENTS } from "@/lib/coc-inputs/types";
 import { runIssuePipeline, type CreateCocInput } from "@/lib/coc/issue";
 import { reserveCompanyCocNumber } from "@/lib/sequences/coc-numbers";
 import { supabaseAdmin } from "@/lib/db/supabase-admin";
-import { getWorkflowPayload, transitionWorkflow, workflowOf, WORKFLOW_PAYLOAD_FIELD } from "@/lib/workflow/server";
+import { getWorkflowPayload, loadInspection, transitionWorkflow, WORKFLOW_PAYLOAD_FIELD } from "@/lib/workflow/server";
+import { mergeStepData, pagesIn } from "@/lib/workflow/merge";
+import { pagesForStep } from "@/lib/workflow/types";
 import { Errors } from "@/lib/errors";
 import { logger } from "@/lib/logging/logger";
 
@@ -24,19 +25,17 @@ const STALE_CLAIM_MS = 5 * 60 * 1000;
 
 /** Quality: enter inspection data, sign and issue a COC prepared by production. */
 export const POST = route<{ id: string }>(async (req, { params }) => {
-  const session = await requireCapability("completeCoc");
+  const session = await requireSession();
   const { id } = params;
   const body = issueSchema.parse(await req.json());
   assertAttachmentSizes(body.attachments);
 
-  const found = await getCocDocumentById(id);
-  const wf = found ? workflowOf(found.doc) : null;
-  if (!found || !wf) throw Errors.notFound("Inspection");
-  const doc = found.doc;
-  const company = String((doc.d365_context_json as Record<string, unknown> | null)?.dataAreaId || doc.customer_account || "HSIN").toUpperCase();
-  if (!companyAllowed(session, company)) throw Errors.forbidden(`company ${company}`);
+  const x = await loadInspection(id, session);
+  const { doc, wf, company } = x;
   if (wf.state === "ISSUED") throw Errors.conflict(`This COC was already issued as ${doc.coc_number}.`);
   if (wf.state === "REJECTED") throw Errors.conflict("This COC was rejected and can no longer be issued.");
+  if (!x.isFinal) throw Errors.validation(`The COC is at step "${x.step.name}" – complete the steps before it is issued.`);
+  if (!x.canAct) throw Errors.forbidden(`sign and issue this COC (step "${x.step.name}")`);
 
   // claim the document so two inspectors cannot issue it at the same time
   let claimed = await transitionWorkflow(doc, "PENDING_INSPECTION", { state: "ISSUING" }, null);
@@ -48,17 +47,17 @@ export const POST = route<{ id: string }>(async (req, { params }) => {
   const who = session.user.name || session.user.email || "Quality";
   const payload = (await getWorkflowPayload(id)) ?? ({} as CreateCocInput);
 
-  // Data entry keys are replaced by what the inspector entered; page-1 data stays as production prepared it
-  const entryKeys = new Set(body.measurements.map((m) => m.key));
-  const baseValues = Object.fromEntries(Object.entries(payload.manualValues || {}).filter(([k]) => !entryKeys.has(k)));
+  // The last step fills its own pages + every page no earlier step handled; earlier steps' data stays
+  const base = { measurements: payload.measurements ?? [], attachments: payload.attachments ?? [], manualValues: payload.manualValues ?? {} };
+  const merged = mergeStepData(base, body, pagesForStep(x.steps, x.stepIndex, pagesIn(base.measurements, body.measurements)), x.step.attachments);
   const input: CreateCocInput = {
     ...payload,
     quantity: payload.quantity ?? doc.quantity ?? 1,
     unitOfMeasure: payload.unitOfMeasure || "Pcs",
     templateVersionNumber: payload.templateVersionNumber ?? doc.template_version_number,
-    manualValues: { ...baseValues, ...body.measurementValues },
-    measurements: body.measurements,
-    attachments: body.attachments,
+    manualValues: merged.manualValues,
+    measurements: merged.measurements,
+    attachments: merged.attachments,
     signatureBase64: body.signatureBase64,
   };
 
@@ -103,7 +102,7 @@ export const POST = route<{ id: string }>(async (req, { params }) => {
     claimed,
     "ISSUING",
     { state: "ISSUED", inspectedBy: { id: session.user.id, email: session.user.email, name: session.user.name }, inspectedAt: now },
-    { at: now, by: who, action: "ISSUED", note: body.note?.trim() || undefined },
+    { at: now, by: who, action: "ISSUED", step: x.step.name, note: body.note?.trim() || undefined },
   );
   // the prepared payload (with the raw photos) is no longer needed – the issued values are stored on the COC
   const { error: delErr } = await supabaseAdmin().from("coc_document_values").delete().eq("coc_document_id", id).eq("field_name", WORKFLOW_PAYLOAD_FIELD);

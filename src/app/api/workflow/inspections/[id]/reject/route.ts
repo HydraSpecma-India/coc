@@ -1,9 +1,8 @@
 import { z } from "zod";
 import { route, json } from "@/lib/api/handler";
-import { companyAllowed, requireSession, sessionCan } from "@/lib/auth/guards";
-import { getCocDocumentById } from "@/lib/db/repositories/coc";
+import { requireSession } from "@/lib/auth/guards";
 import { supabaseAdmin } from "@/lib/db/supabase-admin";
-import { transitionWorkflow, workflowOf } from "@/lib/workflow/server";
+import { loadInspection, transitionWorkflow } from "@/lib/workflow/server";
 import { uuidOrNull } from "@/lib/coc/issue";
 import { Errors } from "@/lib/errors";
 
@@ -19,16 +18,11 @@ export const POST = route<{ id: string }>(async (req, { params }) => {
   const { id } = params;
   const body = schema.parse(await req.json());
 
-  const found = await getCocDocumentById(id);
-  const wf = found ? workflowOf(found.doc) : null;
-  if (!found || !wf) throw Errors.notFound("Inspection");
-  const doc = found.doc;
-  const company = String((doc.d365_context_json as Record<string, unknown> | null)?.dataAreaId || doc.customer_account || "HSIN").toUpperCase();
-  if (!companyAllowed(session, company)) throw Errors.forbidden(`company ${company}`);
-
-  const mine = (wf.submittedBy?.email || "").toLowerCase() === (session.user.email || "").toLowerCase();
-  if (body.withdraw ? !mine && !(await sessionCan(session, "completeCoc")) : !(await sessionCan(session, "completeCoc"))) {
-    throw Errors.forbidden(body.withdraw ? "withdraw this submission" : "reject inspections");
+  const x = await loadInspection(id, session);
+  const { doc, wf, mine } = x;
+  // reject: whoever does the current step · withdraw: the person who sent it
+  if (body.withdraw ? !mine && !x.canAct : !x.canAct) {
+    throw Errors.forbidden(body.withdraw ? "withdraw this submission" : `reject at step "${x.step.name}"`);
   }
   if (wf.state !== "PENDING_INSPECTION") throw Errors.conflict("Only COCs waiting for inspection can be rejected.");
 
@@ -38,7 +32,7 @@ export const POST = route<{ id: string }>(async (req, { params }) => {
     doc,
     "PENDING_INSPECTION",
     { state: "REJECTED", rejectReason: body.reason, inspectedBy: { id: session.user.id, email: session.user.email, name: session.user.name }, inspectedAt: now },
-    { at: now, by: who, action: body.withdraw ? "WITHDRAWN" : "REJECTED", note: body.reason },
+    { at: now, by: who, action: body.withdraw ? "WITHDRAWN" : "REJECTED", step: x.step.name, note: body.reason },
     { status: "CANCELLED", last_error: `${body.withdraw ? "Withdrawn" : "Rejected in inspection"}: ${body.reason}` },
   );
   if (!updated) throw Errors.conflict("This COC was just handled by someone else. Refresh the list.");

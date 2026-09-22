@@ -1,27 +1,16 @@
 import { route, json } from "@/lib/api/handler";
-import { companyAllowed, requireSession, sessionCan } from "@/lib/auth/guards";
-import { getCocDocumentById } from "@/lib/db/repositories/coc";
-import { getWorkflowPayload, workflowOf } from "@/lib/workflow/server";
+import { requireSession } from "@/lib/auth/guards";
+import { getWorkflowPayload, loadInspection } from "@/lib/workflow/server";
 import { Errors } from "@/lib/errors";
 
-/** Everything the inspector needs: order data prepared by production + the captured data. */
+/** Everything the next step needs: order data from production + the data entered so far. */
 export const GET = route<{ id: string }>(async (_req, { params }) => {
   const session = await requireSession();
-  const { id } = params;
-  const found = await getCocDocumentById(id);
-  const wf = found ? workflowOf(found.doc) : null;
-  if (!found || !wf) throw Errors.notFound("Inspection");
-  const { doc } = found;
-  const company = String((doc.d365_context_json as Record<string, unknown> | null)?.dataAreaId || doc.customer_account || "HSIN").toUpperCase();
-  if (!companyAllowed(session, company)) throw Errors.forbidden(`company ${company}`);
-
-  const canInspect = await sessionCan(session, "completeCoc");
-  const canCreate = await sessionCan(session, "createCoc");
-  if (!canInspect && !canCreate) throw Errors.forbidden("view inspections");
-
-  const email = (session.user.email || "").toLowerCase();
-  const mine = (wf.submittedBy?.email || "").toLowerCase() === email;
-  const payload = wf.state === "PENDING_INSPECTION" || wf.state === "ISSUING" || wf.state === "REJECTED" ? await getWorkflowPayload(id) : null;
+  const x = await loadInspection(params.id, session);
+  if (!x.canComplete && !x.canCreate && !x.canAct) throw Errors.forbidden("view inspections");
+  const { doc, wf } = x;
+  const open = wf.state === "PENDING_INSPECTION" || wf.state === "ISSUING" || wf.state === "REJECTED";
+  const payload = open ? await getWorkflowPayload(doc.id) : null;
 
   return json({
     ok: true,
@@ -39,12 +28,15 @@ export const GET = route<{ id: string }>(async (_req, { params }) => {
       quantity: doc.quantity,
       template_id: doc.template_id,
       template_version_id: doc.template_version_id,
-      company,
+      company: x.company,
       created_at: doc.created_at,
     },
     workflow: wf,
+    steps: x.steps,
+    stepIndex: x.stepIndex,
+    isFinal: x.isFinal,
     payload,
-    canInspect: canInspect && (wf.state === "PENDING_INSPECTION" || wf.state === "ISSUING"),
-    canWithdraw: mine && wf.state === "PENDING_INSPECTION",
+    canInspect: x.canAct,
+    canWithdraw: x.mine && wf.state === "PENDING_INSPECTION",
   });
 });

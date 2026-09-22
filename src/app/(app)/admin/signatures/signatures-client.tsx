@@ -134,8 +134,8 @@ export function SignaturesClient({ initialSignatures }: { initialSignatures: Sig
   return (
     <div className="w-full pb-16">
       <PageHeader
-        title="Stored Signatures"
-        description="Manage official digital quality signatures that can be attached to Certificates of Conformity."
+        title="My Signatures"
+        description="Your personal signatures for Certificates of Conformity. Only you can see and use them – every user keeps their own."
         actions={
           <Button size="sm" onClick={() => setModalOpen(true)}>
             <Plus className="h-4 w-4" /> Add Signature
