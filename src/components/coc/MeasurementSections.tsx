@@ -7,6 +7,7 @@ import { Badge, Card, CardBody, CardHeader, Input, Select, Textarea } from "@/co
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils/cn";
 import { QrScanner } from "./QrScanner";
+import { enterMovesToNext } from "@/lib/utils/form-nav";
 import {
   describeLimits, evaluateField, formatPrinted, parseQrPayload,
   type AttachmentUpload, type InputFieldDef, type InputSection, type MeasurementEntry,
@@ -130,8 +131,14 @@ function PhotoFieldInput({ f, value, onChange }: { f: InputFieldDef; value?: Mea
   );
 }
 
-function FieldInput({ f, value, onChange }: { f: InputFieldDef; value: string; onChange: (v: string) => void }) {
-  const common = { id: `m-${f.key}`, placeholder: f.placeholder || (f.nominal ? `Spec: ${f.nominal}` : undefined) };
+function FieldInput({ f, value, onChange, last }: { f: InputFieldDef; value: string; onChange: (v: string) => void; last?: boolean }) {
+  // the phone keyboard shows "next" (last field: "done") – Enter / next jumps to the following field
+  const common = {
+    id: `m-${f.key}`,
+    placeholder: f.placeholder || (f.nominal ? `Spec: ${f.nominal}` : undefined),
+    "data-entry-input": "true",
+    enterKeyHint: (last ? "done" : "next") as "done" | "next",
+  };
   switch (f.type) {
     case "number":
       return <Input {...common} type="text" inputMode="decimal" autoComplete="off" value={value} onChange={(e) => onChange(e.target.value)} />;
@@ -141,7 +148,7 @@ function FieldInput({ f, value, onChange }: { f: InputFieldDef; value: string; o
       return <Textarea {...common} value={value} onChange={(e) => onChange(e.target.value)} className="min-h-16" />;
     case "dropdown":
       return (
-        <Select id={common.id} value={value} onChange={(e) => onChange(e.target.value)}>
+        <Select id={common.id} data-entry-input="true" value={value} onChange={(e) => onChange(e.target.value)}>
           <option value="">Select…</option>
           {(f.options ?? []).map((o) => (
             <option key={o} value={o}>{o}</option>
@@ -203,6 +210,10 @@ export function MeasurementSections({
 }) {
   const [scan, setScan] = useState<{ sectionId?: string; fieldKey?: string; title: string } | null>(null);
   const allFields = useMemo(() => sections.flatMap((s) => s.fields), [sections]);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const lastKey = allFields.filter((f) => f.type !== "photo").at(-1)?.key;
+
+  const onEnter = (e: React.KeyboardEvent<HTMLDivElement>) => enterMovesToNext(e, rootRef.current);
 
   const set = (key: string, value: string, source: "manual" | "qr" = "manual") => onChange({ ...values, [key]: { value, source } });
 
@@ -225,7 +236,7 @@ export function MeasurementSections({
   };
 
   return (
-    <>
+    <div ref={rootRef} className="space-y-6" onKeyDown={onEnter}>
       {sections.map((s) => {
         const filled = s.fields.filter((f) => (values[f.key]?.value ?? "").trim()).length;
         const nok = s.fields.filter((f) => evaluateField(f, values[f.key]?.value ?? "") === "NOK").length;
@@ -282,7 +293,7 @@ export function MeasurementSections({
                             {f.type === "photo" ? (
                               <PhotoFieldInput f={f} value={values[f.key]} onChange={(nv) => onChange({ ...values, [f.key]: nv })} />
                             ) : (
-                              <FieldInput f={f} value={v} onChange={(nv) => set(f.key, nv)} />
+                              <FieldInput f={f} value={v} onChange={(nv) => set(f.key, nv)} last={f.key === lastKey} />
                             )}
                           </div>
                           {f.qr && f.type !== "photo" && (
@@ -334,7 +345,7 @@ export function MeasurementSections({
         onClose={() => setScan(null)}
         onResult={handleScan}
       />
-    </>
+    </div>
   );
 }
 

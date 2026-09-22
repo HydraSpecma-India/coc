@@ -57,6 +57,7 @@ import { MeasurementSections, MeasurementEmptyHint, initMeasureValues, missingRe
 import { DocumentCapture, toAttachmentUploads, type CapturedDoc } from "@/components/coc/DocumentCapture";
 import { PdfViewer } from "@/components/coc/PdfViewer";
 import { useI18n } from "@/lib/i18n/provider";
+import { enterMovesToNext } from "@/lib/utils/form-nav";
 import { SignatureDesigner } from "@/components/coc/SignatureDesigner";
 import { defaultSignatureStyle, loadLocalStyle, renderAutoSignature, type SignatureStyle } from "@/lib/signature/auto-signature";
 import { EMPTY_INPUT_CONFIG, formatPrinted, type TemplateInputConfig } from "@/lib/coc-inputs/types";
@@ -224,6 +225,7 @@ export function CocWizard({
   const { t } = useI18n();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const orderFieldsRef = useRef<HTMLDivElement | null>(null);
   const [showFilters, setShowFilters] = useState(false);
 
   // Admin-defined data entry fields for template pages 2+ and captured supplier documents
@@ -1151,6 +1153,11 @@ export function CocWizard({
     }
 
     fetchProductSequence(order.ItemNumber, order.ItemDescription, order.dataAreaId || selectedCompany);
+
+    // phones / tablets: bring the order panel (sales order reference, customer part no.) into view
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      window.setTimeout(() => document.getElementById("mobile-order-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+    }
   };
 
   // Initial PO search
@@ -1875,6 +1882,263 @@ export function CocWizard({
             </div>
           )}
 
+          {/* Selected Order Summary (mobile / small screen fallback) */}
+          {selectedPO && (
+            <div id="mobile-order-panel" className="lg:hidden scroll-mt-16 rounded-xl border-2 border-brand-300 bg-gradient-to-br from-brand-50/40 via-white to-emerald-50/30 p-4 sm:p-5 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink-100 pb-3">
+                <div className="flex items-start sm:items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500 text-ink-900 font-bold shadow-xs shrink-0">
+                    <CheckCircle2 className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-ink-500 font-semibold uppercase tracking-wider">Active Production Order</span>
+                      <span className="font-mono text-sm font-bold text-brand-800 bg-brand-100/70 px-2 py-0.5 rounded border border-brand-200">
+                        {selectedPO.ProductionOrder}
+                      </span>
+                      {selectedPO.dataAreaId && (
+                        <Badge tone="brand" className="text-[10px] font-mono font-bold">
+                          {selectedPO.dataAreaId}
+                        </Badge>
+                      )}
+                      {selectedPO.ProductionOrderStatus && (
+                        <Badge tone="success" className="text-[10px]">
+                          {selectedPO.ProductionOrderStatus}
+                        </Badge>
+                      )}
+                      {/* Qualification Badges */}
+                      {selectedPO.isFullyCertified ? (
+                        <Badge tone="success" className="text-[10px] font-bold">
+                          COC Created ({selectedPO.certifiedQuantity}/{selectedPO.Quantity} Qty)
+                        </Badge>
+                      ) : selectedPO.certifiedQuantity ? (
+                        <Badge tone="warning" className="text-[10px] font-bold">
+                          {selectedPO.certifiedQuantity}/{selectedPO.Quantity} Certified &bull; {selectedPO.pendingCocQuantity} Pending for COC
+                        </Badge>
+                      ) : (
+                        <Badge tone="neutral" className="text-[10px] font-medium">
+                          {selectedPO.Quantity} Qty Pending for COC
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-sm font-semibold text-ink-900 mt-0.5">
+                      {selectedPO.ItemDescription}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {selectedPO.isFullyCertified && selectedPO.cocList?.[0] && (
+                    <Link
+                      href={`/coc/${selectedPO.cocList[0].id}`}
+                      target="_blank"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors"
+                    >
+                      <Eye className="h-3.5 w-3.5" /> View COC ({selectedPO.cocList[0].coc_number})
+                    </Link>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setManualOrder({ ...selectedPO });
+                      setModalIsCustomSO(false);
+                      setShowManualModal(true);
+                      fetchModalSalesOrders(selectedPO.ItemNumber, selectedPO.dataAreaId || selectedCompany);
+                    }}
+                    className="text-xs gap-1.5"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                    Edit Details
+                  </Button>
+                </div>
+              </div>
+
+              {/* Fully Certified Alert Banner in Card 2 */}
+              {selectedPO.isFullyCertified ? (
+                <div className="rounded-lg border border-emerald-300 bg-emerald-50/90 p-3 text-xs text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-700 shrink-0" />
+                    <span>
+                      <strong>COC Created ({selectedPO.certifiedQuantity}/{selectedPO.Quantity} Qty):</strong> All {selectedPO.Quantity} unit(s) for this Production Order have already been certified. This order is not qualified for generating another COC.
+                    </span>
+                  </div>
+                  {selectedPO.cocList?.[0] && (
+                    <Link
+                      href={`/coc/${selectedPO.cocList[0].id}`}
+                      target="_blank"
+                      className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800 underline hover:text-emerald-950 shrink-0"
+                    >
+                      Open Certificate <ExternalLink className="h-3 w-3" />
+                    </Link>
+                  )}
+                </div>
+              ) : selectedPO.certifiedQuantity ? (
+                <div className="rounded-lg border border-amber-300 bg-amber-50/90 p-3 text-xs text-amber-950 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Info className="h-4 w-4 text-amber-700 shrink-0" />
+                    <span>
+                      <strong>Partial Certification:</strong> {selectedPO.certifiedQuantity} of {selectedPO.Quantity} unit(s) certified. {selectedPO.pendingCocQuantity} unit(s) pending for certification.
+                    </span>
+                  </div>
+                  {selectedPO.cocList?.[0] && (
+                    <Link
+                      href={`/coc/${selectedPO.cocList[0].id}`}
+                      target="_blank"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-amber-900 underline hover:text-amber-950 shrink-0"
+                    >
+                      View Certified Unit ({selectedPO.cocList[0].coc_number}) <ExternalLink className="h-3 w-3" />
+                    </Link>
+                  )}
+                </div>
+              ) : null}
+
+              {/* Cross-checked Sales Order & External Customer Part Box */}
+              <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 bg-white/80 p-3.5 rounded-lg border border-brand-200/80">
+                {/* Sales Order Dropdown */}
+                <div className="space-y-1.5 sm:col-span-2 md:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-ink-800 flex items-center gap-1.5">
+                      <ShoppingCart className="h-3.5 w-3.5 text-brand-600" />
+                      Sales Order Reference (Item: {selectedPO.ItemNumber})
+                    </label>
+                    <span className="text-[11px] text-brand-700 font-medium">
+                      {loadingSalesOrders ? "Querying D365..." : `${currentItemSalesOrders.length} reference line(s)`}
+                    </span>
+                  </div>
+
+                  {isCustomSO ? (
+                    <div className="flex gap-2">
+                      <Input
+                        value={customSOValue || selectedPO.SalesOrder}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setCustomSOValue(v);
+                          setSelectedPO({ ...selectedPO, SalesOrder: v });
+                        }}
+                        placeholder="Enter custom Sales Order Number..."
+                        className="font-mono text-xs"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsCustomSO(false)}
+                        className="text-xs px-2.5 shrink-0"
+                      >
+                        Back to Reference List
+                      </Button>
+                    </div>
+                  ) : (
+                    <Select
+                      value={currentItemSalesOrders.some((s) => s.SalesOrder === selectedPO.SalesOrder) ? selectedPO.SalesOrder : (currentItemSalesOrders[0]?.SalesOrder || "__custom__")}
+                      onChange={(e) => handleSelectSalesOrder(e.target.value)}
+                      className="font-medium text-xs bg-slate-50 border-brand-200 focus:border-brand-500"
+                    >
+                      {currentItemSalesOrders.map((so) => {
+                        let prefix = "🟢";
+                        let statusText = `${so.Quantity} pcs available`;
+                        if (so.isFullyAssigned) {
+                          prefix = "🔴 FULLY ASSIGNED:";
+                          statusText = `${so.assignedQuantity}/${so.Quantity} pcs used (${so.assignedCocs?.map((c) => c.coc_number).join(", ")})`;
+                        } else if (so.assignedQuantity) {
+                          prefix = "🟡 PARTIAL:";
+                          statusText = `${so.assignedQuantity}/${so.Quantity} assigned, ${so.remainingSalesQty} pending (${so.assignedCocs?.map((c) => c.coc_number).join(", ")})`;
+                        }
+                        return (
+                          <option key={so.SalesOrder} value={so.SalesOrder}>
+                            {prefix} Ref SO: {so.SalesOrder} &bull; Item: {so.ItemNumber} &bull; {(so.DeliveryAddressName || so.CustomerName)?.slice(0, 20)} &bull; Cust Part: {so.ExternalItemNumber || "160072"} &bull; [{statusText}]
+                          </option>
+                        );
+                      })}
+                      <option value="__custom__">+ Enter Custom Sales Order...</option>
+                    </Select>
+                  )}
+                  <p className="text-[11px] text-ink-500">
+                    Showing sales order reference line matching production order Item Number <span className="font-mono font-medium text-ink-700">{selectedPO.ItemNumber}</span>.
+                  </p>
+
+                  {/* Active Sales Order Allocation Box */}
+                  {(() => {
+                    const activeSO = currentItemSalesOrders.find((s) => s.SalesOrder === selectedPO.SalesOrder) || salesOrders.find((s) => s.SalesOrder === selectedPO.SalesOrder);
+                    if (!activeSO) return null;
+                    return (
+                      <div className="mt-2.5 rounded-lg border border-brand-200 bg-brand-50/50 p-3 text-xs space-y-2">
+                        <div className="flex items-center justify-between font-bold text-ink-900">
+                          <span className="flex items-center gap-1.5">
+                            <ShoppingCart className="h-3.5 w-3.5 text-brand-600" />
+                            Sales Order Allocation: <span className="font-mono text-brand-900">{activeSO.SalesOrder}</span>
+                          </span>
+                          <Badge tone={activeSO.isFullyAssigned ? "danger" : activeSO.assignedQuantity ? "warning" : "success"}>
+                            {activeSO.isFullyAssigned
+                              ? "Fully Assigned"
+                              : activeSO.assignedQuantity
+                              ? `${activeSO.assignedQuantity}/${activeSO.Quantity} Assigned`
+                              : "Available for COC"}
+                          </Badge>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2 text-[11px] text-ink-700 bg-white/80 p-2 rounded border border-brand-100">
+                          <div>Total SO Line Qty: <strong className="font-semibold text-ink-900">{activeSO.Quantity} Pcs</strong></div>
+                          <div>Certified / Assigned: <strong className="font-semibold text-emerald-700">{activeSO.assignedQuantity || 0} Pcs</strong></div>
+                          <div>Pending / Available: <strong className="font-semibold text-brand-800">{activeSO.remainingSalesQty !== undefined ? activeSO.remainingSalesQty : activeSO.Quantity} Pcs</strong></div>
+                        </div>
+
+                        {activeSO.assignedCocs && activeSO.assignedCocs.length > 0 && (
+                          <div className="pt-1.5 text-[11px] space-y-1">
+                            <p className="font-semibold text-ink-800">Already assigned & generated to below COC numbers:</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {activeSO.assignedCocs.map((c) => (
+                                <Link
+                                  key={c.id}
+                                  href={`/coc/${c.id}`}
+                                  target="_blank"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white border border-brand-300 text-brand-900 font-mono font-bold hover:bg-brand-100/70 shadow-xs transition-colors"
+                                >
+                                  <span>{c.coc_number}</span>
+                                  <span className="text-[10px] font-normal text-ink-500">({c.production_order}{c.serial_number ? ` &bull; ${c.serial_number}` : ''})</span>
+                                  <ExternalLink className="h-3 w-3 text-brand-600" />
+                                </Link>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Customer Part Number (External Item Number) */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-ink-800 flex items-center gap-1.5">
+                    <Tag className="h-3.5 w-3.5 text-brand-600" />
+                    Customer Part No. (External Item)
+                  </label>
+                  <Input
+                    value={selectedPO.CustomerPartNumber || ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedPO({ ...selectedPO, CustomerPartNumber: val });
+                      setManualFields((prev) => ({ ...prev, CustomerPartNo: val }));
+                    }}
+                    placeholder="e.g. 160072 or 29107156"
+                    className="font-mono font-bold text-brand-900 bg-brand-50/50 border-brand-300 text-xs"
+                  />
+                  <p className="text-[11px] text-brand-700">
+                    Populated from <strong>ExternalItemNumber</strong> on Sales Line.
+                  </p>
+                </div>
+              </div>
+
+              {/* Summary Badges: Customer Name, Customer PO, Quantity */}
+              <div className="flex items-center gap-4 text-xs text-ink-600 flex-wrap pt-1">
+                <div>Customer: <strong className="text-ink-900">{selectedPO.CustomerName || "—"}</strong></div>
+                <div>Customer PO: <strong className="font-mono text-ink-900">{selectedPO.CustomerPO || "—"}</strong></div>
+                <div>Qty: <strong className="text-ink-900">{selectedPO.Quantity} {selectedPO.UnitOfMeasure}</strong></div>
+                <div>Delivery Date: <span className="font-mono text-ink-800">{manualFields.DeliveryDate || selectedPO.DeliveryDate || "—"}</span></div>
+              </div>
+            </div>
+          )}
+
           <Card>
             <CardHeader
               title="2. Lookup Dynamics 365 Production Order"
@@ -2564,262 +2828,6 @@ export function CocWizard({
                 </div>
               )}
 
-              {/* Selected Order Summary (mobile / small screen fallback) */}
-              {selectedPO && (
-                <div className="lg:hidden rounded-xl border-2 border-brand-300 bg-gradient-to-br from-brand-50/40 via-white to-emerald-50/30 p-4 sm:p-5 shadow-xs space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink-100 pb-3">
-                    <div className="flex items-start sm:items-center gap-2.5">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500 text-ink-900 font-bold shadow-xs shrink-0">
-                        <CheckCircle2 className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs text-ink-500 font-semibold uppercase tracking-wider">Active Production Order</span>
-                          <span className="font-mono text-sm font-bold text-brand-800 bg-brand-100/70 px-2 py-0.5 rounded border border-brand-200">
-                            {selectedPO.ProductionOrder}
-                          </span>
-                          {selectedPO.dataAreaId && (
-                            <Badge tone="brand" className="text-[10px] font-mono font-bold">
-                              {selectedPO.dataAreaId}
-                            </Badge>
-                          )}
-                          {selectedPO.ProductionOrderStatus && (
-                            <Badge tone="success" className="text-[10px]">
-                              {selectedPO.ProductionOrderStatus}
-                            </Badge>
-                          )}
-                          {/* Qualification Badges */}
-                          {selectedPO.isFullyCertified ? (
-                            <Badge tone="success" className="text-[10px] font-bold">
-                              COC Created ({selectedPO.certifiedQuantity}/{selectedPO.Quantity} Qty)
-                            </Badge>
-                          ) : selectedPO.certifiedQuantity ? (
-                            <Badge tone="warning" className="text-[10px] font-bold">
-                              {selectedPO.certifiedQuantity}/{selectedPO.Quantity} Certified &bull; {selectedPO.pendingCocQuantity} Pending for COC
-                            </Badge>
-                          ) : (
-                            <Badge tone="neutral" className="text-[10px] font-medium">
-                              {selectedPO.Quantity} Qty Pending for COC
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="text-sm font-semibold text-ink-900 mt-0.5">
-                          {selectedPO.ItemDescription}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {selectedPO.isFullyCertified && selectedPO.cocList?.[0] && (
-                        <Link
-                          href={`/coc/${selectedPO.cocList[0].id}`}
-                          target="_blank"
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors"
-                        >
-                          <Eye className="h-3.5 w-3.5" /> View COC ({selectedPO.cocList[0].coc_number})
-                        </Link>
-                      )}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setManualOrder({ ...selectedPO });
-                          setModalIsCustomSO(false);
-                          setShowManualModal(true);
-                          fetchModalSalesOrders(selectedPO.ItemNumber, selectedPO.dataAreaId || selectedCompany);
-                        }}
-                        className="text-xs gap-1.5"
-                      >
-                        <Edit3 className="h-3.5 w-3.5" />
-                        Edit Details
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Fully Certified Alert Banner in Card 2 */}
-                  {selectedPO.isFullyCertified ? (
-                    <div className="rounded-lg border border-emerald-300 bg-emerald-50/90 p-3 text-xs text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-700 shrink-0" />
-                        <span>
-                          <strong>COC Created ({selectedPO.certifiedQuantity}/{selectedPO.Quantity} Qty):</strong> All {selectedPO.Quantity} unit(s) for this Production Order have already been certified. This order is not qualified for generating another COC.
-                        </span>
-                      </div>
-                      {selectedPO.cocList?.[0] && (
-                        <Link
-                          href={`/coc/${selectedPO.cocList[0].id}`}
-                          target="_blank"
-                          className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800 underline hover:text-emerald-950 shrink-0"
-                        >
-                          Open Certificate <ExternalLink className="h-3 w-3" />
-                        </Link>
-                      )}
-                    </div>
-                  ) : selectedPO.certifiedQuantity ? (
-                    <div className="rounded-lg border border-amber-300 bg-amber-50/90 p-3 text-xs text-amber-950 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Info className="h-4 w-4 text-amber-700 shrink-0" />
-                        <span>
-                          <strong>Partial Certification:</strong> {selectedPO.certifiedQuantity} of {selectedPO.Quantity} unit(s) certified. {selectedPO.pendingCocQuantity} unit(s) pending for certification.
-                        </span>
-                      </div>
-                      {selectedPO.cocList?.[0] && (
-                        <Link
-                          href={`/coc/${selectedPO.cocList[0].id}`}
-                          target="_blank"
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-amber-900 underline hover:text-amber-950 shrink-0"
-                        >
-                          View Certified Unit ({selectedPO.cocList[0].coc_number}) <ExternalLink className="h-3 w-3" />
-                        </Link>
-                      )}
-                    </div>
-                  ) : null}
-
-                  {/* Cross-checked Sales Order & External Customer Part Box */}
-                  <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 bg-white/80 p-3.5 rounded-lg border border-brand-200/80">
-                    {/* Sales Order Dropdown */}
-                    <div className="space-y-1.5 sm:col-span-2 md:col-span-2">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-ink-800 flex items-center gap-1.5">
-                          <ShoppingCart className="h-3.5 w-3.5 text-brand-600" />
-                          Sales Order Reference (Item: {selectedPO.ItemNumber})
-                        </label>
-                        <span className="text-[11px] text-brand-700 font-medium">
-                          {loadingSalesOrders ? "Querying D365..." : `${currentItemSalesOrders.length} reference line(s)`}
-                        </span>
-                      </div>
-
-                      {isCustomSO ? (
-                        <div className="flex gap-2">
-                          <Input
-                            value={customSOValue || selectedPO.SalesOrder}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setCustomSOValue(v);
-                              setSelectedPO({ ...selectedPO, SalesOrder: v });
-                            }}
-                            placeholder="Enter custom Sales Order Number..."
-                            className="font-mono text-xs"
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setIsCustomSO(false)}
-                            className="text-xs px-2.5 shrink-0"
-                          >
-                            Back to Reference List
-                          </Button>
-                        </div>
-                      ) : (
-                        <Select
-                          value={currentItemSalesOrders.some((s) => s.SalesOrder === selectedPO.SalesOrder) ? selectedPO.SalesOrder : (currentItemSalesOrders[0]?.SalesOrder || "__custom__")}
-                          onChange={(e) => handleSelectSalesOrder(e.target.value)}
-                          className="font-medium text-xs bg-slate-50 border-brand-200 focus:border-brand-500"
-                        >
-                          {currentItemSalesOrders.map((so) => {
-                            let prefix = "🟢";
-                            let statusText = `${so.Quantity} pcs available`;
-                            if (so.isFullyAssigned) {
-                              prefix = "🔴 FULLY ASSIGNED:";
-                              statusText = `${so.assignedQuantity}/${so.Quantity} pcs used (${so.assignedCocs?.map((c) => c.coc_number).join(", ")})`;
-                            } else if (so.assignedQuantity) {
-                              prefix = "🟡 PARTIAL:";
-                              statusText = `${so.assignedQuantity}/${so.Quantity} assigned, ${so.remainingSalesQty} pending (${so.assignedCocs?.map((c) => c.coc_number).join(", ")})`;
-                            }
-                            return (
-                              <option key={so.SalesOrder} value={so.SalesOrder}>
-                                {prefix} Ref SO: {so.SalesOrder} &bull; Item: {so.ItemNumber} &bull; {(so.DeliveryAddressName || so.CustomerName)?.slice(0, 20)} &bull; Cust Part: {so.ExternalItemNumber || "160072"} &bull; [{statusText}]
-                              </option>
-                            );
-                          })}
-                          <option value="__custom__">+ Enter Custom Sales Order...</option>
-                        </Select>
-                      )}
-                      <p className="text-[11px] text-ink-500">
-                        Showing sales order reference line matching production order Item Number <span className="font-mono font-medium text-ink-700">{selectedPO.ItemNumber}</span>.
-                      </p>
-
-                      {/* Active Sales Order Allocation Box */}
-                      {(() => {
-                        const activeSO = currentItemSalesOrders.find((s) => s.SalesOrder === selectedPO.SalesOrder) || salesOrders.find((s) => s.SalesOrder === selectedPO.SalesOrder);
-                        if (!activeSO) return null;
-                        return (
-                          <div className="mt-2.5 rounded-lg border border-brand-200 bg-brand-50/50 p-3 text-xs space-y-2">
-                            <div className="flex items-center justify-between font-bold text-ink-900">
-                              <span className="flex items-center gap-1.5">
-                                <ShoppingCart className="h-3.5 w-3.5 text-brand-600" />
-                                Sales Order Allocation: <span className="font-mono text-brand-900">{activeSO.SalesOrder}</span>
-                              </span>
-                              <Badge tone={activeSO.isFullyAssigned ? "danger" : activeSO.assignedQuantity ? "warning" : "success"}>
-                                {activeSO.isFullyAssigned
-                                  ? "Fully Assigned"
-                                  : activeSO.assignedQuantity
-                                  ? `${activeSO.assignedQuantity}/${activeSO.Quantity} Assigned`
-                                  : "Available for COC"}
-                              </Badge>
-                            </div>
-
-                            <div className="grid grid-cols-3 gap-2 text-[11px] text-ink-700 bg-white/80 p-2 rounded border border-brand-100">
-                              <div>Total SO Line Qty: <strong className="font-semibold text-ink-900">{activeSO.Quantity} Pcs</strong></div>
-                              <div>Certified / Assigned: <strong className="font-semibold text-emerald-700">{activeSO.assignedQuantity || 0} Pcs</strong></div>
-                              <div>Pending / Available: <strong className="font-semibold text-brand-800">{activeSO.remainingSalesQty !== undefined ? activeSO.remainingSalesQty : activeSO.Quantity} Pcs</strong></div>
-                            </div>
-
-                            {activeSO.assignedCocs && activeSO.assignedCocs.length > 0 && (
-                              <div className="pt-1.5 text-[11px] space-y-1">
-                                <p className="font-semibold text-ink-800">Already assigned & generated to below COC numbers:</p>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {activeSO.assignedCocs.map((c) => (
-                                    <Link
-                                      key={c.id}
-                                      href={`/coc/${c.id}`}
-                                      target="_blank"
-                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white border border-brand-300 text-brand-900 font-mono font-bold hover:bg-brand-100/70 shadow-xs transition-colors"
-                                    >
-                                      <span>{c.coc_number}</span>
-                                      <span className="text-[10px] font-normal text-ink-500">({c.production_order}{c.serial_number ? ` &bull; ${c.serial_number}` : ''})</span>
-                                      <ExternalLink className="h-3 w-3 text-brand-600" />
-                                    </Link>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-
-                    {/* Customer Part Number (External Item Number) */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-ink-800 flex items-center gap-1.5">
-                        <Tag className="h-3.5 w-3.5 text-brand-600" />
-                        Customer Part No. (External Item)
-                      </label>
-                      <Input
-                        value={selectedPO.CustomerPartNumber || ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setSelectedPO({ ...selectedPO, CustomerPartNumber: val });
-                          setManualFields((prev) => ({ ...prev, CustomerPartNo: val }));
-                        }}
-                        placeholder="e.g. 160072 or 29107156"
-                        className="font-mono font-bold text-brand-900 bg-brand-50/50 border-brand-300 text-xs"
-                      />
-                      <p className="text-[11px] text-brand-700">
-                        Populated from <strong>ExternalItemNumber</strong> on Sales Line.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Summary Badges: Customer Name, Customer PO, Quantity */}
-                  <div className="flex items-center gap-4 text-xs text-ink-600 flex-wrap pt-1">
-                    <div>Customer: <strong className="text-ink-900">{selectedPO.CustomerName || "—"}</strong></div>
-                    <div>Customer PO: <strong className="font-mono text-ink-900">{selectedPO.CustomerPO || "—"}</strong></div>
-                    <div>Qty: <strong className="text-ink-900">{selectedPO.Quantity} {selectedPO.UnitOfMeasure}</strong></div>
-                    <div>Delivery Date: <span className="font-mono text-ink-800">{manualFields.DeliveryDate || selectedPO.DeliveryDate || "—"}</span></div>
-                  </div>
-                </div>
-              )}
 
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-ink-200">
                 {selectedPO?.isFullyCertified ? (
@@ -2888,9 +2896,12 @@ export function CocWizard({
               description="Verify customer part mapping and purchase order reference details as printed on the official COC."
             />
             <CardBody className="space-y-4">
+              <div ref={orderFieldsRef} className="space-y-4" onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => enterMovesToNext(e, orderFieldsRef.current)}>
               <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
                 <Field label="Customer Part No. *" hint="e.g. 160072">
                   <Input
+                    data-entry-input="true"
+                    enterKeyHint="next"
                     value={manualFields.CustomerPartNo}
                     onChange={(e) => setManualFields({ ...manualFields, CustomerPartNo: e.target.value })}
                     required
@@ -2899,6 +2910,8 @@ export function CocWizard({
 
                 <Field label="Customer Purchase Order *" hint="e.g. 4509008214">
                   <Input
+                    data-entry-input="true"
+                    enterKeyHint="next"
                     value={manualFields.CustomerPO}
                     onChange={(e) => setManualFields({ ...manualFields, CustomerPO: e.target.value })}
                     required
@@ -2907,6 +2920,8 @@ export function CocWizard({
 
                 <Field label="Top Level Serial Number *" hint="e.g. SN-HSIN-000011">
                   <Input
+                    data-entry-input="true"
+                    enterKeyHint="next"
                     value={manualFields.SerialNumber}
                     onChange={(e) => setManualFields({ ...manualFields, SerialNumber: e.target.value })}
                     required
@@ -2961,11 +2976,14 @@ export function CocWizard({
                 <div className="sm:col-span-2 md:col-span-3">
                   <Field label="Customer Technical Purchase Specification & Revision">
                     <Input
+                      data-entry-input="true"
+                      enterKeyHint="done"
                       value={manualFields.CustomerSpec}
                       onChange={(e) => setManualFields({ ...manualFields, CustomerSpec: e.target.value })}
                     />
                   </Field>
                 </div>
+              </div>
               </div>
             </CardBody>
           </Card>}
