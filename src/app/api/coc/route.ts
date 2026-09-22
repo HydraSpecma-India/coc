@@ -107,6 +107,20 @@ export const POST = route(async (req) => {
     }
   }
 
+  // Only a published version of an active (not archived) template may be used to issue a COC.
+  if (isUuid(tplId) && isUuid(tplVerId)) {
+    const [{ data: tplRow }, { data: verRow }] = await Promise.all([
+      sb.from("coc_templates").select("status").eq("id", tplId!).maybeSingle(),
+      sb.from("coc_template_versions").select("status").eq("id", tplVerId!).eq("template_id", tplId!).maybeSingle(),
+    ]);
+    if (tplRow && tplRow.status === "archived") {
+      throw Errors.conflict("This template is archived. Choose a published template.");
+    }
+    if (verRow && verRow.status !== "published") {
+      throw Errors.conflict("This template version is not published. Choose a published template.");
+    }
+  }
+
   // Pre-validate uniqueness of Production Order + Serial Number before insertion
   if (parsed.serialNumber && prodOrder) {
     const cleanSerial = parsed.serialNumber.trim();

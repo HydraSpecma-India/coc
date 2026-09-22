@@ -175,10 +175,18 @@ export async function updateTemplate(
 
 export async function deleteTemplate(id: string): Promise<void> {
   const db = supabaseAdmin();
-  const { count } = await db.from("coc_template_versions").select("id", { count: "exact", head: true }).eq("template_id", id).in("status", ["published", "deprecated"]);
-  if ((count ?? 0) > 0) throw Errors.conflict("This template has published versions and cannot be deleted. Archive it instead.");
+  const { data: tpl } = await db.from("coc_templates").select("status").eq("id", id).maybeSingle();
+  if (!tpl) throw Errors.notFound("Template");
+  // Issued COCs keep a permanent link to the template version they were rendered from.
   const { count: docs } = await db.from("coc_documents").select("id", { count: "exact", head: true }).eq("template_id", id);
-  if ((docs ?? 0) > 0) throw Errors.conflict("Documents were generated from this template. Archive it instead.");
+  if ((docs ?? 0) > 0) {
+    throw Errors.conflict(`${docs} COC document(s) were issued from this template, so it must be kept for audit. It stays archived and hidden from New COC.`);
+  }
+  // A live template must be archived (deactivated) before it can be removed.
+  const { count } = await db.from("coc_template_versions").select("id", { count: "exact", head: true }).eq("template_id", id).eq("status", "published");
+  if (tpl.status !== "archived" && (count ?? 0) > 0) {
+    throw Errors.conflict("This template is published. Archive it first, then delete it.");
+  }
   const { error } = await db.from("coc_templates").delete().eq("id", id);
   if (error) throw error;
   invalidateTemplatesCache();

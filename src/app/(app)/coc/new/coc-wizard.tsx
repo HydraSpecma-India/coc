@@ -1606,6 +1606,7 @@ export function CocWizard({
                   onChange={(e) => setSelectedTemplateId(e.target.value)}
                   className="h-8 max-w-[240px] sm:max-w-xs truncate rounded border border-ink-300 bg-ink-50/60 px-2.5 py-0 text-xs font-semibold text-ink-900 focus:border-brand-500 focus:bg-white focus:outline-hidden cursor-pointer"
                 >
+                  {templateList.length === 0 && <option value="">No published template – publish one in Admin → Templates</option>}
                   {templateList.map((tpl) => {
                     const matchInfo = selectedPO
                       ? getTemplateMatchScore(tpl, selectedPO.ItemNumber, selectedPO.dataAreaId || selectedCompany)

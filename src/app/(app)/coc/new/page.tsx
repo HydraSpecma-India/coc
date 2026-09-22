@@ -19,9 +19,14 @@ export default async function NewCocPage() {
     applicable_items?: string[];
   }> = [];
 
+  let dbFailed = false;
   try {
     const rawTemplates = await listTemplates();
-    templateSummaries = rawTemplates.map((t) => {
+    // Only published, active templates can be used to issue a COC – drafts and archived
+    // (deactivated) templates stay in Admin → Templates but never appear in the picker.
+    templateSummaries = rawTemplates
+      .filter((t) => t.status !== "archived" && !!t.active_version_id && t.versions.some((v) => v.id === t.active_version_id && v.status === "published"))
+      .map((t) => {
       const activeVer = t.versions.find((v) => v.id === t.active_version_id);
       return {
         id: t.id,
@@ -35,6 +40,7 @@ export default async function NewCocPage() {
     });
   } catch (e) {
     console.error("NewCocPage DB error:", e);
+    dbFailed = true;
   }
 
   // Always prioritize the official Standard HydraSpecma template
@@ -48,10 +54,8 @@ export default async function NewCocPage() {
     applicable_items: ["*"],
   };
 
-  const hasStandard = templateSummaries.some(
-    (t) => t.id === standardTemplate.id || t.name.toLowerCase().includes("hydraspecma")
-  );
-  const templates = hasStandard ? templateSummaries : [standardTemplate, ...templateSummaries];
+  // The built-in standard layout is only offered when the template list could not be loaded.
+  const templates = dbFailed ? [standardTemplate] : templateSummaries;
 
   // Retrieved directly from the JWT session without an extra database round-trip
   const allowedCompanies = session.user.allowedCompanies && session.user.allowedCompanies.length > 0

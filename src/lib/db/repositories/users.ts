@@ -191,17 +191,5 @@ export async function verifyUserCredentials(email: string, password: string): Pr
     return null;
   }
 
-  // Fallback for bootstrap admin: if no password set yet and logging in as admin, allow default password Admin@123
-  if (
-    cleanEmail === "manigandan.parthasarathi@hydraspecma.com" ||
-    cleanEmail === "mani.sarathy12@gmail.com"
-  ) {
-    if (password === "Admin@123" || password === "Admin123") {
-      const hash = hashPassword(password);
-      await db.from("coc_users").update({ password_hash: hash }).eq("id", user.id);
-      return user as UserRow;
-    }
-  }
-
   return null;
 }
