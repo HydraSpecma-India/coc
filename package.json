@@ -1,6 +1,6 @@
 {
   "name": "coc-platform",
-  "version": "1.00069",
+  "version": "1.00070",
   "private": true,
   "scripts": {
     "prebuild": "node scripts/update-version.mjs",

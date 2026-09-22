@@ -6,12 +6,13 @@ export const GET = route(async (req) => {
   await requireSession();
   const itemNumber = req.nextUrl.searchParams.get("itemNumber") || "";
   const productName = req.nextUrl.searchParams.get("productName") || "";
+  const company = req.nextUrl.searchParams.get("company") || "";
 
   if (!itemNumber.trim()) {
     return json({ ok: false, error: "itemNumber is required" }, { status: 400 });
   }
 
-  const result = await getOrInitProductSequence(itemNumber.trim(), productName.trim() || undefined);
+  const result = await getOrInitProductSequence(itemNumber.trim(), productName.trim() || undefined, company);
 
   return json({
     ok: true,

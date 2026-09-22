@@ -18,6 +18,7 @@ import {
   ProductSequenceRule,
   SequencesConfig,
   formatSequenceSerial,
+  patternUsesCompany,
   DEFAULT_SEQUENCES_CONFIG,
 } from "@/lib/sequences/types";
 import {
@@ -52,6 +53,8 @@ export function NumberSequencesPanel() {
   const [formPattern, setFormPattern] = useState("{ItemNumber} - SN{###}");
   const [formNextNumber, setFormNextNumber] = useState(1);
   const [formPadding, setFormPadding] = useState(3);
+  /** per-company next numbers – used when the pattern contains {Company} */
+  const [formCompanyNext, setFormCompanyNext] = useState<Array<{ company: string; next: number }>>([]);
 
   const fetchConfig = async () => {
     setLoading(true);
@@ -97,6 +100,7 @@ export function NumberSequencesPanel() {
     setFormPattern(config.defaultPattern || "{ItemNumber} - SN{###}");
     setFormNextNumber(1);
     setFormPadding(config.defaultPadding || 3);
+    setFormCompanyNext([]);
     setShowModal(true);
   };
 
@@ -109,6 +113,7 @@ export function NumberSequencesPanel() {
     setFormPattern(rule.pattern || "{ItemNumber} - SN{###}");
     setFormNextNumber(rule.nextNumber || 1);
     setFormPadding(rule.padding || 3);
+    setFormCompanyNext(Object.entries(rule.companyNext || {}).map(([company, next]) => ({ company, next })));
     setShowModal(true);
   };
 
@@ -127,6 +132,11 @@ export function NumberSequencesPanel() {
       nextNumber: Math.max(1, Number(formNextNumber) || 1),
       padding: Math.max(1, Number(formPadding) || 3),
       lastGeneratedSerial: editingRule?.lastGeneratedSerial || null,
+      companyNext: Object.fromEntries(
+        formCompanyNext
+          .map((r) => [r.company.trim().toUpperCase(), Math.max(1, Number(r.next) || 1)] as const)
+          .filter(([c]) => c && c !== "ALL"),
+      ),
       updatedAt: new Date().toISOString(),
     };
 
@@ -204,7 +214,16 @@ export function NumberSequencesPanel() {
   };
 
   const handleResetCounter = async (rule: ProductSequenceRule) => {
-    const input = prompt(`Enter new starting number for ${rule.itemNumber}:`, "1");
+    const perCompany = patternUsesCompany(rule.pattern);
+    let company = "";
+    if (perCompany) {
+      const known = Object.keys(rule.companyNext || {}).join(", ");
+      const c = prompt(`This series counts per company.${known ? ` Known: ${known}.` : ""}\nEnter the company code to reset (e.g. HSIN):`, Object.keys(rule.companyNext || {})[0] || "HSIN");
+      if (c === null) return;
+      company = c.trim().toUpperCase();
+      if (!company) return;
+    }
+    const input = prompt(`Enter new starting number for ${rule.itemNumber}${company ? ` (${company})` : ""}:`, "1");
     if (input === null) return;
     const num = parseInt(input, 10);
     if (isNaN(num) || num < 1) {
@@ -212,11 +231,9 @@ export function NumberSequencesPanel() {
       return;
     }
 
-    const updated: ProductSequenceRule = {
-      ...rule,
-      nextNumber: num,
-      updatedAt: new Date().toISOString(),
-    };
+    const updated: ProductSequenceRule = perCompany
+      ? { ...rule, companyNext: { ...(rule.companyNext || {}), [company]: num }, updatedAt: new Date().toISOString() }
+      : { ...rule, nextNumber: num, updatedAt: new Date().toISOString() };
 
     try {
       const res = await api<{ ok: boolean }>("/api/admin/sequences", {
@@ -224,7 +241,7 @@ export function NumberSequencesPanel() {
         json: { rule: updated },
       });
       if (res.ok) {
-        toast.success(`${rule.itemNumber} counter reset to ${num}`);
+        toast.success(`${rule.itemNumber}${company ? ` (${company})` : ""} counter reset to ${num}`);
         setConfig((prev) => ({
           ...prev,
           productRules: {
@@ -249,11 +266,14 @@ export function NumberSequencesPanel() {
     );
   });
 
+  const formPerCompany = patternUsesCompany(formPattern);
+  const previewCompany = formCompanyNext[0]?.company?.trim().toUpperCase() || "HSIN";
   const previewModalSerial = formatSequenceSerial(
     formPattern,
     formItemNumber || "1070.0049",
-    formNextNumber || 1,
-    formPadding || 3
+    formPerCompany ? formCompanyNext[0]?.next || 1 : formNextNumber || 1,
+    formPadding || 3,
+    { company: previewCompany, productName: formProductName },
   );
 
   return (
@@ -296,7 +316,7 @@ export function NumberSequencesPanel() {
 
             <Field
               label="Default Pattern"
-              hint="Tokens: {ItemNumber}, {###}, {seq:N}, {yyyy}"
+              hint="Tokens: {Company}, {ItemNumber}, {ProductName}, {###}, {seq:N}, {yyyy}, {yy}, {MM}"
             >
               <Input
                 value={config.defaultPattern}
@@ -385,12 +405,15 @@ export function NumberSequencesPanel() {
                   </tr>
                 ) : (
                   filteredRules.map((rule) => {
-                    const nextSerial = formatSequenceSerial(
-                      rule.pattern,
-                      rule.itemNumber,
-                      rule.nextNumber,
-                      rule.padding
-                    );
+                    const perCompany = patternUsesCompany(rule.pattern);
+                    const companyRows = Object.entries(rule.companyNext || {});
+                    const nextSerial = perCompany
+                      ? companyRows.length
+                        ? companyRows
+                            .map(([c, n]) => formatSequenceSerial(rule.pattern, rule.itemNumber, n, rule.padding, { company: c, productName: rule.productName }))
+                            .join("\n")
+                        : formatSequenceSerial(rule.pattern, rule.itemNumber, 1, rule.padding, { company: "HSIN", productName: rule.productName }) + "  (per company)"
+                      : formatSequenceSerial(rule.pattern, rule.itemNumber, rule.nextNumber, rule.padding, { productName: rule.productName });
 
                     return (
                       <tr key={rule.itemNumber} className="hover:bg-ink-50/50 transition-colors">
@@ -426,7 +449,15 @@ export function NumberSequencesPanel() {
                         </td>
                         <td className="px-4 py-3 font-bold text-ink-900">
                           <div className="flex items-center gap-1.5">
-                            <span>#{rule.nextNumber}</span>
+                            {perCompany ? (
+                              <span className="flex flex-col gap-0.5 text-[11px]">
+                                {companyRows.length
+                                  ? companyRows.map(([c, n]) => <span key={c}>{c} #{n}</span>)
+                                  : <span className="font-normal text-ink-500">per company · starts at 1</span>}
+                              </span>
+                            ) : (
+                              <span>#{rule.nextNumber}</span>
+                            )}
                             <button
                               type="button"
                               onClick={() => handleResetCounter(rule)}
@@ -437,7 +468,7 @@ export function NumberSequencesPanel() {
                             </button>
                           </div>
                         </td>
-                        <td className="px-4 py-3 font-mono text-[11px] font-bold text-emerald-800 bg-emerald-50/40">
+                        <td className="px-4 py-3 font-mono text-[11px] font-bold text-emerald-800 bg-emerald-50/40 whitespace-pre-line">
                           {nextSerial}
                         </td>
                         <td className="px-4 py-3 font-mono text-[11px] text-ink-500">
@@ -525,7 +556,7 @@ export function NumberSequencesPanel() {
               </Field>
             </div>
 
-            <Field label="Sequence Pattern" hint="Pattern placeholders: {ItemNumber}, {###}, {####}, {yyyy}">
+            <Field label="Sequence Pattern" hint="Placeholders: {Company} (order company, e.g. HSIN), {ItemNumber}, {ProductName}, {###}, {####}, {yyyy}, {yy}, {MM}. With {Company} every company keeps its own counter.">
               <Input
                 value={formPattern}
                 onChange={(e) => setFormPattern(e.target.value)}
@@ -541,6 +572,8 @@ export function NumberSequencesPanel() {
                 "SN{####}",
                 "{ItemNumber}-SN{###}",
                 "HSRE-{ItemNumber}-{###}",
+                "{Company}-{ItemNumber}-SN{###}",
+                "{Company}-SN{####}",
               ].map((p) => (
                 <button
                   key={p}
@@ -552,6 +585,50 @@ export function NumberSequencesPanel() {
                 </button>
               ))}
             </div>
+
+            {formPerCompany && (
+              <div className="rounded-lg border border-ink-200 bg-ink-50/60 p-3 space-y-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-700">
+                  Next number per company
+                </div>
+                <p className="text-[11px] text-ink-500">
+                  {"{Company}"} is filled with the production order&apos;s company. Each company counts on its own; a company not listed starts after its highest issued serial.
+                </p>
+                {formCompanyNext.map((row, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <Input
+                      value={row.company}
+                      onChange={(e) => setFormCompanyNext((prev) => prev.map((r, i) => (i === idx ? { ...r, company: e.target.value.toUpperCase() } : r)))}
+                      placeholder="HSIN"
+                      className="w-28 font-mono uppercase"
+                      maxLength={10}
+                    />
+                    <Input
+                      type="number"
+                      min={1}
+                      value={row.next}
+                      onChange={(e) => setFormCompanyNext((prev) => prev.map((r, i) => (i === idx ? { ...r, next: Math.max(1, Number(e.target.value) || 1) } : r)))}
+                      className="w-28"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setFormCompanyNext((prev) => prev.filter((_, i) => i !== idx))}
+                      className="text-ink-400 hover:text-red-600"
+                      title="Remove"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setFormCompanyNext((prev) => [...prev, { company: "", next: 1 }])}
+                  className="text-[11px] font-semibold text-brand-800 hover:underline"
+                >
+                  + Add company
+                </button>
+              </div>
+            )}
 
             {/* Live Serial Preview Box */}
             <div className="rounded-lg border-2 border-brand-300 bg-brand-50/50 p-3">

@@ -360,7 +360,7 @@ export const POST = route(async (req) => {
     // Advance continuous product sequence counter
     if (parsed.itemNumber) {
       try {
-        await advanceProductSequence(parsed.itemNumber, parsed.serialNumber || undefined);
+        await advanceProductSequence(parsed.itemNumber, parsed.serialNumber || undefined, (parsed.company || "").toUpperCase() || undefined);
       } catch (seqErr) {
         logger.warn("Failed to advance product sequence", { error: (seqErr as Error).message });
       }

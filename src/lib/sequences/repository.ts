@@ -5,6 +5,7 @@ import {
   SequencesConfig,
   DEFAULT_SEQUENCES_CONFIG,
   formatSequenceSerial,
+  patternUsesCompany,
 } from "./types";
 
 const SETTINGS_KEY = "product_number_sequences";
@@ -72,75 +73,97 @@ export async function saveSequencesConfig(
   }
 }
 
-/**
- * Retrieves the sequence rule for a given product/item number.
- * If the product series does not exist, automatically creates it by inspecting
- * existing issued certificates in the database or starting from 1.
- */
-export async function getOrInitProductSequence(
-  itemNumber: string,
-  productName?: string
-): Promise<{ rule: ProductSequenceRule; nextSerial: string; isNew: boolean }> {
-  const cleanItem = (itemNumber || "").trim();
-  const config = await getSequencesConfig();
+const normCompany = (c?: string) => (c || "").trim().toUpperCase();
 
-  // If rule already exists for this exact product
-  if (config.productRules[cleanItem]) {
-    const rule = config.productRules[cleanItem];
-    // Update productName if newly provided and wasn't set
-    if (productName && !rule.productName) {
-      rule.productName = productName;
-      await saveSequencesConfig(config);
-    }
-    const nextSerial = formatSequenceSerial(rule.pattern, cleanItem, rule.nextNumber, rule.padding);
-    return { rule, nextSerial, isNew: false };
+/** Next number for this rule – per company when the pattern contains {Company}. */
+function nextNumberFor(rule: ProductSequenceRule, company: string): number {
+  if (company && patternUsesCompany(rule.pattern)) {
+    return rule.companyNext?.[company] ?? 1;
   }
+  return rule.nextNumber;
+}
 
-  // Auto-initialize sequence for this product
-  let maxExistingSeq = 0;
+/** Highest sequence number already used by issued COCs for this item (optionally only serials of one company). */
+async function scanMaxExistingSeq(itemNumber: string, company?: string): Promise<number> {
+  let max = 0;
   try {
-    const sb = supabaseAdmin();
-    const { data: existingDocs } = await sb
+    const { data } = await supabaseAdmin()
       .from("coc_documents")
       .select("serial_number")
-      .eq("item_number", cleanItem)
+      .eq("item_number", itemNumber)
       .neq("status", "CANCELLED")
       .not("serial_number", "is", null);
-
-    if (existingDocs && existingDocs.length > 0) {
-      for (const row of existingDocs) {
-        if (!row.serial_number) continue;
-        // Try matching SN(\d+) or trailing numbers
-        const match = row.serial_number.match(/SN(\d+)/i) || row.serial_number.match(/(\d+)$/);
-        if (match) {
-          const num = parseInt(match[1], 10);
-          if (!isNaN(num) && num > maxExistingSeq) {
-            maxExistingSeq = num;
-          }
-        }
-      }
+    for (const row of data ?? []) {
+      const sn = String(row.serial_number || "");
+      if (!sn) continue;
+      if (company && !sn.toUpperCase().includes(company)) continue;
+      const match = sn.match(/SN(\d+)/i) || sn.match(/(\d+)$/);
+      const num = match ? parseInt(match[1], 10) : NaN;
+      if (!isNaN(num) && num > max) max = num;
     }
   } catch (e) {
     logger.warn("Could not scan existing coc_documents for max serial", { error: (e as Error).message });
   }
+  return max;
+}
 
-  const nextNumber = maxExistingSeq > 0 ? maxExistingSeq + 1 : 1;
-  const newRule: ProductSequenceRule = {
-    itemNumber: cleanItem,
-    productName: productName || cleanItem,
-    mode: config.defaultMode || "auto",
-    pattern: config.defaultPattern || "{ItemNumber} - SN{###}",
-    nextNumber,
-    padding: config.defaultPadding || 3,
-    lastGeneratedSerial: null,
-    updatedAt: new Date().toISOString(),
-  };
+/**
+ * Retrieves the sequence rule for a given product/item number.
+ * If the product series does not exist, automatically creates it by inspecting
+ * existing issued certificates in the database or starting from 1.
+ * When the rule's pattern contains {Company}, every company keeps its own counter.
+ */
+export async function getOrInitProductSequence(
+  itemNumber: string,
+  productName?: string,
+  companyRaw?: string,
+): Promise<{ rule: ProductSequenceRule; nextSerial: string; nextNumber: number; isNew: boolean }> {
+  const cleanItem = (itemNumber || "").trim();
+  const company = normCompany(companyRaw);
+  const config = await getSequencesConfig();
+  let rule = config.productRules[cleanItem];
+  let isNew = false;
+  let dirty = false;
 
-  config.productRules[cleanItem] = newRule;
-  await saveSequencesConfig(config);
+  if (!rule) {
+    isNew = true;
+    const pattern = config.defaultPattern || "{ItemNumber} - SN{###}";
+    const perCompany = company && patternUsesCompany(pattern);
+    const max = await scanMaxExistingSeq(cleanItem, perCompany ? company : undefined);
+    rule = {
+      itemNumber: cleanItem,
+      productName: productName || cleanItem,
+      mode: config.defaultMode || "auto",
+      pattern,
+      nextNumber: perCompany ? 1 : max + 1,
+      padding: config.defaultPadding || 3,
+      lastGeneratedSerial: null,
+      ...(perCompany ? { companyNext: { [company]: max + 1 } } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+    config.productRules[cleanItem] = rule;
+    dirty = true;
+  } else {
+    if (productName && !rule.productName) {
+      rule.productName = productName;
+      dirty = true;
+    }
+    // First time this company uses a company-wise series: start after its highest issued serial.
+    if (company && patternUsesCompany(rule.pattern) && rule.companyNext?.[company] === undefined) {
+      const max = await scanMaxExistingSeq(cleanItem, company);
+      rule.companyNext = { ...(rule.companyNext || {}), [company]: max + 1 };
+      dirty = true;
+    }
+  }
 
-  const nextSerial = formatSequenceSerial(newRule.pattern, cleanItem, newRule.nextNumber, newRule.padding);
-  return { rule: newRule, nextSerial, isNew: true };
+  if (dirty) await saveSequencesConfig(config);
+
+  const nextNumber = nextNumberFor(rule, company);
+  const nextSerial = formatSequenceSerial(rule.pattern, cleanItem, nextNumber, rule.padding, {
+    company: company || undefined,
+    productName: rule.productName || productName,
+  });
+  return { rule, nextSerial, nextNumber, isNew };
 }
 
 /**
@@ -148,36 +171,32 @@ export async function getOrInitProductSequence(
  */
 export async function advanceProductSequence(
   itemNumber: string,
-  usedSerial?: string
+  usedSerial?: string,
+  companyRaw?: string,
 ): Promise<void> {
   const cleanItem = (itemNumber || "").trim();
   if (!cleanItem) return;
+  const company = normCompany(companyRaw);
 
+  await getOrInitProductSequence(cleanItem, undefined, company); // make sure rule / company counter exist
   const config = await getSequencesConfig();
-  let rule = config.productRules[cleanItem];
+  const rule = config.productRules[cleanItem];
+  if (!rule) return;
 
-  if (!rule) {
-    // If not found, init first
-    const init = await getOrInitProductSequence(cleanItem);
-    rule = init.rule;
-  }
-
-  // Parse sequence number from usedSerial if provided to ensure counter stays >= used number
-  let advancedNumber = rule.nextNumber + 1;
+  const current = nextNumberFor(rule, company);
+  let advanced = current + 1;
   if (usedSerial) {
     const match = usedSerial.match(/SN(\d+)/i) || usedSerial.match(/(\d+)$/);
-    if (match) {
-      const num = parseInt(match[1], 10);
-      if (!isNaN(num) && num >= rule.nextNumber) {
-        advancedNumber = num + 1;
-      }
-    }
+    const num = match ? parseInt(match[1], 10) : NaN;
+    if (!isNaN(num) && num >= current) advanced = num + 1;
   }
 
-  rule.nextNumber = advancedNumber;
-  if (usedSerial) {
-    rule.lastGeneratedSerial = usedSerial;
+  if (company && patternUsesCompany(rule.pattern)) {
+    rule.companyNext = { ...(rule.companyNext || {}), [company]: advanced };
+  } else {
+    rule.nextNumber = advanced;
   }
+  if (usedSerial) rule.lastGeneratedSerial = usedSerial;
   rule.updatedAt = new Date().toISOString();
 
   config.productRules[cleanItem] = rule;

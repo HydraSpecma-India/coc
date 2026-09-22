@@ -742,17 +742,23 @@ export function CocWizard({
     source: "db_configured" | "default_auto";
   } | null>(null);
 
-  const fetchProductSequence = async (itemNumber: string, itemDescription?: string) => {
+  // Set once the configured product series has supplied the serial, so the older
+  // "count existing COCs" suggestion never overwrites it (e.g. a {Company} pattern).
+  const seqSerialAppliedRef = useRef(false);
+
+  const fetchProductSequence = async (itemNumber: string, itemDescription?: string, company?: string) => {
+    seqSerialAppliedRef.current = false;
     try {
       const res = await api<{
         ok: boolean;
         rule: { itemNumber: string; mode: "auto" | "manual"; pattern: string; nextNumber: number };
         samplePreview: string;
         source: "db_configured" | "default_auto";
-      }>(`/api/admin/number-sequences/rule?itemNumber=${encodeURIComponent(itemNumber)}&itemDescription=${encodeURIComponent(itemDescription || "")}`);
+      }>(`/api/admin/number-sequences/rule?itemNumber=${encodeURIComponent(itemNumber)}&itemDescription=${encodeURIComponent(itemDescription || "")}&company=${encodeURIComponent(company && company.toUpperCase() !== "ALL" ? company.toUpperCase() : "")}`);
       if (res.ok && res.rule) {
         setProductSequence(res);
         if (res.rule.mode === "auto" && res.samplePreview) {
+          seqSerialAppliedRef.current = true;
           setManualFields((prev) => ({
             ...prev,
             SerialNumber: res.samplePreview,
@@ -777,13 +783,17 @@ export function CocWizard({
           const padNext = String(nextIndex).padStart(4, "0");
           const prefixItem = itemNumber?.trim() || poNumber.trim();
           const autoSuggestedSerial = `${prefixItem} - SN${padNext}`;
-          setManualFields((prev) => ({
-            ...prev,
-            SerialNumber: autoSuggestedSerial,
-          }));
-          setSerialNotice(
-            `Found ${count} previously issued Certificate(s) for this order. Auto-incremented serial number to "${autoSuggestedSerial}".`
-          );
+          if (seqSerialAppliedRef.current) {
+            setSerialNotice(`Found ${count} previously issued Certificate(s) for this order. Serial number follows the product series.`);
+          } else {
+            setManualFields((prev) => ({
+              ...prev,
+              SerialNumber: autoSuggestedSerial,
+            }));
+            setSerialNotice(
+              `Found ${count} previously issued Certificate(s) for this order. Auto-incremented serial number to "${autoSuggestedSerial}".`
+            );
+          }
         } else {
           setSerialNotice(null);
         }
@@ -1083,7 +1093,7 @@ export function CocWizard({
       fetchExistingCocsForPO(order.ProductionOrder, order.ItemNumber);
     }
 
-    fetchProductSequence(order.ItemNumber, order.ItemDescription);
+    fetchProductSequence(order.ItemNumber, order.ItemDescription, order.dataAreaId || selectedCompany);
   };
 
   // Initial PO search
@@ -2252,7 +2262,7 @@ export function CocWizard({
                         setShowManualModal(false);
                         fetchSalesOrdersForPO(finalOrder.ItemNumber, finalOrder.dataAreaId || selectedCompany, finalOrder);
                         fetchExistingCocsForPO(finalOrder.ProductionOrder, finalOrder.ItemNumber);
-                        fetchProductSequence(finalOrder.ItemNumber, finalOrder.ItemDescription);
+                        fetchProductSequence(finalOrder.ItemNumber, finalOrder.ItemDescription, finalOrder.dataAreaId || selectedCompany);
                         toast.success(`Applied order: ${manualOrder.ProductionOrder} (Customer Part: ${finalCustPart})`);
                       }}
                     >
