@@ -63,6 +63,11 @@ export const InputFieldDefSchema = z.object({
   placeholder: z.string().max(200).optional(),
   help: z.string().max(400).optional(),
   defaultValue: z.string().max(400).optional(),
+  /**
+   * How the value is printed on the PDF, e.g. "<{value} mm" → user types 1, PDF shows "<1 mm".
+   * Tokens: {value}, {unit}. Empty = the value as typed.
+   */
+  printFormat: z.string().max(60).optional(),
   /** Optional preset positions on the template (one value can be stamped in several boxes) */
   placements: z.array(PlacementSchema).max(40).optional(),
 });
@@ -144,6 +149,8 @@ export const MeasurementEntrySchema = z.object({
   min: z.number().nullable().optional(),
   max: z.number().nullable().optional(),
   status: z.enum(["OK", "NOK", ""]).default(""),
+  /** Value as stamped on the PDF (after the field's print format) */
+  printed: z.string().max(4000).optional(),
   source: z.enum(["manual", "qr"]).default("manual"),
   printSheet: z.boolean().default(true),
 });
@@ -200,6 +207,21 @@ export function evaluateField(field: Pick<InputFieldDef, "type" | "min" | "max">
     return field.min != null || field.max != null ? "OK" : "";
   }
   return "";
+}
+
+/** Apply the field's print format: "<{value} mm" + "1" → "<1 mm" (also accepts "<1", "1 mm", "<1mm"). */
+export function formatPrinted(field: Pick<InputFieldDef, "printFormat" | "unit">, raw: string): string {
+  const value = (raw ?? "").trim();
+  if (!value || !field.printFormat) return value;
+  const fmt = field.printFormat;
+  let v = value;
+  // the format already carries the comparison sign → drop one typed by the user
+  if (/^\s*(<=|>=|≤|≥|<|>)/.test(fmt)) v = v.replace(/^(<=|>=|≤|≥|<|>)\s*/, "");
+  // the format already carries the unit → drop a unit typed by the user
+  const unit = (field.unit || "").trim();
+  const unitInFmt = fmt.includes("{unit}") ? unit : (fmt.match(/\{value\}\s*([A-Za-z%°/]+)/)?.[1] ?? "");
+  if (unitInFmt) v = v.replace(new RegExp(`\\s*${unitInFmt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i"), "");
+  return fmt.replace(/\{value\}/g, v).replace(/\{unit\}/g, unit).trim();
 }
 
 export function describeLimits(f: Pick<InputFieldDef, "min" | "max" | "unit" | "nominal">): string {

@@ -166,7 +166,7 @@ function appendMeasurementSheets(pdf: PDFDocument, fonts: Fonts, ctx: ExtrasCont
     g.items.forEach((m, idx) => {
       const spec = m.nominal || (m.min != null && m.max != null ? `${m.min} - ${m.max}` : m.min != null ? `>= ${m.min}` : m.max != null ? `<= ${m.max}` : "");
       const specText = spec ? `${spec}${m.unit && !spec.includes(m.unit) ? ` ${m.unit}` : ""}` : "";
-      const valueText = m.value ? `${m.value}${m.unit && m.type === "number" ? ` ${m.unit}` : ""}` : "-";
+      const valueText = m.printed ? m.printed : m.value ? `${m.value}${m.unit && m.type === "number" ? ` ${m.unit}` : ""}` : "-";
       const cells: Record<string, string[]> = {
         no: [String(idx + 1)],
         label: wrap(safe(m.label), fonts.regular, size, COLS[1].w - 8),
@@ -243,7 +243,7 @@ function stampUnplacedOnPages(pdf: PDFDocument, fonts: Fonts, ctx: ExtrasContext
       const col = i % 2;
       const row = Math.floor(i / 2);
       const label = safe(`${m.label}: `);
-      const val = safe(`${m.value}${m.unit && m.type === "number" ? ` ${m.unit}` : ""}${m.status ? ` (${m.status})` : ""}`);
+      const val = safe(`${m.printed || `${m.value}${m.unit && m.type === "number" ? ` ${m.unit}` : ""}`}${m.status ? ` (${m.status})` : ""}`);
       const x = MARGIN + 4 + col * colW;
       const y = y0 + boxH - 22 - row * lineH;
       let lab = label;

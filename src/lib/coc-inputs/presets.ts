@@ -81,7 +81,8 @@ export function baseframe10700049Preset(): TemplateInputConfig {
         "Page 2 · Appendix B – Flatness of baseframe (COC-1070.0049-2)",
         [1, 2, 3, 4, 5].map((p) =>
           num(`Flatness${p}`, `Flatness point ${p}`, {
-            unit: "mm", nominal: "Max 4 mm", max: 4, placeholder: "e.g. <1",
+            unit: "mm", nominal: "Max 4 mm", max: 4, placeholder: "e.g. 1", printFormat: "<{value} mm",
+            help: "Type the reading only – it is stamped as “<value mm”, e.g. 1 → <1 mm.",
             placements: [cell(2, P2_COLS[p - 1], 699, 736, { fontSize: 13 })],
           }),
         ),

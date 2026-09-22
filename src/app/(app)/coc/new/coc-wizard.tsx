@@ -54,7 +54,7 @@ import {
 import { MeasurementSections, MeasurementEmptyHint, initMeasureValues, missingRequired, photoUploads, toMeasurementEntries, type MeasureValues } from "@/components/coc/MeasurementSections";
 import { DocumentCapture, toAttachmentUploads, type CapturedDoc } from "@/components/coc/DocumentCapture";
 import { PdfViewer } from "@/components/coc/PdfViewer";
-import { EMPTY_INPUT_CONFIG, type TemplateInputConfig } from "@/lib/coc-inputs/types";
+import { EMPTY_INPUT_CONFIG, formatPrinted, type TemplateInputConfig } from "@/lib/coc-inputs/types";
 
 export type DatePreset = "ALL" | "CURRENT_MONTH" | "LAST_MONTH" | "LAST_3_MONTHS" | "LAST_6_MONTHS" | "NEXT_MONTH";
 
@@ -355,10 +355,13 @@ export function CocWizard({
   const extrasPayload = () => ({
     measurements: toMeasurementEntries(inputConfig.sections, measureValues),
     attachments: [...photoUploads(inputConfig.sections, measureValues), ...toAttachmentUploads(capturedDocs)],
+    // values stamped on the template – after each field's print format (e.g. "<1 mm")
     measurementValues: Object.fromEntries(
-      Object.entries(measureValues)
-        .filter(([, v]) => !v.photo && (v.value ?? "").trim())
-        .map(([k, v]) => [k, v.value]),
+      inputConfig.sections
+        .flatMap((s) => s.fields)
+        .filter((f) => f.type !== "photo")
+        .map((f) => [f.key, formatPrinted(f, measureValues[f.key]?.value ?? "")] as const)
+        .filter(([, v]) => v),
     ) as Record<string, string>,
   });
   const [showUploadPdfModal, setShowUploadPdfModal] = useState(false);

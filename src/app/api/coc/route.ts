@@ -49,7 +49,10 @@ export const GET = route(async (req) => {
   const offsetParam = Number.parseInt(req.nextUrl.searchParams.get("offset") || "0", 10);
   const limit = Number.isFinite(limitParam) ? Math.min(100, Math.max(1, limitParam)) : 50;
   const offset = Number.isFinite(offsetParam) ? Math.max(0, offsetParam) : 0;
-  const docs = await listCocDocuments({ query: q, productionOrder, limit, offset });
+  const isoOrUndef = (v: string | null) => (v && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : undefined);
+  const from = isoOrUndef(req.nextUrl.searchParams.get("from"));
+  const to = isoOrUndef(req.nextUrl.searchParams.get("to"));
+  const docs = await listCocDocuments({ query: q, productionOrder, limit, offset, from, to });
   return json({ ok: true, documents: docs, hasMore: docs.length === limit });
 });
 

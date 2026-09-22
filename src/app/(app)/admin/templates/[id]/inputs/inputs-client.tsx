@@ -419,6 +419,17 @@ export function InputsEditorClient({
                             <Field label="Nominal / specification" hint="shown to user & printed">
                               <Input value={f.nominal ?? ""} placeholder="e.g. 25.0 ± 0.2" disabled={!canManage} onChange={(e) => updateField(s.id, f.id, { nominal: e.target.value || undefined })} />
                             </Field>
+                            {f.type !== "photo" && f.type !== "checkbox" && (
+                              <Field label="Print format" hint="{value} {unit}">
+                                <Input
+                                  value={f.printFormat ?? ""}
+                                  placeholder="e.g. <{value} mm"
+                                  disabled={!canManage}
+                                  onChange={(e) => updateField(s.id, f.id, { printFormat: e.target.value || undefined })}
+                                  className="font-mono"
+                                />
+                              </Field>
+                            )}
                             <Field label="Default value">
                               <Input value={f.defaultValue ?? ""} disabled={!canManage} onChange={(e) => updateField(s.id, f.id, { defaultValue: e.target.value || undefined })} />
                             </Field>

@@ -191,6 +191,9 @@ export async function listCocDocuments(opts: {
   productionOrder?: string;
   limit?: number;
   offset?: number;
+  /** ISO timestamps (inclusive) on the issue date (created_at) */
+  from?: string;
+  to?: string;
 } = {}): Promise<COCDocumentRow[]> {
   const sb = supabaseAdmin();
   let q = sb.from("coc_documents").select("*").order("created_at", { ascending: false });
@@ -198,6 +201,9 @@ export async function listCocDocuments(opts: {
   if (opts.productionOrder) {
     q = q.eq("production_order", opts.productionOrder);
   }
+
+  if (opts.from) q = q.gte("created_at", opts.from);
+  if (opts.to) q = q.lte("created_at", opts.to);
 
   if (opts.query) {
     q = q.or(

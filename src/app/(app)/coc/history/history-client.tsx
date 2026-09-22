@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   PageHeader,
@@ -26,7 +26,10 @@ import {
   Eye,
   Building2,
   X,
+  CalendarRange,
+  Loader2,
 } from "lucide-react";
+import { DATE_RANGE_PRESETS, formatRangeLabel, presetRange, rangeToIso, type DateRangePreset } from "@/lib/utils/date-range";
 
 interface HistoryClientProps {
   initialDocs: COCDocumentRow[];
@@ -53,6 +56,43 @@ export function HistoryClient({
   }, []);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(initialDocs.length === HISTORY_PAGE_SIZE);
+
+  // Issue-date filter (server side, so paging stays correct)
+  const [datePreset, setDatePreset] = useState<DateRangePreset>("ALL");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [loadingRange, setLoadingRange] = useState(false);
+  const firstRange = useRef(true);
+
+  const applyPreset = (preset: DateRangePreset) => {
+    setDatePreset(preset);
+    if (preset === "CUSTOM") return; // keep the dates, user edits them
+    const r = presetRange(preset);
+    setDateFrom(r?.from ?? "");
+    setDateTo(r?.to ?? "");
+  };
+
+  useEffect(() => {
+    if (firstRange.current) {
+      firstRange.current = false;
+      return;
+    }
+    let active = true;
+    const { fromIso, toIso } = rangeToIso(dateFrom || undefined, dateTo || undefined);
+    const qs = `${fromIso ? `&from=${encodeURIComponent(fromIso)}` : ""}${toIso ? `&to=${encodeURIComponent(toIso)}` : ""}`;
+    setLoadingRange(true);
+    api<{ ok: boolean; documents: COCDocumentRow[]; hasMore: boolean }>(`/api/coc?offset=0&limit=${HISTORY_PAGE_SIZE}${qs}`)
+      .then((res) => {
+        if (!active) return;
+        setDocs(res.documents);
+        setHasMore(res.hasMore);
+      })
+      .catch(() => {})
+      .finally(() => active && setLoadingRange(false));
+    return () => {
+      active = false;
+    };
+  }, [dateFrom, dateTo]);
 
   // Company / Legal Entity Filter
   const defaultCompany =
@@ -149,11 +189,16 @@ export function HistoryClient({
     }
   };
 
+  const rangeQuery = () => {
+    const { fromIso, toIso } = rangeToIso(dateFrom || undefined, dateTo || undefined);
+    return `${fromIso ? `&from=${encodeURIComponent(fromIso)}` : ""}${toIso ? `&to=${encodeURIComponent(toIso)}` : ""}`;
+  };
+
   const loadMore = async () => {
     setLoadingMore(true);
     try {
       const result = await api<{ ok: boolean; documents: COCDocumentRow[]; hasMore: boolean }>(
-        `/api/coc?offset=${docs.length}&limit=${HISTORY_PAGE_SIZE}`,
+        `/api/coc?offset=${docs.length}&limit=${HISTORY_PAGE_SIZE}${rangeQuery()}`,
       );
       setDocs((current) => {
         const knownIds = new Set(current.map((doc) => doc.id));
@@ -239,6 +284,69 @@ export function HistoryClient({
             </span>
           </div>
 
+          {/* Issue-date filter */}
+          <div className="flex flex-col gap-2 pt-2 border-t border-ink-100 sm:flex-row sm:items-center sm:flex-wrap">
+            <div className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-ink-700">
+              <CalendarRange className="h-3.5 w-3.5 text-brand-600" />
+              <span>Issue date:</span>
+            </div>
+            <div className="-mx-4 flex items-center gap-1.5 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+              {DATE_RANGE_PRESETS.map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => applyPreset(p.value)}
+                  className={`shrink-0 rounded px-3 py-1.5 text-[11px] font-semibold border transition-colors sm:px-2.5 sm:py-1 ${
+                    datePreset === p.value
+                      ? "bg-ink-900 text-white border-ink-900"
+                      : "bg-white text-ink-600 border-ink-200 hover:bg-ink-100"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => {
+                  setDatePreset("CUSTOM");
+                  setDateFrom(e.target.value);
+                }}
+                className="h-9 w-full min-w-0 rounded-md border border-ink-300 bg-white px-2 text-xs sm:h-8 sm:w-36"
+                aria-label="From date"
+              />
+              <span className="text-xs text-ink-400">to</span>
+              <input
+                type="date"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => {
+                  setDatePreset("CUSTOM");
+                  setDateTo(e.target.value);
+                }}
+                className="h-9 w-full min-w-0 rounded-md border border-ink-300 bg-white px-2 text-xs sm:h-8 sm:w-36"
+                aria-label="To date"
+              />
+              {(dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  onClick={() => applyPreset("ALL")}
+                  className="flex h-8 shrink-0 items-center gap-1 rounded border border-red-200 bg-red-50 px-2 text-[11px] font-semibold text-red-700 hover:bg-red-100"
+                  title="Clear date filter"
+                >
+                  <X className="h-3 w-3" /> Clear
+                </button>
+              )}
+              {loadingRange && <Loader2 className="h-4 w-4 animate-spin text-ink-400" />}
+            </div>
+            {(dateFrom || dateTo) && (
+              <span className="text-[11px] font-medium text-ink-500 sm:ml-auto">{formatRangeLabel(dateFrom || undefined, dateTo || undefined)}</span>
+            )}
+          </div>
+
           {/* Search Input */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-ink-100">
             <div className="relative w-full max-w-xl">
@@ -276,7 +384,7 @@ export function HistoryClient({
         <div className="rounded-xl border border-dashed border-ink-300 p-12 text-center bg-ink-50/50">
           <FileCheck className="mx-auto h-10 w-10 text-ink-400 mb-3" />
           <h4 className="text-sm font-semibold text-ink-900">
-            {query || selectedCompany !== "ALL"
+            {query || selectedCompany !== "ALL" || dateFrom || dateTo
               ? "No completed COCs match your search and filter criteria."
               : "No Certificates of Conformity have been completed yet."}
           </h4>
@@ -286,13 +394,14 @@ export function HistoryClient({
               : "Once you generate a Certificate of Conformity from the New COC wizard, it will appear here."}
           </p>
           <div className="mt-4 flex items-center justify-center gap-3">
-            {(query || selectedCompany !== "ALL") && (
+            {(query || selectedCompany !== "ALL" || dateFrom || dateTo) && (
               <Button
                 variant="secondary"
                 size="sm"
                 onClick={() => {
                   setQuery("");
                   setSelectedCompany("ALL");
+                  applyPreset("ALL");
                 }}
               >
                 Reset Filters

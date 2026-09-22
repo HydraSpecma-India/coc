@@ -8,7 +8,7 @@ import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils/cn";
 import { QrScanner } from "./QrScanner";
 import {
-  describeLimits, evaluateField, parseQrPayload,
+  describeLimits, evaluateField, formatPrinted, parseQrPayload,
   type AttachmentUpload, type InputFieldDef, type InputSection, type MeasurementEntry,
 } from "@/lib/coc-inputs/types";
 
@@ -45,6 +45,7 @@ export function toMeasurementEntries(sections: InputSection[], values: MeasureVa
         min: f.min ?? null,
         max: f.max ?? null,
         status: evaluateField(f, v.value ?? ""),
+        printed: f.type === "photo" ? undefined : formatPrinted(f, v.value ?? "") || undefined,
         source: v.source,
         printSheet: s.printSheet,
       };
@@ -298,6 +299,11 @@ export function MeasurementSections({
                         </div>
                         <div className={cn("mt-1 flex min-h-4 items-center gap-2 text-[11px]", f.type === "checkbox" && !missing && "hidden")}>
                           {limits && <span className="text-ink-500">Spec: {limits}</span>}
+                          {f.printFormat && v.trim() && (
+                            <span className="rounded bg-ink-100 px-1.5 font-mono text-ink-700" title="As stamped on the certificate">
+                              PDF: {formatPrinted(f, v)}
+                            </span>
+                          )}
                           {status === "OK" && (
                             <span className="inline-flex items-center gap-0.5 font-semibold text-emerald-700">
                               <CheckCircle2 className="h-3 w-3" /> OK
