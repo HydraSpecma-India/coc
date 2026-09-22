@@ -54,7 +54,7 @@ export const GET = route(async (req) => {
         if (!cocsByPO.has(poKey)) cocsByPO.set(poKey, []);
         cocsByPO.get(poKey)!.push({
           id: coc.id,
-          coc_number: coc.coc_number || `COC-${coc.id.slice(0, 8)}`,
+          coc_number: coc.coc_number || "Pending inspection",
           serial_number: coc.serial_number,
           quantity: Number(coc.quantity) || 1,
           status: coc.status,

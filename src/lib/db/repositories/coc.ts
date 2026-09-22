@@ -95,9 +95,11 @@ export async function createCocDocument(input: {
   userId?: string;
   /** legal entity (dataAreaId) – every company has its own COC number sequence */
   company?: string;
+  /** false = no COC number yet (inspection workflow: the number is given when quality issues it) */
+  reserveNumber?: boolean;
 }): Promise<COCDocumentRow> {
   const sb = supabaseAdmin();
-  const cocNumber = await reserveCompanyCocNumber(input.company);
+  const cocNumber = input.reserveNumber === false ? null : await reserveCompanyCocNumber(input.company);
 
   const { data, error } = await sb
     .from("coc_documents")
@@ -198,9 +200,12 @@ export async function listCocDocuments(opts: {
   /** ISO timestamps (inclusive) on the issue date (created_at) */
   from?: string;
   to?: string;
+  /** include documents without a COC number (waiting for / rejected in quality inspection) */
+  includeUnnumbered?: boolean;
 } = {}): Promise<COCDocumentRow[]> {
   const sb = supabaseAdmin();
   let q = sb.from("coc_documents").select("*").order("created_at", { ascending: false });
+  if (!opts.includeUnnumbered) q = q.not("coc_number", "is", null);
 
   if (opts.productionOrder) {
     q = q.eq("production_order", opts.productionOrder);

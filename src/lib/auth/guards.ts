@@ -54,3 +54,15 @@ export function requireRole(session: Session, roles: readonly string[]): void {
 
   throw Errors.forbidden(`Requires role: ${roles.join(" or ")}`);
 }
+
+/** Non-throwing capability check for a session already loaded. */
+export async function sessionCan(session: AppSession, capability: Capability | string): Promise<boolean> {
+  const caps = session.user.capabilities || (await getCapabilitiesForRole(session.user.role));
+  return can(session.user.role, capability, caps);
+}
+
+/** True when the user may work with documents of this company (allowed companies on the user). */
+export function companyAllowed(session: AppSession, company?: string | null): boolean {
+  const allowed = (session.user.allowedCompanies || ["ALL"]).map((c) => String(c).toUpperCase());
+  return allowed.length === 0 || allowed.includes("ALL") || allowed.includes(String(company || "").toUpperCase());
+}

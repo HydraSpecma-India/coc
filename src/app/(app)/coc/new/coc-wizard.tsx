@@ -50,6 +50,8 @@ import {
   X,
   ClipboardList,
   SlidersHorizontal,
+  GitBranch,
+  Send,
 } from "lucide-react";
 import { MeasurementSections, MeasurementEmptyHint, initMeasureValues, missingRequired, photoUploads, toMeasurementEntries, type MeasureValues } from "@/components/coc/MeasurementSections";
 import { DocumentCapture, toAttachmentUploads, type CapturedDoc } from "@/components/coc/DocumentCapture";
@@ -274,6 +276,8 @@ export function CocWizard({
   /** Returns a list of problems that block leaving step 2. */
   const step2Problems = (): string[] => {
     const problems: string[] = [];
+    // inspection workflow: quality completes the data entry, production only prepares the COC
+    if (workflowPending) return problems;
     const missing = missingRequired(inputConfig.sections, measureValues);
     if (missing.length) problems.push(`${missing.length} required field(s) missing: ${missing.slice(0, 4).map((f) => f.label).join(", ")}${missing.length > 4 ? "…" : ""}`);
     if (capturedDocs.length < attachmentsNeeded) problems.push(`Capture at least ${attachmentsNeeded} supplier document(s) (${capturedDocs.length} added)`);
@@ -306,7 +310,7 @@ export function CocWizard({
     setStep(target);
   };
 
-  const extrasPayload = () => ({
+  const extrasPayload = () => (!productionEntersData ? { measurements: [], attachments: [], measurementValues: {} as Record<string, string> } : {
     measurements: toMeasurementEntries(inputConfig.sections, measureValues),
     attachments: [...photoUploads(inputConfig.sections, measureValues), ...toAttachmentUploads(capturedDocs)],
     // values stamped on the template – after each field's print format (e.g. "<1 mm")
@@ -441,6 +445,33 @@ export function CocWizard({
   const [poQuery, setPoQuery] = useState("");
   const [searchResults, setSearchResults] = useState<D365ProductionOrder[]>([]);
   const [selectedPO, setSelectedPO] = useState<D365ProductionOrder | null>(null);
+
+  // Quality inspection workflow (admin setting per item number): production prepares, quality issues
+  const [workflowMatch, setWorkflowMatch] = useState<{
+    key: string;
+    applies: boolean;
+    rule?: { id: string; name: string; instructions: string; productionCanEnterData: boolean };
+  } | null>(null);
+  const [workflowNote, setWorkflowNote] = useState("");
+  const wfItem = selectedPO?.ItemNumber?.trim() || "";
+  const wfCompany = (selectedPO?.dataAreaId || "").toUpperCase();
+  const wfKey = wfItem ? `${wfItem}|${wfCompany}` : "";
+  useEffect(() => {
+    if (!wfKey) return;
+    let active = true;
+    const [item, comp] = wfKey.split("|");
+    api<{ ok: boolean; applies: boolean; rule?: { id: string; name: string; instructions: string; productionCanEnterData: boolean } }>(
+      `/api/workflow/match?itemNumber=${encodeURIComponent(item)}&company=${encodeURIComponent(comp)}`,
+    )
+      .then((r) => active && setWorkflowMatch({ key: wfKey, applies: Boolean(r.applies), rule: r.rule }))
+      .catch(() => active && setWorkflowMatch({ key: wfKey, applies: false }));
+    return () => {
+      active = false;
+    };
+  }, [wfKey]);
+  const workflowPending = Boolean(wfKey && workflowMatch?.key === wfKey && workflowMatch.applies);
+  const workflowRule = workflowPending ? workflowMatch?.rule : undefined;
+  const productionEntersData = !workflowPending || workflowRule?.productionCanEnterData !== false;
 
   // Pagination states for Production Orders
   const [pageSize] = useState<number>(50);
@@ -1450,7 +1481,7 @@ export function CocWizard({
 
     setGenerating(true);
     try {
-      const res = await api<{ ok: boolean; documentId: string; cocNumber: string }>("/api/coc", {
+      const res = await api<{ ok: boolean; documentId: string; cocNumber?: string; pending?: boolean; workflow?: string }>("/api/coc", {
         method: "POST",
         json: {
           templateId: tpl.id,
@@ -1474,10 +1505,14 @@ export function CocWizard({
           signatureBase64: signatureDataUrl,
           measurements: extras.measurements,
           attachments: extras.attachments,
+          workflowNote: workflowPending ? workflowNote.trim() || undefined : undefined,
         },
       });
 
-      if (res.ok) {
+      if (res.ok && res.pending) {
+        toast.success("Sent to Quality inspection", `${prodOrder} · ${manualFields.SerialNumber || ""} is waiting in Pending Inspection.`);
+        router.push(`/coc/inspection`);
+      } else if (res.ok) {
         toast.success(`Generated ${res.cocNumber} successfully!`);
         router.push(`/coc/${res.documentId}`);
       }
@@ -1545,7 +1580,7 @@ export function CocWizard({
                 <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Sign
               </Button>
               <Button loading={generating} onClick={handleCreateCoc} className="flex-1 justify-center text-xs font-bold bg-brand-500 hover:bg-brand-600 text-ink-900">
-                Issue COC <FileCheck className="h-3.5 w-3.5 ml-1" />
+                {workflowPending ? <>Send to Quality <Send className="h-3.5 w-3.5 ml-1" /></> : <>Issue COC <FileCheck className="h-3.5 w-3.5 ml-1" /></>}
               </Button>
             </div>
           )
@@ -2806,6 +2841,16 @@ export function CocWizard({
       {/* Step 2: Quality Inspection Data & Official Workflow Checklist */}
       {step === 2 && (
         <div className="space-y-6">
+          {workflowPending && (
+            <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 flex items-start gap-2.5">
+              <GitBranch className="h-4 w-4 shrink-0 mt-0.5 text-sky-700" />
+              <div className="space-y-0.5">
+                <p className="font-semibold text-sm">Quality inspection workflow · {workflowRule?.name}</p>
+                <p>This item is inspected by Quality before the COC is issued. Check the order and customer data; {productionEntersData ? "the inspection fields below are optional – Quality completes them." : "Quality enters the inspection data."}</p>
+                {workflowRule?.instructions && <p className="italic">“{workflowRule.instructions}”</p>}
+              </div>
+            </div>
+          )}
           {/* Part & Order References Box */}
           <Card>
             <CardHeader
@@ -2896,7 +2941,7 @@ export function CocWizard({
           </Card>
 
           {/* Admin-defined data entry for template pages 2+ (manual / QR) */}
-          {inputConfigLoading ? (
+          {!productionEntersData ? null : inputConfigLoading ? (
             <div className="rounded-lg border border-ink-200 bg-white p-4 text-xs text-ink-500">Loading template data fields…</div>
           ) : inputConfig.sections.length > 0 ? (
             <>
@@ -2916,7 +2961,7 @@ export function CocWizard({
             <MeasurementEmptyHint canManage={canManageTemplates} templateId={selectedTemplate?.id} />
           )}
 
-          {inputConfig.attachments.enabled && (
+          {productionEntersData && inputConfig.attachments.enabled && (
             <DocumentCapture
               settings={inputConfig.attachments}
               docs={capturedDocs}
@@ -3028,7 +3073,21 @@ export function CocWizard({
       )}
 
       {/* Step 3: Digital Signature */}
-      {step === 3 && (
+      {step === 3 && workflowPending && (
+        <div className="mb-4">
+          {workflowPending && (
+            <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 flex items-start gap-2.5">
+              <GitBranch className="h-4 w-4 shrink-0 mt-0.5 text-sky-700" />
+              <div className="space-y-0.5">
+                <p className="font-semibold text-sm">Quality inspection workflow · {workflowRule?.name}</p>
+                <p>No signature is needed from production – the Quality inspector signs when issuing the COC. Continue to Review.</p>
+                {workflowRule?.instructions && <p className="italic">“{workflowRule.instructions}”</p>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {step === 3 && !workflowPending && (
         <Card>
           <CardHeader
             title="Authorized Digital Signature"
@@ -3278,8 +3337,8 @@ export function CocWizard({
                 disabled={Boolean(serialWarning)}
                 className="bg-brand-500 hover:bg-brand-600 text-ink-900 font-semibold gap-2 border-brand-500 disabled:opacity-50"
               >
-                <FileCheck className="h-4 w-4" />
-                Generate & Issue Official COC
+                {workflowPending ? <Send className="h-4 w-4" /> : <FileCheck className="h-4 w-4" />}
+                {workflowPending ? "Send to Quality Inspection" : "Generate & Issue Official COC"}
               </Button>
             }
           />
@@ -3299,6 +3358,30 @@ export function CocWizard({
                     Go to Step 2 to Change Serial Number
                   </Button>
                 </div>
+              </div>
+            )}
+
+            {workflowPending && (
+              <div className="space-y-2">
+                {workflowPending && (
+            <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 flex items-start gap-2.5">
+              <GitBranch className="h-4 w-4 shrink-0 mt-0.5 text-sky-700" />
+              <div className="space-y-0.5">
+                <p className="font-semibold text-sm">Quality inspection workflow · {workflowRule?.name}</p>
+                <p>“Send to Quality Inspection” puts this COC in Pending Inspection. Quality inspects, signs and issues it – the COC number is assigned then.</p>
+                {workflowRule?.instructions && <p className="italic">“{workflowRule.instructions}”</p>}
+              </div>
+            </div>
+          )}
+                <Field label="Note for Quality (optional)">
+                  <Textarea
+                    rows={2}
+                    value={workflowNote}
+                    onChange={(e) => setWorkflowNote(e.target.value)}
+                    placeholder="e.g. Unit ready at test bench 2"
+                    maxLength={1000}
+                  />
+                </Field>
               </div>
             )}
 
@@ -3329,8 +3412,8 @@ export function CocWizard({
                 disabled={Boolean(serialWarning)}
                 className="bg-brand-500 hover:bg-brand-600 text-ink-900 font-semibold gap-2 border-brand-500 disabled:opacity-50"
               >
-                <FileCheck className="h-4 w-4" />
-                Confirm & Issue Official Certificate
+                {workflowPending ? <Send className="h-4 w-4" /> : <FileCheck className="h-4 w-4" />}
+                {workflowPending ? "Send to Quality Inspection" : "Confirm & Issue Official Certificate"}
               </Button>
             </div>
           </CardBody>

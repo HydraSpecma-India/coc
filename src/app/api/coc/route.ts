@@ -1,47 +1,14 @@
 import { route, json } from "@/lib/api/handler";
 import { requireCapability, requireSession } from "@/lib/auth/guards";
-import { createCocDocument, listCocDocuments, logProcessStep, uploadGeneratedPdf, uploadAttachmentPdf } from "@/lib/db/repositories/coc";
-import { attachmentToPdf } from "@/lib/render/coc-extras";
+import { createCocDocument, listCocDocuments } from "@/lib/db/repositories/coc";
 import { assertAttachmentSizes } from "@/lib/coc-inputs/server";
-import {
-  AttachmentUploadSchema, MeasurementEntrySchema, MAX_ATTACHMENTS,
-  type StoredAttachment,
-} from "@/lib/coc-inputs/types";
-import { renderCOCPdf } from "@/lib/render/pdf-renderer";
-import { D365Service } from "@/lib/integrations/d365/service";
-import { TeamsService } from "@/lib/integrations/teams/service";
 import { supabaseAdmin } from "@/lib/db/supabase-admin";
 import { logger } from "@/lib/logging/logger";
 import { Errors } from "@/lib/errors";
 import { advanceProductSequence } from "@/lib/sequences/repository";
-import { z } from "zod";
-
-const createCocSchema = z.object({
-  templateId: z.string().optional(),
-  templateVersionId: z.string().optional(),
-  templateVersionNumber: z.number().default(1),
-  productionOrder: z.string().optional(),
-  itemNumber: z.string().optional(),
-  itemDescription: z.string().optional(),
-  customerName: z.string().optional(),
-  customerPO: z.string().optional(),
-  customerPartNumber: z.string().optional(),
-  salesOrder: z.string().optional(),
-  salesLine: z.string().optional(),
-  customerAccount: z.string().optional(),
-  /** legal entity / dataAreaId of the production order (company-wise COC numbering) */
-  company: z.string().max(10).optional(),
-  quantity: z.number().default(1),
-  unitOfMeasure: z.string().default("Pcs"),
-  batchNumber: z.string().optional(),
-  deliveryDate: z.string().optional(),
-  serialNumber: z.string().optional(),
-  manualValues: z.record(z.string(), z.string()).optional(),
-  signatureBase64: z.string().optional(),
-  measurements: z.array(MeasurementEntrySchema).max(500).optional(),
-  attachments: z.array(AttachmentUploadSchema).max(MAX_ATTACHMENTS).optional(),
-});
-
+import { createCocSchema, runIssuePipeline, uuidOrNull } from "@/lib/coc/issue";
+import { getWorkflowConfig, saveWorkflowPayload } from "@/lib/workflow/server";
+import { canIssueDirectly, matchWorkflowRule, type WorkflowInfo } from "@/lib/workflow/types";
 
 export const GET = route(async (req) => {
   await requireSession();
@@ -150,8 +117,17 @@ export const POST = route(async (req) => {
     parsed.manualValues?.["DeliveryDate"] ||
     "";
 
-  // 1. Create database record in DRAFT
-  const doc = await createCocDocument({
+  const companyCode = (parsed.company || parsed.customerAccount || "HSIN").toUpperCase();
+  const d365Context = {
+    customerName: resolvedCustomerName,
+    deliveryDate: resolvedDeliveryDate,
+    batchNumber: parsed.batchNumber,
+    unitOfMeasure: parsed.unitOfMeasure,
+    customerPartNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
+    externalItemNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
+    dataAreaId: companyCode,
+  };
+  const docInput = {
     template_id: tplId!,
     template_version_id: tplVerId!,
     template_version_number: tplVerNum,
@@ -164,215 +140,80 @@ export const POST = route(async (req) => {
     customer_account: parsed.customerAccount,
     quantity: parsed.quantity,
     serial_number: parsed.serialNumber,
-    d365_context_json: {
-      customerName: resolvedCustomerName,
-      deliveryDate: resolvedDeliveryDate,
-      batchNumber: parsed.batchNumber,
-      unitOfMeasure: parsed.unitOfMeasure,
-      customerPartNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
-      externalItemNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
-      dataAreaId: (parsed.company || parsed.customerAccount || "HSIN").toUpperCase(),
-    },
     userId: session.user.id,
     company: parsed.company || parsed.customerAccount || "HSIN",
-  });
+  };
 
-  const cocNumber = doc.coc_number || "COC-" + doc.id.slice(0, 8);
-
-  try {
-    // Step 1: D365 Fetch & Context verification
-    await logProcessStep(doc.id, "D365_FETCH", "OK", { productionOrder: prodOrder });
-
-    // Step 2: Validation
-    await logProcessStep(doc.id, "VALIDATE", "OK", { quantity: parsed.quantity });
-
-    // Step 3: Render PDF
-    const pdfBytes = await renderCOCPdf({
-      cocNumber,
-      productionOrder: prodOrder,
-      itemNumber: itemNum,
-      itemDescription: itemDesc,
-      customerName: resolvedCustomerName,
-      customerPO: parsed.customerPO || parsed.manualValues?.["CustomerPO"] || "4509008214",
-      customerPartNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
-      salesOrder: parsed.salesOrder || "",
-      batchNumber: parsed.batchNumber || "",
-      deliveryDate: resolvedDeliveryDate,
-      serialNumber: parsed.serialNumber || parsed.manualValues?.["SerialNumber"] || "",
-      quantity: parsed.quantity,
-      unitOfMeasure: parsed.unitOfMeasure,
-      manualValues: parsed.manualValues,
-      signatureBase64: parsed.signatureBase64,
-      isDraft: false,
-      templateId: tplId,
-      templateVersionId: tplVerId,
-      measurements: parsed.measurements,
-      attachments: parsed.attachments,
-    });
-    await logProcessStep(doc.id, "RENDER", "OK", {
-      byteLength: pdfBytes.length,
-      measurements: parsed.measurements?.length ?? 0,
-      attachments: parsed.attachments?.length ?? 0,
-    });
-
-    // Store every captured supplier document individually as well (traceability / re-use)
-    const storedAttachments: StoredAttachment[] = [];
-    const atts = parsed.attachments ?? [];
-    for (let i = 0; i < atts.length; i++) {
-      const a = atts[i];
-      const entry: StoredAttachment = { index: i, name: a.name, caption: a.caption, mimeType: a.mimeType, storagePath: null, pageCount: 0, sizeBytes: Math.floor((a.dataBase64.length * 3) / 4) };
-      try {
-        const single = await attachmentToPdf(a, { cocNumber, productionOrder: prodOrder, itemNumber: itemNum, serialNumber: parsed.serialNumber }, i, atts.length);
-        entry.pageCount = single.pageCount;
-        entry.storagePath = await uploadAttachmentPdf(cocNumber, i, a.name, single.bytes);
-      } catch (attErr) {
-        logger.warn("Attachment storage failed", { cocNumber, index: i, error: (attErr as Error).message });
-      }
-      storedAttachments.push(entry);
-    }
-
-    // Step 4: Storage / SharePoint Upload
-    let storagePath: string | null = null;
+  // Inspection workflow: prepared by production, issued by quality
+  const rule = matchWorkflowRule(await getWorkflowConfig(), itemNum, companyCode);
+  if (rule && !canIssueDirectly(rule, session.user.role)) {
+    const now = new Date().toISOString();
+    const who = session.user.name || session.user.email || "User";
+    const workflow: WorkflowInfo = {
+      state: "PENDING_INSPECTION",
+      ruleId: rule.id,
+      ruleName: rule.name,
+      instructions: rule.instructions,
+      submittedBy: { id: session.user.id, email: session.user.email, name: session.user.name },
+      submittedAt: now,
+      note: parsed.workflowNote?.trim() || undefined,
+      history: [{ at: now, by: who, action: "SUBMITTED", note: parsed.workflowNote?.trim() || undefined }],
+    };
+    const doc = await createCocDocument({ ...docInput, reserveNumber: false, d365_context_json: { ...d365Context, workflow } });
     try {
-      storagePath = await uploadGeneratedPdf(cocNumber, pdfBytes);
-      await logProcessStep(doc.id, "SP_UPLOAD", "OK", { storagePath });
-    } catch (spErr) {
-      logger.error("Storage upload error", { error: (spErr as Error).message });
-      await logProcessStep(doc.id, "SP_UPLOAD", "FAILED", {}, (spErr as Error).message);
-      storagePath = `${new Date().getFullYear()}/${cocNumber}.pdf`;
-    }
-
-    // Step 5: Teams Webhook Notification
-    try {
-      await logProcessStep(doc.id, "TEAMS_WEBHOOK", "STARTED");
-      const teamsRes = await TeamsService.sendCocToTeams({
-        cocId: doc.id,
-        cocNumber,
+      await saveWorkflowPayload(doc.id, {
+        ...parsed,
         productionOrder: prodOrder,
         itemNumber: itemNum,
         itemDescription: itemDesc,
-        customerPO: parsed.customerPO,
         customerName: resolvedCustomerName,
-        customerPartNumber: parsed.customerPartNumber,
-        salesOrder: parsed.salesOrder,
-        company: parsed.customerAccount || prodOrder.slice(0, 4) || "HSIN",
-        serialNumber: parsed.serialNumber,
-        batchNumber: parsed.batchNumber,
         deliveryDate: resolvedDeliveryDate,
-        quantity: parsed.quantity,
-        unitOfMeasure: parsed.unitOfMeasure,
-        issuedBy: session.user.email || "System",
-        issueDate: new Date().toISOString(),
-        pdfBytes,
-        storagePath,
+        company: companyCode,
+        templateId: tplId,
+        templateVersionId: tplVerId,
+        templateVersionNumber: tplVerNum,
+        ...(rule.productionCanEnterData ? {} : { measurements: [], attachments: [] }),
       });
-      await logProcessStep(doc.id, "TEAMS_WEBHOOK", "OK", { status: teamsRes.status });
-    } catch (teamsErr) {
-      logger.warn("Teams webhook notification error", { error: (teamsErr as Error).message });
-      await logProcessStep(doc.id, "TEAMS_WEBHOOK", "FAILED", {}, (teamsErr as Error).message);
-    }
-
-    // Step 6: D365 Registration
-    try {
-      await D365Service.registerCOCDocument({
-        COCDocumentNumber: cocNumber,
-        ProductionOrder: prodOrder,
-        ItemNumber: itemNum,
-        CustomerPO: parsed.customerPO || "",
-        SalesOrder: parsed.salesOrder || "",
-        SerialNumber: parsed.serialNumber,
-        BatchNumber: parsed.batchNumber,
-        DeliveryDate: resolvedDeliveryDate,
-        DocumentURL: storagePath,
-        IssuedBy: session.user.email || "System",
-        IssueDate: new Date().toISOString(),
-      });
-      await logProcessStep(doc.id, "D365_UPDATE", "OK");
     } catch (e) {
-      await logProcessStep(doc.id, "D365_UPDATE", "FAILED", {}, (e as Error).message);
+      await sb.from("coc_documents").delete().eq("id", doc.id);
+      throw e;
     }
-
-    // Save manual field values
-    if (parsed.manualValues) {
-      const mergedManualValues = {
-        ...parsed.manualValues,
-        CustomerName: resolvedCustomerName,
-      };
-      const valueRows = Object.entries(mergedManualValues).map(([fieldName, val]) => ({
-        coc_document_id: doc.id,
-        field_name: fieldName,
-        source_type: "MANUAL",
-        value_text: val,
-      }));
-      if (valueRows.length > 0) {
-        await sb.from("coc_document_values").upsert(valueRows, { onConflict: "coc_document_id,field_name" });
-      }
-    }
-
-    // Snapshot of the admin-defined page 2+ data and the captured documents
-    const snapshotRows: Array<Record<string, unknown>> = [];
-    if (parsed.measurements?.length) {
-      const nok = parsed.measurements.filter((m) => m.status === "NOK").length;
-      snapshotRows.push({
-        coc_document_id: doc.id,
-        field_name: "__measurements",
-        source_type: "MANUAL",
-        value_text: `${parsed.measurements.length} value(s)${nok ? `, ${nok} out of tolerance` : ""}`,
-        value_json: parsed.measurements,
-      });
-    }
-    if (storedAttachments.length) {
-      snapshotRows.push({
-        coc_document_id: doc.id,
-        field_name: "__attachments",
-        source_type: "MANUAL",
-        value_text: `${storedAttachments.length} document(s)`,
-        value_json: storedAttachments,
-      });
-    }
-    if (snapshotRows.length) {
-      const { error: snapErr } = await sb.from("coc_document_values").upsert(snapshotRows, { onConflict: "coc_document_id,field_name" });
-      if (snapErr) logger.warn("Could not store measurement/attachment snapshot", { error: snapErr.message });
-    }
-
-    // Finalize document status
-    await sb
-      .from("coc_documents")
-      .update({
-        status: "COMPLETED",
-        generated_pdf_path: storagePath,
-        completed_at: new Date().toISOString(),
-        completed_by: session.user.id && /^[0-9a-f-]{36}$/i.test(session.user.id) ? session.user.id : null,
-      })
-      .eq("id", doc.id);
-
-    // Audit log
-    await sb.from("coc_audit_logs").insert({
-      entity_type: "COC_DOCUMENT",
-      entity_id: doc.id,
-      action: "GENERATE",
-      user_id: session.user.id && /^[0-9a-f-]{36}$/i.test(session.user.id) ? session.user.id : null,
-      user_email: session.user.email,
-      coc_number: cocNumber,
-      details: { productionOrder: parsed.productionOrder, itemNumber: parsed.itemNumber },
-    });
-
-    // Advance continuous product sequence counter
-    if (parsed.itemNumber) {
+    // the serial number is taken now – the next unit gets the next one
+    if (itemNum) {
       try {
-        await advanceProductSequence(parsed.itemNumber, parsed.serialNumber || undefined, (parsed.company || "").toUpperCase() || undefined);
+        await advanceProductSequence(itemNum, parsed.serialNumber || undefined, companyCode);
       } catch (seqErr) {
         logger.warn("Failed to advance product sequence", { error: (seqErr as Error).message });
       }
     }
+    await sb.from("coc_audit_logs").insert({
+      entity_type: "COC_DOCUMENT",
+      entity_id: doc.id,
+      action: "SUBMIT_FOR_INSPECTION",
+      user_id: uuidOrNull(session.user.id),
+      user_email: session.user.email,
+      coc_number: null,
+      details: { productionOrder: prodOrder, itemNumber: itemNum, serialNumber: parsed.serialNumber, workflow: rule.name },
+    });
+    return json({ ok: true, pending: true, documentId: doc.id, workflow: rule.name });
+  }
 
-    return json({ ok: true, documentId: doc.id, cocNumber });
-  } catch (err) {
-    logger.error("COC generation error", { error: (err as Error).message, id: doc.id });
-    await sb.from("coc_documents").update({ status: "UPLOAD_FAILED", last_error: (err as Error).message }).eq("id", doc.id);
+  const doc = await createCocDocument({ ...docInput, d365_context_json: d365Context });
+  const cocNumber = doc.coc_number || "COC-" + doc.id.slice(0, 8);
+
+  const result = await runIssuePipeline({
+    doc,
+    cocNumber,
+    input: parsed,
+    resolved: { prodOrder, itemNum, itemDesc, customerName: resolvedCustomerName, deliveryDate: resolvedDeliveryDate, tplId: tplId!, tplVerId: tplVerId! },
+    user: { id: session.user.id, email: session.user.email },
+    advanceSequence: true,
+  });
+  if (!result.ok) {
     return json(
-      { ok: false, error: { code: "GENERATION_FAILED", message: (err as Error).message }, documentId: doc.id },
+      { ok: false, error: { code: "GENERATION_FAILED", message: result.message }, documentId: doc.id },
       { status: 500 },
     );
   }
+  return json({ ok: true, documentId: doc.id, cocNumber });
 });

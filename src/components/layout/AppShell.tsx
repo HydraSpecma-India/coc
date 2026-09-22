@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { signOutToLogin } from "@/lib/auth/login-redirect";
 import {
   LayoutDashboard, FilePlus2, History, FileText, ListTree, Database, FolderCog, Users, PenTool, ScrollText, Settings, LogOut, ShieldCheck,
-  Menu, X,
+  Menu, X, ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { can, type Role } from "@/lib/auth/roles";
@@ -23,14 +23,22 @@ interface Props {
   children: React.ReactNode;
 }
 
-type NavItem = { href: string; label: string; short: string; icon: typeof LayoutDashboard; show: boolean };
+type NavItem = { href: string; label: string; short: string; icon: typeof LayoutDashboard; show: boolean; badge?: number };
 
-const nav = (role: Role, capabilities?: string[]): { title: string; items: NavItem[] }[] => [
+const nav = (role: Role, capabilities: string[] | undefined, inspection: { enabled: boolean; count: number }): { title: string; items: NavItem[] }[] => [
   {
     title: "Documents",
     items: [
       { href: "/", label: "Dashboard", short: "Home", icon: LayoutDashboard, show: can(role, "dashboard:read", capabilities) },
       { href: "/coc/new", label: "New COC", short: "New", icon: FilePlus2, show: can(role, "coc:create", capabilities) },
+      {
+        href: "/coc/inspection",
+        label: "Pending Inspection",
+        short: "Inspect",
+        icon: ClipboardCheck,
+        show: inspection.enabled && (can(role, "coc:update", capabilities) || can(role, "coc:create", capabilities)),
+        badge: inspection.count,
+      },
       { href: "/coc/history", label: "Completed COCs", short: "Completed", icon: History, show: can(role, "coc:read", capabilities) },
     ],
   },
@@ -61,7 +69,23 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
   const pathname = usePathname();
   const isDesigner = pathname.includes("/designer/");
   const isCocNew = pathname.startsWith("/coc/new");
-  const groups = nav(user.role, user.capabilities).map((g) => ({ ...g, items: g.items.filter((i) => i.show) })).filter((g) => g.items.length);
+  // Quality inspection workflow: menu entry + number of COCs waiting (refreshed every minute)
+  const [inspection, setInspection] = useState({ enabled: false, count: 0 });
+  useEffect(() => {
+    let active = true;
+    const load = () =>
+      fetch("/api/workflow/pending?count=1", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => active && d && setInspection({ enabled: Boolean(d.enabled), count: Number(d.count) || 0 }))
+        .catch(() => undefined);
+    void load();
+    const t = window.setInterval(load, 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(t);
+    };
+  }, [pathname]);
+  const groups = nav(user.role, user.capabilities, inspection).map((g) => ({ ...g, items: g.items.filter((i) => i.show) })).filter((g) => g.items.length);
   // The drawer remembers the path it was opened on, so it closes automatically after navigation
   const [drawerPath, setDrawerPath] = useState<string | null>(null);
   const drawerOpen = drawerPath === pathname;
@@ -136,7 +160,10 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
               )}
             >
               <i.icon className="h-4 w-4 shrink-0" />
-              {i.label}
+              <span className="flex-1">{i.label}</span>
+              {Boolean(i.badge) && (
+                <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{i.badge}</span>
+              )}
             </Link>
           ))}
         </div>
@@ -188,7 +215,12 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
                       isActive(pathname, i.href) && "bg-ink-900 text-white hover:bg-ink-900",
                     )}
                   >
-                    <i.icon className="h-5 w-5 shrink-0" />
+                    <span className="relative">
+                      <i.icon className="h-5 w-5 shrink-0" />
+                      {Boolean(i.badge) && (
+                        <span className="absolute -right-2.5 -top-1.5 rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-4 text-white">{i.badge}</span>
+                      )}
+                    </span>
                     <span className="w-full truncate">{i.short}</span>
                   </Link>
                 ))}
@@ -240,8 +272,11 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
                     isActive(pathname, i.href) && "text-ink-900",
                   )}
                 >
-                  <span className={cn("flex h-7 w-12 items-center justify-center rounded-full", isActive(pathname, i.href) && "bg-brand-100 text-brand-800")}>
+                  <span className={cn("relative flex h-7 w-12 items-center justify-center rounded-full", isActive(pathname, i.href) && "bg-brand-100 text-brand-800")}>
                     <i.icon className="h-5 w-5" />
+                    {Boolean(i.badge) && (
+                      <span className="absolute right-0.5 -top-1 rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-4 text-white">{i.badge}</span>
+                    )}
                   </span>
                   {i.short}
                 </Link>

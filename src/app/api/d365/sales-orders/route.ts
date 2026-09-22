@@ -39,7 +39,7 @@ export const GET = route(async (req) => {
         if (!cocsBySO.has(soKey)) cocsBySO.set(soKey, []);
         cocsBySO.get(soKey)!.push({
           id: coc.id,
-          coc_number: coc.coc_number || `COC-${coc.id.slice(0, 8)}`,
+          coc_number: coc.coc_number || "Pending inspection",
           production_order: coc.production_order,
           serial_number: coc.serial_number,
           quantity: Number(coc.quantity) || 1,
