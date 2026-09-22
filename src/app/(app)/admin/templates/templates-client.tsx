@@ -11,7 +11,7 @@ import type { TemplateRow, TemplateVersionSummary } from "@/lib/db/repositories/
 
 type T = TemplateRow & { versions: TemplateVersionSummary[] };
 
-export function TemplatesClient({ templates, templateTypes, canManage }: { templates: T[]; templateTypes: string[]; canManage: boolean }) {
+export function TemplatesClient({ templates, templateTypes, canManage, isAdmin = false }: { templates: T[]; templateTypes: string[]; canManage: boolean; isAdmin?: boolean }) {
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
   const [uploadPdfOpen, setUploadPdfOpen] = useState(false);
@@ -320,8 +320,12 @@ export function TemplatesClient({ templates, templateTypes, canManage }: { templ
                       {canManage && (
                         <>
                           <Button size="icon" variant="ghost" title="Duplicate" onClick={() => { setDupTarget(t); setDupName(`${t.name} (copy)`); }}><Copy className="h-4 w-4" /></Button>
-                          <Button size="icon" variant="ghost" title={t.status === "archived" ? "Restore" : "Archive"} onClick={() => archive(t)}><Archive className="h-4 w-4" /></Button>
-                          <Button size="icon" variant="ghost" title="Delete" onClick={() => remove(t)}><Trash2 className="h-4 w-4 text-red-600" /></Button>
+                          {isAdmin && (
+                            <>
+                              <Button size="icon" variant="ghost" title={t.status === "archived" ? "Restore" : "Deactivate (archive) – admin only"} onClick={() => archive(t)}><Archive className="h-4 w-4" /></Button>
+                              <Button size="icon" variant="ghost" title="Delete – admin only" onClick={() => remove(t)}><Trash2 className="h-4 w-4 text-red-600" /></Button>
+                            </>
+                          )}
                         </>
                       )}
                     </div>

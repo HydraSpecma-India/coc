@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { route, json } from "@/lib/api/handler";
-import { requireCapability } from "@/lib/auth/guards";
+import { requireAdmin, requireCapability } from "@/lib/auth/guards";
 import { getVersion, saveDraft, setVersionStatus } from "@/lib/db/repositories/templates";
 import { Errors } from "@/lib/errors";
 import { audit } from "@/lib/audit/audit";
@@ -50,7 +50,7 @@ export const PUT = route<P>(async (req, { params }) => {
 
 /** Soft delete of a draft (restorable). */
 export const DELETE = route<P>(async (_req, { params }) => {
-  const session = await requireCapability("manageTemplates");
+  const session = await requireAdmin();
   await setVersionStatus(params.id, params.versionId, "draft", "deleted");
   await audit({ entityType: "template_version", entityId: params.versionId, action: "DELETED", user: session.user });
   return json({ ok: true });

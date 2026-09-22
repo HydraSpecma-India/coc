@@ -18,6 +18,7 @@ import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
 import { KeyRound, Database, Share2, Cog, RefreshCw, CheckCircle2, AlertCircle, Hash, Send, Building2, Plus, Trash2, Network } from "lucide-react";
 import { NumberSequencesPanel } from "./number-sequences-panel";
+import { CocNumberingPanel } from "./coc-numbering-panel";
 import { ArchitecturePanel } from "./architecture-panel";
 
 interface ConfigState {
@@ -680,7 +681,14 @@ export function SettingsClient({ initialConfig }: { initialConfig: ConfigState }
         </Card>
       )}
 
-      {activeTab === "sequences" && <NumberSequencesPanel />}
+      {activeTab === "sequences" && (
+        <>
+          <CocNumberingPanel />
+          <div className="mt-6">
+            <NumberSequencesPanel />
+          </div>
+        </>
+      )}
 
       {activeTab === "teams" && (
         <Card>

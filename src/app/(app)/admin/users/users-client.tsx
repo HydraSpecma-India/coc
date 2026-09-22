@@ -27,7 +27,7 @@ import {
   type PermissionAction,
   type PageResourceDefinition,
 } from "@/lib/auth/roles";
-import type { UserRow } from "@/lib/db/repositories/users";
+import type { SafeUser as UserRow } from "@/lib/auth/account-setup";
 import type { RoleRow } from "@/lib/db/repositories/roles";
 import {
   UserPlus,
@@ -113,11 +113,28 @@ export function UsersClient({
     displayName: "",
     email: "",
     role: "Production",
-    password: "User@123",
+    password: "",
     active: true,
     allowedCompany: "ALL",
   });
   const [createLoading, setCreateLoading] = useState(false);
+  // One-time passcode to show the admin (after creating a user or issuing a new passcode)
+  const [passcodeInfo, setPasscodeInfo] = useState<{ email: string; code: string; expiresAt?: string | null } | null>(null);
+  const [passcodeLoading, setPasscodeLoading] = useState<string | null>(null);
+
+  const issuePasscode = async (u: UserRow) => {
+    if (u.has_password && !confirm(`Issue a new passcode for ${u.email}? Their current password will stop working until they set a new one.`)) return;
+    setPasscodeLoading(u.id);
+    try {
+      const res = await api<{ ok: boolean; code: string; expiresAt: string }>(`/api/users/${u.id}/passcode`, { method: "POST" });
+      setPasscodeInfo({ email: u.email, code: res.code, expiresAt: res.expiresAt });
+      startTransition(() => router.refresh());
+    } catch (e) {
+      toast.error("Could not issue passcode", (e as Error).message);
+    } finally {
+      setPasscodeLoading(null);
+    }
+  };
 
   // Reset Password Modal state
   const [resetTarget, setResetTarget] = useState<UserRow | null>(null);
@@ -175,7 +192,7 @@ export function UsersClient({
     }
     setCreateLoading(true);
     try {
-      await api("/api/users", {
+      const created = await api<{ passcode: string | null; passcodeExpiresAt: string | null }>("/api/users", {
         method: "POST",
         json: {
           email: createForm.email.trim(),
@@ -187,12 +204,13 @@ export function UsersClient({
         },
       });
       toast.success("User created", `${createForm.email} has been added.`);
+      if (created.passcode) setPasscodeInfo({ email: createForm.email.trim(), code: created.passcode, expiresAt: created.passcodeExpiresAt });
       setCreateOpen(false);
       setCreateForm({
         displayName: "",
         email: "",
         role: roles[0]?.name || "Production",
-        password: "User@123",
+        password: "",
         active: true,
         allowedCompany: "ALL",
       });
@@ -211,8 +229,8 @@ export function UsersClient({
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!resetTarget) return;
-    if (newPassword.length < 4) {
-      toast.error("Password too short", "Password must be at least 4 characters.");
+    if (newPassword.length < 6) {
+      toast.error("Password too short", "Password must be at least 6 characters.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -223,7 +241,7 @@ export function UsersClient({
     try {
       await api(`/api/users/${resetTarget.id}/reset-password`, {
         method: "POST",
-        json: { newPassword },
+        json: { password: newPassword },
       });
       toast.success("Password reset", `Updated password for ${resetTarget.email}`);
       setResetTarget(null);
@@ -656,6 +674,25 @@ export function UsersClient({
                             {u.active ? <UserCheck className="h-3 w-3" /> : <UserX className="h-3 w-3" />}
                             {u.active ? "Active" : "Inactive"}
                           </button>
+                          {(u.setup || !u.has_password) && (
+                            <div className="mt-1 space-y-0.5">
+                              <Badge tone={u.setup?.locked ? "danger" : "warning"} className="text-[10px]">
+                                {u.setup?.locked ? "Passcode expired / locked" : "Awaiting password"}
+                              </Badge>
+                              {u.setup && !u.setup.locked && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(u.setup!.code).then(() => toast.success("Passcode copied"), () => {});
+                                  }}
+                                  className="block font-mono text-sm font-bold tracking-[0.2em] text-ink-900 hover:text-brand-800"
+                                  title={`Passcode – valid until ${new Date(u.setup.expiresAt).toLocaleDateString()}. Click to copy.`}
+                                >
+                                  {u.setup.code}
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </Td>
 
                         <Td className="text-ink-500 font-mono text-[11px]">
@@ -684,6 +721,16 @@ export function UsersClient({
                             >
                               <KeyRound className="h-3 w-3 mr-1 text-ink-500" />
                               Reset
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              loading={passcodeLoading === u.id}
+                              onClick={() => issuePasscode(u)}
+                              className="text-[11px] h-7 px-2"
+                              title="Generate a 6-digit passcode so the user sets their own password"
+                            >
+                              Passcode
                             </Button>
 
                             {!isSelf && (
@@ -906,13 +953,19 @@ export function UsersClient({
             </Select>
           </Field>
 
-          <Field label="Initial Password" hint="Temporary password for first sign in">
+          <Field label="Initial Password (optional)" hint="Leave empty – the user sets their own password">
             <Input
               type="text"
               value={createForm.password}
               onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
-              placeholder="User@123"
+              placeholder="Leave empty to use a 6-digit passcode"
             />
+            {!createForm.password && (
+              <p className="mt-1 text-[11px] text-ink-500">
+                A 6-digit passcode is generated. Give it to the user – on the sign-in page they choose
+                “New user / set password”, enter their e-mail and the passcode, and pick a password.
+              </p>
+            )}
           </Field>
 
           <div className="flex items-center gap-2 pt-2">
@@ -1357,6 +1410,31 @@ export function UsersClient({
         </div>
       </Dialog>
 
+      {/* One-time passcode for the admin to hand over */}
+      <Dialog open={Boolean(passcodeInfo)} onClose={() => setPasscodeInfo(null)} title="Passcode for first sign-in">
+        {passcodeInfo && (
+          <div className="space-y-4 text-sm">
+            <p className="text-ink-700">
+              Give this passcode to <strong>{passcodeInfo.email}</strong>. On the sign-in page they choose
+              <strong> “New user / set password”</strong>, enter their e-mail and this passcode, and pick their own password.
+            </p>
+            <div className="flex items-center justify-center gap-3 rounded-xl border-2 border-dashed border-brand-300 bg-brand-50 py-5">
+              <span className="font-mono text-3xl font-bold tracking-[0.35em] text-ink-900">{passcodeInfo.code}</span>
+              <Button size="sm" variant="outline" onClick={() => navigator.clipboard?.writeText(passcodeInfo.code).then(() => toast.success("Copied"), () => {})}>
+                Copy
+              </Button>
+            </div>
+            <p className="text-xs text-ink-500">
+              Single use{passcodeInfo.expiresAt ? `, valid until ${new Date(passcodeInfo.expiresAt).toLocaleDateString()}` : ""}. It stays visible in the
+              user list until the password is set. Five wrong tries lock it – then issue a new one.
+            </p>
+            <div className="flex justify-end">
+              <Button onClick={() => setPasscodeInfo(null)}>Done</Button>
+            </div>
+          </div>
+        )}
+      </Dialog>
+
       {/* 4. Reset Password Modal */}
       <Dialog
         open={Boolean(resetTarget)}
@@ -1368,7 +1446,7 @@ export function UsersClient({
             Enter a new password for <strong className="text-ink-900">{resetTarget?.email}</strong>. The user can use this password to sign in immediately.
           </p>
 
-          <Field label="New Password *" hint="Must be at least 4 characters">
+          <Field label="New Password *" hint="Must be at least 6 characters">
             <Input
               type="password"
               required

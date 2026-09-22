@@ -1,6 +1,6 @@
 {
   "name": "coc-platform",
-  "version": "1.00067",
+  "version": "1.00068",
   "private": true,
   "scripts": {
     "prebuild": "node scripts/update-version.mjs",
@@ -11,6 +11,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@fontsource/allura": "^5.3.0",
+    "@fontsource/caveat": "^5.3.0",
+    "@fontsource/dancing-script": "^5.3.0",
+    "@fontsource/great-vibes": "^5.3.0",
+    "@fontsource/homemade-apple": "^5.3.0",
+    "@fontsource/sacramento": "^5.3.0",
     "@pdf-lib/fontkit": "^1.1.1",
     "@supabase/supabase-js": "^2.116.0",
     "@zxing/library": "^0.21.3",

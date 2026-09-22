@@ -156,8 +156,8 @@ export async function updateUser(
 }
 
 export async function resetUserPassword(id: string, newPassword: string): Promise<void> {
-  if (!newPassword || newPassword.length < 4) {
-    throw Errors.validation("Password must be at least 4 characters long.");
+  if (!newPassword || newPassword.length < 6) {
+    throw Errors.validation("Password must be at least 6 characters long.");
   }
   const passwordHash = hashPassword(newPassword);
   const { error } = await supabaseAdmin()

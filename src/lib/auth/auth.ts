@@ -92,8 +92,9 @@ providers.push(
   }),
 );
 
-// 2. Local fallback provider
-providers.push(
+// 2. Local development provider – signs in WITHOUT a password, so it is only registered when
+//    AUTH_DEV_BYPASS=true is set explicitly (never in production).
+if (env().AUTH_DEV_BYPASS === "true") providers.push(
   Credentials({
     id: "dev",
     name: "Local user sign-in",

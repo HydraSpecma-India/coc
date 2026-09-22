@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
-import { Loader2, Clock } from "lucide-react";
+import { Loader2, Clock, KeyRound, ArrowLeft } from "lucide-react";
 
 interface Props {
   callbackUrl: string;
@@ -16,6 +16,12 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [ssoLoading, setSsoLoading] = useState(false);
+  // "New user / set password" mode – uses the 6-digit passcode from the administrator
+  const [mode, setMode] = useState<"signin" | "setup">("signin");
+  const [passcode, setPasscode] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(() => {
     if (!initialError) return null;
     if (initialError === "InvalidCredentials" || initialError === "CredentialsSignin") {
@@ -28,9 +34,90 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
     return `Sign-in failed (${initialError}).`;
   });
 
+  const goAfterLogin = (resUrl?: string | null) => {
+    if (callbackUrl && callbackUrl.startsWith("/") && !callbackUrl.startsWith("//")) {
+      window.location.href = callbackUrl;
+      return;
+    }
+    if (resUrl) {
+      try {
+        const parsed = new URL(resUrl);
+        window.location.href = parsed.port === "8080" || !parsed.hostname.includes(".") ? parsed.pathname + parsed.search : resUrl;
+        return;
+      } catch {
+        /* ignore */
+      }
+    }
+    window.location.href = "/";
+  };
+
+  const checkSetupRequired = async (addr: string): Promise<boolean> => {
+    try {
+      const r = await fetch("/api/auth/account-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: addr.trim() }),
+      });
+      if (!r.ok) return false;
+      return Boolean((await r.json()).setupRequired);
+    } catch {
+      return false;
+    }
+  };
+
+  const handleSetup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loading) return;
+    setError(null);
+    if (!/^\d{6}$/.test(passcode)) return setError("Enter the 6-digit passcode you received from your administrator.");
+    if (newPw.length < 6) return setError("Your new password must be at least 6 characters.");
+    if (newPw !== confirmPw) return setError("The two passwords do not match.");
+    setLoading(true);
+    try {
+      const r = await fetch("/api/auth/setup-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), code: passcode, password: newPw }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setError(data?.error?.message || "Could not set the password.");
+        setLoading(false);
+        return;
+      }
+      // Password saved – sign straight in
+      const res = await signIn("credentials", { email: email.trim(), password: newPw, redirect: false, callbackUrl });
+      if (res?.error) {
+        setMode("signin");
+        setPassword("");
+        setInfo("Password saved. Please sign in with your new password.");
+        setLoading(false);
+        return;
+      }
+      goAfterLogin(res?.url);
+    } catch (err) {
+      setError((err as Error).message || "Could not set the password.");
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password || loading) return;
+    if (!email || loading) return;
+    setInfo(null);
+    if (!password) {
+      // Empty password: new users have none yet – offer the passcode flow
+      setLoading(true);
+      const needs = await checkSetupRequired(email);
+      setLoading(false);
+      if (needs) {
+        setMode("setup");
+        setInfo("Your account has no password yet. Enter the 6-digit passcode from your administrator and choose a password.");
+      } else {
+        setError("Please enter your password.");
+      }
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -44,30 +131,17 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
       });
 
       if (res?.error) {
-        setError("Invalid email or password. Please check your credentials and try again.");
+        if (await checkSetupRequired(email)) {
+          setMode("setup");
+          setInfo("Your account needs a new password. Enter the 6-digit passcode from your administrator and choose a password.");
+        } else {
+          setError("Invalid email or password. Please check your credentials and try again.");
+        }
         setLoading(false);
         return;
       }
 
-      // Successful sign-in: navigate safely to target page without container host leak
-      if (callbackUrl && callbackUrl.startsWith("/") && !callbackUrl.startsWith("//")) {
-        window.location.href = callbackUrl;
-        return;
-      }
-      if (res?.url) {
-        try {
-          const parsed = new URL(res.url);
-          if (parsed.port === "8080" || !parsed.hostname.includes(".")) {
-            window.location.href = parsed.pathname + parsed.search;
-            return;
-          }
-          window.location.href = res.url;
-          return;
-        } catch {
-          // ignore
-        }
-      }
-      window.location.href = "/";
+      goAfterLogin(res?.url);
     } catch (err) {
       setError((err as Error).message || "An unexpected error occurred during sign-in.");
       setLoading(false);
@@ -96,7 +170,7 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
           <div>
             <p className="font-bold text-amber-950">Session Timed Out</p>
             <p className="mt-0.5 text-amber-800 leading-relaxed">
-              Your session automatically expired after 30 minutes of inactivity. Please sign in to resume your work.
+              Your session expired after a period of inactivity. Please sign in to resume your work.
             </p>
           </div>
         </div>
@@ -107,7 +181,83 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
           {error}
         </div>
       )}
+      {info && !error && (
+        <div className="mb-4 rounded-md border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 leading-relaxed">{info}</div>
+      )}
 
+      {mode === "setup" ? (
+        <form onSubmit={handleSetup} className="space-y-4">
+          <div className="flex items-center gap-2 text-sm font-bold text-ink-900">
+            <KeyRound className="h-4 w-4 text-brand-600" /> New user – set your password
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-ink-700 mb-1">Work Email</label>
+            <input
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="h-10 w-full rounded-md border border-ink-300 bg-white px-3 text-sm text-ink-900 focus:border-brand-500 focus:ring-1 focus:ring-brand-400 font-medium"
+              placeholder="name@hydraspecma.com"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-ink-700 mb-1">6-digit passcode (from your administrator)</label>
+            <input
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={passcode}
+              onChange={(e) => setPasscode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              className="h-12 w-full rounded-md border border-ink-300 bg-white px-3 text-center font-mono text-2xl tracking-[0.5em] text-ink-900 focus:border-brand-500 focus:ring-1 focus:ring-brand-400"
+              placeholder="••••••"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-ink-700 mb-1">New password (min. 6 characters)</label>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={newPw}
+              onChange={(e) => setNewPw(e.target.value)}
+              className="h-10 w-full rounded-md border border-ink-300 bg-white px-3 text-sm text-ink-900 focus:border-brand-500 focus:ring-1 focus:ring-brand-400"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-ink-700 mb-1">Confirm new password</label>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={confirmPw}
+              onChange={(e) => setConfirmPw(e.target.value)}
+              className="h-10 w-full rounded-md border border-ink-300 bg-white px-3 text-sm text-ink-900 focus:border-brand-500 focus:ring-1 focus:ring-brand-400"
+              required
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-brand-500 text-sm font-bold text-ink-900 hover:bg-brand-600 transition-colors shadow-sm disabled:opacity-75"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Set password &amp; sign in
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("signin");
+              setError(null);
+              setInfo(null);
+            }}
+            className="flex w-full items-center justify-center gap-1 text-xs font-semibold text-ink-600 hover:text-ink-900"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" /> Back to sign in
+          </button>
+        </form>
+      ) : (
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs font-semibold text-ink-700 mb-1">Work Email</label>
@@ -143,7 +293,6 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
             disabled={loading || ssoLoading}
             className="h-10 w-full rounded-md border border-ink-300 bg-white px-3 text-sm text-ink-900 focus:border-brand-500 focus:ring-1 focus:ring-brand-400 font-medium disabled:opacity-60 disabled:bg-ink-50"
             placeholder="••••••••"
-            required
           />
         </div>
 
@@ -161,7 +310,19 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
             <span>Sign In</span>
           )}
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            setMode("setup");
+            setError(null);
+            setInfo(null);
+          }}
+          className="flex w-full items-center justify-center gap-1.5 text-xs font-semibold text-brand-800 hover:underline"
+        >
+          <KeyRound className="h-3.5 w-3.5" /> New user / set password with passcode
+        </button>
       </form>
+      )}
 
       {/* Live Microsoft 365 SSO Section */}
       <div className="relative my-6">

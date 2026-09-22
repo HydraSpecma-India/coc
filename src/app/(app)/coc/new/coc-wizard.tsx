@@ -54,6 +54,8 @@ import {
 import { MeasurementSections, MeasurementEmptyHint, initMeasureValues, missingRequired, photoUploads, toMeasurementEntries, type MeasureValues } from "@/components/coc/MeasurementSections";
 import { DocumentCapture, toAttachmentUploads, type CapturedDoc } from "@/components/coc/DocumentCapture";
 import { PdfViewer } from "@/components/coc/PdfViewer";
+import { SignatureDesigner } from "@/components/coc/SignatureDesigner";
+import { defaultSignatureStyle, loadLocalStyle, renderAutoSignature, type SignatureStyle } from "@/lib/signature/auto-signature";
 import { EMPTY_INPUT_CONFIG, formatPrinted, type TemplateInputConfig } from "@/lib/coc-inputs/types";
 
 export type DatePreset = "ALL" | "CURRENT_MONTH" | "LAST_MONTH" | "LAST_3_MONTHS" | "LAST_6_MONTHS" | "NEXT_MONTH";
@@ -189,54 +191,6 @@ function findBestMatchingTemplate(
   return bestTpl;
 }
 
-function generateAutoSignature(name: string): string {
-  if (typeof document === "undefined") return "";
-  const canvas = document.createElement("canvas");
-  canvas.width = 480;
-  canvas.height = 140;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return "";
-
-  // Clean background
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, 480, 140);
-
-  // Subtle border frame
-  ctx.strokeStyle = "#cbd5e1";
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(4, 4, 472, 132);
-
-  // Verified shield badge
-  ctx.fillStyle = "#0284c7";
-  ctx.beginPath();
-  ctx.arc(36, 42, 18, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 16px sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("✓", 36, 48);
-
-  // Cursive / Calligraphic signature style
-  ctx.textAlign = "left";
-  ctx.fillStyle = "#0f172a";
-  ctx.font = "italic bold 26px 'Segoe Script', 'Brush Script MT', cursive, sans-serif";
-  ctx.fillText(name || "Authorized Signatory", 68, 46);
-
-  // Subtitle / Legal verification
-  ctx.fillStyle = "#334155";
-  ctx.font = "bold 10px sans-serif";
-  ctx.fillText("DIGITALLY SIGNED & VERIFIED QUALITY INSPECTOR", 68, 70);
-
-  // Metadata line
-  const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
-  ctx.fillStyle = "#64748b";
-  ctx.font = "9.5px monospace";
-  ctx.fillText(`Signatory: ${name} | Timestamp: ${nowStr}`, 68, 90);
-  ctx.fillText("HydraSpecma Quality Assurance System Certified", 68, 108);
-
-  return canvas.toDataURL("image/png");
-}
 
 const QUALITY_WORKFLOW_STEPS = [
   { step: 1, name: "Assembled.", spec: "According to AI-1071.0512 and AI-1070.0049, Latest revision." },
@@ -1020,21 +974,13 @@ export function CocWizard({
         } else if (active) {
           // No stored signature exists in the system, default to auto-sign
           setSignatureMode("auto");
-          const autoSig = generateAutoSignature(userName);
-          if (autoSig) {
-            setSignatureDataUrl(autoSig);
-            setHasSignature(true);
-          }
+          setHasSignature(true);
         }
       } catch (err) {
         console.warn("Could not load stored signatures, falling back to auto-sign:", err);
         if (active) {
           setSignatureMode("auto");
-          const autoSig = generateAutoSignature(userName);
-          if (autoSig) {
-            setSignatureDataUrl(autoSig);
-            setHasSignature(true);
-          }
+          setHasSignature(true);
         }
       } finally {
         if (active) setLoadingSignatures(false);
@@ -1046,15 +992,41 @@ export function CocWizard({
     };
   }, [userName]);
 
+  // Auto-sign: the personal signature designer (step 3) renders and supplies the image
+  const designerSignedRef = useRef(false);
+  const handleAutoSignature = (url: string) => {
+    designerSignedRef.current = true;
+    setSignatureDataUrl(url);
+    setHasSignature(true);
+  };
+
+  // Make sure an auto-signature exists even if step 3 is skipped (uses the saved personal style)
   useEffect(() => {
-    if (signatureMode === "auto" && typeof window !== "undefined") {
-      const autoSig = generateAutoSignature(userName);
-      if (autoSig) {
-        setSignatureDataUrl(autoSig);
+    if (signatureMode !== "auto") {
+      designerSignedRef.current = false;
+      return;
+    }
+    let active = true;
+    (async () => {
+      let style = loadLocalStyle();
+      if (!style) {
+        try {
+          const r = await api<{ ok: boolean; style: SignatureStyle | null }>("/api/signatures/style");
+          style = r.style ? { ...defaultSignatureStyle(userName), ...r.style } : null;
+        } catch {
+          /* ignore */
+        }
+      }
+      const url = await renderAutoSignature(style ?? defaultSignatureStyle(userName));
+      if (active && url && !designerSignedRef.current) {
+        setSignatureDataUrl(url);
         setHasSignature(true);
       }
-    }
-  }, [userName, signatureMode]);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [signatureMode, userName]);
 
   // Preview & Generating state
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -1483,6 +1455,7 @@ export function CocWizard({
           salesOrder: selectedPO.SalesOrder || "",
           salesLine: selectedPO.SalesLine || "1.0",
           customerAccount: selectedPO.CustomerAccount || selectedCompany || "HSIN",
+          company: (selectedPO.dataAreaId || (selectedCompany !== "ALL" ? selectedCompany : "") || "HSIN").toUpperCase(),
           quantity: selectedPO.Quantity || 1,
           unitOfMeasure: selectedPO.UnitOfMeasure || "Pcs",
           deliveryDate: manualFields.DeliveryDate || selectedPO.DeliveryDate || "",
@@ -3077,11 +3050,6 @@ export function CocWizard({
                   size="sm"
                   onClick={() => {
                     setSignatureMode("auto");
-                    const autoSig = generateAutoSignature(userName);
-                    if (autoSig) {
-                      setSignatureDataUrl(autoSig);
-                      setHasSignature(true);
-                    }
                   }}
                   className="gap-1.5 text-xs font-semibold"
                 >
@@ -3215,8 +3183,6 @@ export function CocWizard({
                         size="sm"
                         onClick={() => {
                           setSignatureMode("auto");
-                          const autoSig = generateAutoSignature(userName);
-                          if (autoSig) setSignatureDataUrl(autoSig);
                         }}
                       >
                         Use Auto-Sign Instead
@@ -3226,7 +3192,7 @@ export function CocWizard({
                 )}
               </div>
             ) : signatureMode === "auto" ? (
-              <div className="rounded-xl border-2 border-brand-300 bg-gradient-to-br from-brand-50/60 to-sky-50/40 p-6">
+              <div className="rounded-xl border-2 border-brand-300 bg-gradient-to-br from-brand-50/60 to-sky-50/40 p-4 sm:p-6">
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div className="space-y-1.5 text-left">
                     <div className="flex items-center gap-2">
@@ -3246,16 +3212,9 @@ export function CocWizard({
                   </Badge>
                 </div>
 
-                {signatureDataUrl && (
-                  <div className="mt-4 flex justify-center rounded-lg border border-brand-200 bg-white p-3 shadow-inner">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={signatureDataUrl}
-                      alt="Digital Signature Preview"
-                      className="max-h-28 object-contain"
-                    />
-                  </div>
-                )}
+                <div className="mt-4">
+                  <SignatureDesigner userName={userName} onChange={handleAutoSignature} />
+                </div>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-ink-300 bg-ink-50/50 p-6">

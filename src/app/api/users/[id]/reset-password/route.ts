@@ -5,7 +5,7 @@ import { resetUserPassword } from "@/lib/db/repositories/users";
 import { audit } from "@/lib/audit/audit";
 
 const ResetPasswordSchema = z.object({
-  password: z.string().min(4, "Password must be at least 4 characters long"),
+  password: z.string().min(6, "Password must be at least 6 characters long"),
 });
 
 export const POST = route<{ id: string }>(async (req, { params }) => {

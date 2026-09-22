@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { route, json } from "@/lib/api/handler";
-import { requireCapability } from "@/lib/auth/guards";
+import { requireAdmin, requireCapability } from "@/lib/auth/guards";
 import { deleteTemplate, getTemplate, updateTemplate } from "@/lib/db/repositories/templates";
 import { Errors } from "@/lib/errors";
 import { audit } from "@/lib/audit/audit";
@@ -26,13 +26,15 @@ const PatchSchema = z.object({
 export const PATCH = route<P>(async (req, { params }) => {
   const session = await requireCapability("manageTemplates");
   const body = PatchSchema.parse(await req.json());
+  // Archiving (deactivating) a template is an admin-only action
+  if (body.status === "archived") await requireAdmin();
   const template = await updateTemplate(params.id, body, session.user.id);
   await audit({ entityType: "template", entityId: params.id, action: "EDITED", user: session.user, details: body });
   return json({ template });
 });
 
 export const DELETE = route<P>(async (_req, { params }) => {
-  const session = await requireCapability("manageTemplates");
+  const session = await requireAdmin();
   await deleteTemplate(params.id);
   await audit({ entityType: "template", entityId: params.id, action: "DELETED", user: session.user });
   return json({ ok: true });

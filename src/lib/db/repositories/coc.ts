@@ -2,6 +2,7 @@ import "server-only";
 import { supabaseAdmin, Buckets } from "@/lib/db/supabase-admin";
 import { getActiveConfig } from "@/lib/config";
 import { logger } from "@/lib/logging/logger";
+import { reserveCompanyCocNumber } from "@/lib/sequences/coc-numbers";
 
 export interface COCDocumentRow {
   id: string;
@@ -46,6 +47,7 @@ export interface COCProcessStepRow {
   details: Record<string, unknown> | null;
 }
 
+/** @deprecated global (non company-wise) counter – kept for reference; see sequences/coc-numbers.ts */
 export async function reserveNextCocNumber(): Promise<string> {
   const year = new Date().getFullYear();
   const config = await getActiveConfig();
@@ -91,9 +93,11 @@ export async function createCocDocument(input: {
   serial_number?: string;
   d365_context_json?: Record<string, unknown>;
   userId?: string;
+  /** legal entity (dataAreaId) – every company has its own COC number sequence */
+  company?: string;
 }): Promise<COCDocumentRow> {
   const sb = supabaseAdmin();
-  const cocNumber = await reserveNextCocNumber();
+  const cocNumber = await reserveCompanyCocNumber(input.company);
 
   const { data, error } = await sb
     .from("coc_documents")

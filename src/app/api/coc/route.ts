@@ -29,6 +29,8 @@ const createCocSchema = z.object({
   salesOrder: z.string().optional(),
   salesLine: z.string().optional(),
   customerAccount: z.string().optional(),
+  /** legal entity / dataAreaId of the production order (company-wise COC numbering) */
+  company: z.string().max(10).optional(),
   quantity: z.number().default(1),
   unitOfMeasure: z.string().default("Pcs"),
   batchNumber: z.string().optional(),
@@ -155,9 +157,10 @@ export const POST = route(async (req) => {
       unitOfMeasure: parsed.unitOfMeasure,
       customerPartNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
       externalItemNumber: parsed.customerPartNumber || parsed.manualValues?.["CustomerPartNo"] || "160072",
-      dataAreaId: parsed.customerAccount || "HSIN",
+      dataAreaId: (parsed.company || parsed.customerAccount || "HSIN").toUpperCase(),
     },
     userId: session.user.id,
+    company: parsed.company || parsed.customerAccount || "HSIN",
   });
 
   const cocNumber = doc.coc_number || "COC-" + doc.id.slice(0, 8);

@@ -7,7 +7,8 @@ export interface SettingRow { key: string; value: unknown; description: string |
 export async function getAllSettings(): Promise<SettingRow[]> {
   const { data, error } = await supabaseAdmin().from("coc_app_settings").select("*").order("key");
   if (error) throw error;
-  return data as SettingRow[];
+  // one-time user passcodes are only shown on the Users page
+  return (data as SettingRow[]).filter((r) => !r.key.startsWith("auth.setup."));
 }
 
 export async function getSetting<T>(key: string, fallback: T): Promise<T> {

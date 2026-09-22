@@ -28,6 +28,7 @@ export default async function TemplatesPage() {
       templates={templates}
       templateTypes={types}
       canManage={can(session.user.role, "manageTemplates")}
+      isAdmin={String(session.user.role).toLowerCase() === "admin"}
     />
   );
 }

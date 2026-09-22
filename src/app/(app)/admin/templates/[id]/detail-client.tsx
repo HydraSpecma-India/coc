@@ -13,7 +13,7 @@ type T = TemplateRow & { versions: TemplateVersionSummary[] };
 
 const statusTone = { draft: "info", published: "success", deprecated: "neutral", deleted: "danger" } as const;
 
-export function TemplateDetailClient({ template, canManage }: { template: T; canManage: boolean }) {
+export function TemplateDetailClient({ template, canManage, isAdmin = false }: { template: T; canManage: boolean; isAdmin?: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [meta, setMeta] = useState({ name: template.name, description: template.description ?? "" });
@@ -94,12 +94,12 @@ export function TemplateDetailClient({ template, canManage }: { template: T; can
                             <Button size="sm" variant="secondary" loading={busy === `pub-${v.id}`} onClick={() => run(`pub-${v.id}`, () => api(`${vb}/publish`, { method: "POST" }), `Version ${v.version_number} published`)}>
                               <Rocket className="h-3.5 w-3.5" /> Publish
                             </Button>
-                            <Button size="icon" variant="ghost" title="Delete draft" onClick={() => run(`del-${v.id}`, () => api(vb, { method: "DELETE" }), "Draft deleted (restorable)")}>
+                            {isAdmin && <Button size="icon" variant="ghost" title="Delete draft (admin only)" onClick={() => run(`del-${v.id}`, () => api(vb, { method: "DELETE" }), "Draft deleted (restorable)")}>
                               <Trash2 className="h-4 w-4 text-red-600" />
-                            </Button>
+                            </Button>}
                           </>
                         )}
-                        {canManage && v.status === "published" && (
+                        {isAdmin && v.status === "published" && (
                           <Button size="sm" variant="outline" loading={busy === `deact-${v.id}`} onClick={() => run(`deact-${v.id}`, () => api(`${vb}/deactivate`, { method: "POST" }), "Version deactivated")}>
                             <Ban className="h-3.5 w-3.5" /> Deactivate
                           </Button>

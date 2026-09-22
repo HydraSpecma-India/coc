@@ -11,5 +11,11 @@ export default async function TemplateDetailPage({ params }: { params: Promise<{
   const { id } = await params;
   const template = await getTemplate(id);
   if (!template) notFound();
-  return <TemplateDetailClient template={template} canManage={can(session.user.role, "manageTemplates")} />;
+  return (
+    <TemplateDetailClient
+      template={template}
+      canManage={can(session.user.role, "manageTemplates")}
+      isAdmin={String(session.user.role).toLowerCase() === "admin"}
+    />
+  );
 }
