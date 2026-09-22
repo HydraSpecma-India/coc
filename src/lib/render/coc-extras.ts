@@ -1,4 +1,5 @@
 import { PDFDocument, PDFFont, PDFPage, StandardFonts, degrees, rgb } from "pdf-lib";
+import { ensureFallbackFont } from "@/lib/render/cjk-font";
 import type { AttachmentUpload, MeasurementEntry } from "@/lib/coc-inputs/types";
 
 /**
@@ -325,6 +326,7 @@ export async function appendCocExtras(pdf: PDFDocument, ctx: ExtrasContext, temp
   if (!hasMeasurements && !atts.length) return;
 
   const fonts: Fonts = { regular: await pdf.embedFont(StandardFonts.Helvetica), bold: await pdf.embedFont(StandardFonts.HelveticaBold) };
+  await ensureFallbackFont(pdf, { ...ctx, attachments: atts.map((a) => ({ name: a.name, caption: a.caption })) });
   const appended: PDFPage[] = [];
 
   // Fields that were not placed in the designer are stamped on their own template page
@@ -365,6 +367,7 @@ export async function attachmentToPdf(att: AttachmentUpload, ctx: ExtrasContext,
   }
   const pdf = await PDFDocument.create();
   const fonts: Fonts = { regular: await pdf.embedFont(StandardFonts.Helvetica), bold: await pdf.embedFont(StandardFonts.HelveticaBold) };
+  await ensureFallbackFont(pdf, [att.name, att.caption, ctx.cocNumber, ctx.serialNumber, ctx.productionOrder, ctx.itemNumber]);
   const pages = await appendOneAttachment(pdf, fonts, ctx, att, index, total);
   return { bytes: await pdf.save(), pageCount: pages.length };
 }

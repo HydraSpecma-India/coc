@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRight, CheckCircle2, ClipboardList, CornerUpLeft, Eye, 
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Dialog, Field, PageHeader, Textarea } from "@/components/ui";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/utils/fetcher";
+import { useI18n } from "@/lib/i18n/provider";
 import { MeasurementSections, initMeasureValues, missingRequired, photoUploads, toMeasurementEntries, type MeasureValues } from "@/components/coc/MeasurementSections";
 import { DocumentCapture, toAttachmentUploads, uid, type CapturedDoc } from "@/components/coc/DocumentCapture";
 import { SignaturePicker } from "@/components/coc/SignaturePicker";
@@ -75,6 +76,7 @@ function prefill(cfg: TemplateInputConfig, payload: CreateCocInput | null): { va
 
 export function InspectClient({ id, userName }: { id: string; userName: string }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [data, setData] = useState<InspectionData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [inputConfig, setInputConfig] = useState<TemplateInputConfig>(EMPTY_INPUT_CONFIG);
@@ -113,8 +115,8 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
   }, [id]);
 
   useEffect(() => {
-    const t = setTimeout(() => void load(), 0);
-    return () => clearTimeout(t);
+    const tm = setTimeout(() => void load(), 0);
+    return () => clearTimeout(tm);
   }, [load]);
 
   useEffect(() => () => {
@@ -202,7 +204,7 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
         method: "POST",
         json: { ...extras, signatureBase64: signature, note: note.trim() || undefined },
       });
-      toast.success(`Issued ${res.cocNumber}`, "The COC is now in Completed COCs.");
+      toast.success(t("ip.issued", { coc: res.cocNumber }));
       router.push(`/coc/${res.documentId}`);
     } catch (e) {
       toast.error("Could not issue the COC", (e as Error).message);
@@ -216,7 +218,7 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
     const list = problems();
     if (list.length) {
       setShowErrors(true);
-      toast.error("Complete this step first", list.join(" • "));
+      toast.error(t("ip.completeFirst"), list.join(" • "));
       window.setTimeout(() => document.querySelector<HTMLElement>("[data-missing='true']")?.scrollIntoView({ behavior: "smooth", block: "center" }), 250);
       return;
     }
@@ -226,7 +228,7 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
         method: "POST",
         json: { ...extras, note: note.trim() || undefined },
       });
-      toast.success("Step completed", res.nextStep ? `Sent to “${res.nextStep}”.` : undefined);
+      toast.success(t("ip.stepCompleted"), res.nextStep ? t("ip.sentToStep", { step: res.nextStep }) : undefined);
       router.push("/coc/inspection");
     } catch (e) {
       toast.error("Could not complete the step", (e as Error).message);
@@ -265,7 +267,7 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
   if (error) {
     return (
       <div className="space-y-4">
-        <Link href="/coc/inspection" className="inline-flex items-center gap-1 text-xs text-ink-600 hover:text-ink-900"><ArrowLeft className="h-3.5 w-3.5" /> Pending Inspection</Link>
+        <Link href="/coc/inspection" className="inline-flex items-center gap-1 text-xs text-ink-600 hover:text-ink-900"><ArrowLeft className="h-3.5 w-3.5" /> {t("ip.back")}</Link>
         <Alert tone="danger" title="Could not open this inspection">{error}</Alert>
       </div>
     );
@@ -279,17 +281,17 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
   const nextStep = steps[stepIndex + 1];
   const open = state === "PENDING_INSPECTION" || state === "ISSUING";
   const wfLabel: Record<string, { text: string; tone: "warning" | "brand" | "danger" | "success" }> = {
-    PENDING_INSPECTION: { text: `Step ${stepIndex + 1} of ${steps.length}: ${step?.name ?? ""}`, tone: "warning" },
-    ISSUING: { text: "Being issued", tone: "brand" },
-    REJECTED: { text: "Rejected", tone: "danger" },
-    ISSUED: { text: "Issued", tone: "success" },
+    PENDING_INSPECTION: { text: t("ip.state.pending", { i: stepIndex + 1, n: steps.length, step: step?.name ?? "" }), tone: "warning" },
+    ISSUING: { text: t("ip.state.issuing"), tone: "brand" },
+    REJECTED: { text: t("ip.state.rejected"), tone: "danger" },
+    ISSUED: { text: t("ip.state.issued"), tone: "success" },
   };
   const filled = (key: string) => values[key]?.photo ? "Photo attached" : values[key]?.value || "";
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 pb-24">
       <Link href="/coc/inspection" className="inline-flex items-center gap-1 text-xs text-ink-600 hover:text-ink-900">
-        <ArrowLeft className="h-3.5 w-3.5" /> Pending Inspection
+        <ArrowLeft className="h-3.5 w-3.5" /> {t("ip.back")}
       </Link>
       <PageHeader
         title={`${open ? step?.name : "COC workflow"} · ${doc.production_order}`}
@@ -319,18 +321,18 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
       </ol>
 
       {state === "ISSUED" && doc.coc_number && (
-        <Alert tone="success" title={`Issued as ${doc.coc_number}`}>
-          <Link href={`/coc/${doc.id}`} className="font-semibold underline">Open the certificate</Link>
+        <Alert tone="success" title={t("ip.issuedAs", { coc: doc.coc_number })}>
+          <Link href={`/coc/${doc.id}`} className="font-semibold underline">{t("ip.openCertificate")}</Link>
         </Alert>
       )}
       {state === "REJECTED" && (
-        <Alert tone="danger" title="Rejected">
+        <Alert tone="danger" title={t("ip.rejected")}>
           {wf.rejectReason} — {wf.inspectedBy?.name || wf.inspectedBy?.email}, {fmt(wf.inspectedAt)}
         </Alert>
       )}
 
       <Card>
-        <CardHeader title="Order data (step 1)" description={`${wf.ruleName} · sent by ${wf.submittedBy?.name || wf.submittedBy?.email} · ${fmt(wf.submittedAt)}`} />
+        <CardHeader title={t("ip.orderData")} description={`${wf.ruleName} · sent by ${wf.submittedBy?.name || wf.submittedBy?.email} · ${fmt(wf.submittedAt)}`} />
         <CardBody className="space-y-3">
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
             {[
@@ -351,7 +353,7 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
               </div>
             ))}
           </dl>
-          {wf.note && <div className="rounded-md bg-ink-50 px-3 py-2 text-xs italic text-ink-700">Note from production: “{wf.note}”</div>}
+          {wf.note && <div className="rounded-md bg-ink-50 px-3 py-2 text-xs italic text-ink-700">{t("ip.noteFromProduction")} “{wf.note}”</div>}
           {wf.instructions && (
             <div className="flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
               <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {wf.instructions}
@@ -369,7 +371,7 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
       {/* data from earlier steps (read only) */}
       {otherSections.some((sec) => sec.fields.some((f) => filled(f.key))) && (
         <Card>
-          <CardHeader title="Entered in other steps" description="Read only – each step changes only its own pages." />
+          <CardHeader title={t("ip.otherSteps")} description={t("ip.otherStepsDesc")} />
           <CardBody className="space-y-3">
             {otherSections.map((sec) => {
               const rows = sec.fields.filter((f) => filled(f.key));
@@ -396,10 +398,10 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
       )}
 
       {readOnly ? (
-        <Alert tone="info" title={open ? `Waiting for “${step?.name}”` : "Read only"}>
+        <Alert tone="info" title={open ? t("ip.waitingFor", { step: step?.name ?? "" }) : t("ip.readOnly")}>
           {open
-            ? `This step is done by ${step?.roles.length ? step.roles.join(", ") : "a user who may complete COCs"}.${data.canWithdraw ? " You can withdraw your submission while it is waiting." : ""}`
-            : "This workflow is closed."}
+            ? `${t("ip.doneBy", { roles: step?.roles.length ? step.roles.join(", ") : "Quality" })}${data.canWithdraw ? t("ip.canWithdraw") : ""}`
+            : t("ip.closed")}
         </Alert>
       ) : (
         <>
@@ -407,13 +409,13 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
             <>
               <div className="flex items-center gap-2 px-1 pt-1">
                 <ClipboardList className="h-4 w-4 text-brand-600" />
-                <h3 className="text-sm font-semibold text-ink-900">{step?.name} – data entry</h3>
-                <span className="text-[11px] text-ink-500">pages {Array.from(stepPages).filter((p) => p > 0).sort((a, b) => a - b).join(", ") || "–"}</span>
+                <h3 className="text-sm font-semibold text-ink-900">{t("ip.dataEntry", { step: step?.name ?? "" })}</h3>
+                <span className="text-[11px] text-ink-500">{t("ip.pages", { p: Array.from(stepPages).filter((p) => p > 0).sort((a, b) => a - b).join(", ") || "–" })}</span>
               </div>
               <MeasurementSections sections={mySections} values={values} onChange={setValues} showErrors={showErrors} />
             </>
           ) : (
-            <Alert tone="info">No template fields in this step{isFinal ? " – check the data and sign." : " – check the data and complete the step."}</Alert>
+            <Alert tone="info">{isFinal ? t("ip.noFieldsFinal") : t("ip.noFields")}</Alert>
           )}
 
           {stepDoesDocuments && (
@@ -428,20 +430,20 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
           <Card>
             {isFinal ? (
               <>
-                <CardHeader title="Signature" description="Your own signature is stamped on the certificate when you issue it." />
+                <CardHeader title={t("ip.signature")} description={t("ip.signatureDesc")} />
                 <CardBody className="space-y-3">
                   <SignaturePicker userName={userName} onChange={setSignature} />
-                  {showErrors && !signature && <div className="text-xs font-medium text-red-600" data-missing="true">Sign the certificate before issuing it.</div>}
-                  <Field label="Remark (optional, kept in the history)">
+                  {showErrors && !signature && <div className="text-xs font-medium text-red-600" data-missing="true">{t("ip.signFirst")}</div>}
+                  <Field label={t("ip.remark")}>
                     <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} />
                   </Field>
                 </CardBody>
               </>
             ) : (
               <>
-                <CardHeader title="Hand over" description={`When you complete this step the COC goes to “${nextStep?.name}”${nextStep?.roles.length ? ` (${nextStep.roles.join(", ")})` : ""}.`} />
+                <CardHeader title={t("ip.handover")} description={`${t("ip.handoverDesc", { step: nextStep?.name ?? "" })}${nextStep?.roles.length ? ` (${nextStep.roles.join(", ")})` : ""}`} />
                 <CardBody>
-                  <Field label="Note for the next step (optional)">
+                  <Field label={t("ip.noteNext")}>
                     <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} />
                   </Field>
                 </CardBody>
@@ -451,7 +453,7 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
 
           {previewUrl && (
             <Card>
-              <CardHeader title="Preview" description="Draft preview – the COC number is assigned when the COC is issued." />
+              <CardHeader title={t("common.preview")} description={t("ip.previewDesc")} />
               <CardBody>
                 <PdfViewer src={previewUrl} title="Preview" downloadName={`${doc.production_order}-preview.pdf`} />
               </CardBody>
@@ -462,7 +464,7 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
 
       {wf.history?.length > 0 && (
         <Card>
-          <CardHeader title="History" />
+          <CardHeader title={t("ip.history")} />
           <CardBody>
             <ol className="space-y-1.5 text-xs">
               {wf.history.map((h, i) => (
@@ -484,29 +486,29 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
         <div className="sticky bottom-0 z-20 -mx-3 flex flex-wrap items-center justify-end gap-2 border-t border-ink-200 bg-white/95 px-3 py-2.5 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
           {data.canWithdraw && !data.canInspect && (
             <Button variant="outline" onClick={() => openDialog("withdraw")} className="gap-1.5">
-              <Undo2 className="h-4 w-4" /> Withdraw
+              <Undo2 className="h-4 w-4" /> {t("common.withdraw")}
             </Button>
           )}
           {data.canInspect && (
             <>
               <Button variant="outline" onClick={() => openDialog("reject")} className="gap-1.5 text-red-700 border-red-200 hover:bg-red-50">
-                <XCircle className="h-4 w-4" /> Reject
+                <XCircle className="h-4 w-4" /> {t("common.reject")}
               </Button>
               {stepIndex >= 2 && (
                 <Button variant="outline" onClick={() => openDialog("return")} className="gap-1.5">
-                  <CornerUpLeft className="h-4 w-4" /> Send back
+                  <CornerUpLeft className="h-4 w-4" /> {t("ip.sendBack")}
                 </Button>
               )}
               <Button variant="outline" loading={previewing} onClick={preview} className="gap-1.5">
-                <Eye className="h-4 w-4" /> Preview
+                <Eye className="h-4 w-4" /> {t("common.preview")}
               </Button>
               {isFinal ? (
                 <Button loading={issuing} onClick={issue} className="gap-1.5 bg-brand-500 hover:bg-brand-600 text-ink-900 border-brand-500 font-semibold">
-                  {signature ? <FileCheck className="h-4 w-4" /> : <PenTool className="h-4 w-4" />} Issue COC
+                  {signature ? <FileCheck className="h-4 w-4" /> : <PenTool className="h-4 w-4" />} {t("ip.issueCoc")}
                 </Button>
               ) : (
                 <Button loading={completing} onClick={completeStep} className="gap-1.5 bg-brand-500 hover:bg-brand-600 text-ink-900 border-brand-500 font-semibold">
-                  Complete step <ArrowRight className="h-4 w-4" />
+                  {t("ip.completeStep")} <ArrowRight className="h-4 w-4" />
                 </Button>
               )}
             </>
@@ -517,23 +519,21 @@ export function InspectClient({ id, userName }: { id: string; userName: string }
       <Dialog
         open={rejectOpen}
         onClose={() => setRejectOpen(false)}
-        title={dialogMode === "return" ? `Send back to “${steps[stepIndex - 1]?.name ?? ""}”` : dialogMode === "withdraw" ? "Withdraw from the workflow" : "Reject this COC"}
+        title={dialogMode === "return" ? t("ip.returnTitle", { step: steps[stepIndex - 1]?.name ?? "" }) : dialogMode === "withdraw" ? t("ip.withdrawTitle") : t("ip.rejectTitle")}
         footer={
           <>
-            <Button variant="outline" onClick={() => setRejectOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setRejectOpen(false)}>{t("common.cancel")}</Button>
             <Button variant={dialogMode === "return" ? "primary" : "danger"} loading={rejecting} onClick={() => reject(dialogMode === "withdraw")}>
-              {dialogMode === "return" ? "Send back" : dialogMode === "withdraw" ? "Withdraw" : "Reject"}
+              {dialogMode === "return" ? t("ip.sendBack") : dialogMode === "withdraw" ? t("common.withdraw") : t("common.reject")}
             </Button>
           </>
         }
       >
         <div className="space-y-2 text-sm">
           <p className="text-ink-600">
-            {dialogMode === "return"
-              ? "The previous step gets the COC back with your reason and can correct its data."
-              : <>The COC is cancelled and the serial number {doc.serial_number ? <strong>{doc.serial_number}</strong> : null} can be used again. The reason is shown under “Rejected / withdrawn”.</>}
+            {dialogMode === "return" ? t("ip.returnInfo") : t("ip.rejectInfo")}
           </p>
-          <Field label="Reason">
+          <Field label={t("common.reason")}>
             <Textarea rows={3} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="e.g. Flatness point 3 out of tolerance – rework needed" />
           </Field>
         </div>

@@ -13,6 +13,9 @@ import { can, type Role } from "@/lib/auth/roles";
 import { Toaster } from "@/components/ui/toast";
 import { Badge } from "@/components/ui";
 import { APP_VERSION } from "@/lib/version";
+import { useI18n } from "@/lib/i18n/provider";
+import type { MessageKey } from "@/lib/i18n/messages";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 interface Props {
   user: { name?: string | null; email: string; role: Role; isDev?: boolean; capabilities?: string[] };
@@ -23,36 +26,36 @@ interface Props {
   children: React.ReactNode;
 }
 
-type NavItem = { href: string; label: string; short: string; icon: typeof LayoutDashboard; show: boolean; badge?: number };
+type NavItem = { href: string; label: MessageKey; short: MessageKey; icon: typeof LayoutDashboard; show: boolean; badge?: number };
 
-const nav = (role: Role, capabilities: string[] | undefined, inspection: { enabled: boolean; count: number }): { title: string; items: NavItem[] }[] => [
+const nav = (role: Role, capabilities: string[] | undefined, inspection: { enabled: boolean; count: number }): { title: MessageKey; items: NavItem[] }[] => [
   {
-    title: "Documents",
+    title: "nav.documents",
     items: [
-      { href: "/", label: "Dashboard", short: "Home", icon: LayoutDashboard, show: can(role, "dashboard:read", capabilities) },
-      { href: "/coc/new", label: "New COC", short: "New", icon: FilePlus2, show: can(role, "coc:create", capabilities) },
+      { href: "/", label: "nav.dashboard", short: "nav.short.home", icon: LayoutDashboard, show: can(role, "dashboard:read", capabilities) },
+      { href: "/coc/new", label: "nav.newCoc", short: "nav.short.new", icon: FilePlus2, show: can(role, "coc:create", capabilities) },
       {
         href: "/coc/inspection",
-        label: "Pending Inspection",
-        short: "Inspect",
+        label: "nav.pendingInspection",
+        short: "nav.short.inspect",
         icon: ClipboardCheck,
         show: inspection.enabled && (can(role, "coc:update", capabilities) || can(role, "coc:create", capabilities)),
         badge: inspection.count,
       },
-      { href: "/coc/history", label: "Completed COCs", short: "Completed", icon: History, show: can(role, "coc:read", capabilities) },
+      { href: "/coc/history", label: "nav.completed", short: "nav.short.completed", icon: History, show: can(role, "coc:read", capabilities) },
     ],
   },
   {
-    title: "Administration",
+    title: "nav.administration",
     items: [
-      { href: "/admin/templates", label: "Templates", short: "Templates", icon: FileText, show: can(role, "templates:read", capabilities) },
-      { href: "/admin/fields", label: "Field Definitions", short: "Fields", icon: ListTree, show: can(role, "fields:read", capabilities) },
-      { href: "/admin/d365-mappings", label: "D365FO Field Mapping", short: "D365", icon: Database, show: can(role, "d365_mappings:read", capabilities) },
-      { href: "/admin/sharepoint", label: "SharePoint Configuration", short: "SharePoint", icon: FolderCog, show: can(role, "sharepoint:read", capabilities) },
-      { href: "/admin/users", label: "Users & Roles", short: "Users", icon: Users, show: can(role, "users:read", capabilities) || can(role, "roles:read", capabilities) },
-      { href: "/admin/signatures", label: "Signatures", short: "Signatures", icon: PenTool, show: can(role, "signatures:read", capabilities) },
-      { href: "/admin/audit", label: "Audit Logs", short: "Audit", icon: ScrollText, show: String(role || "").toLowerCase() === "admin" },
-      { href: "/admin/settings", label: "System Settings", short: "Settings", icon: Settings, show: can(role, "settings:read", capabilities) },
+      { href: "/admin/templates", label: "nav.templates", short: "nav.templates", icon: FileText, show: can(role, "templates:read", capabilities) },
+      { href: "/admin/fields", label: "nav.fields", short: "nav.fields", icon: ListTree, show: can(role, "fields:read", capabilities) },
+      { href: "/admin/d365-mappings", label: "nav.d365", short: "nav.d365", icon: Database, show: can(role, "d365_mappings:read", capabilities) },
+      { href: "/admin/sharepoint", label: "nav.sharepoint", short: "nav.sharepoint", icon: FolderCog, show: can(role, "sharepoint:read", capabilities) },
+      { href: "/admin/users", label: "nav.users", short: "nav.users", icon: Users, show: can(role, "users:read", capabilities) || can(role, "roles:read", capabilities) },
+      { href: "/admin/signatures", label: "nav.signatures", short: "nav.signatures", icon: PenTool, show: can(role, "signatures:read", capabilities) },
+      { href: "/admin/audit", label: "nav.audit", short: "nav.audit", icon: ScrollText, show: String(role || "").toLowerCase() === "admin" },
+      { href: "/admin/settings", label: "nav.settings", short: "nav.settings", icon: Settings, show: can(role, "settings:read", capabilities) },
     ],
   },
 ];
@@ -67,6 +70,7 @@ const isActive = (pathname: string, href: string) => (href === "/" ? pathname ==
  */
 export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Props) {
   const pathname = usePathname();
+  const { t } = useI18n();
   const isDesigner = pathname.includes("/designer/");
   const isCocNew = pathname.startsWith("/coc/new");
   // Quality inspection workflow: menu entry + number of COCs waiting (refreshed every minute)
@@ -102,7 +106,8 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
   }, [drawerOpen]);
 
   const allItems = groups.flatMap((g) => g.items);
-  const currentLabel = allItems.find((i) => isActive(pathname, i.href))?.label || "COC Platform";
+  const currentItem = allItems.find((i) => isActive(pathname, i.href));
+  const currentLabel = currentItem ? t(currentItem.label) : "COC Platform";
   const bottomItems = groups[0]?.items ?? [];
   // The New COC wizard renders its own sticky action bar on phones
   const showBottomBar = !isDesigner && !isCocNew;
@@ -113,10 +118,11 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
     <div className="border-t border-ink-200 p-3">
       {compact ? (
         <div className="flex flex-col items-center gap-2">
+          <LanguageSwitcher compact className="px-1" />
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-ink-200 text-xs font-semibold text-ink-700" title={`${user.name || user.email} · ${user.role}`}>
             {initials}
           </div>
-          <button onClick={() => void signOutToLogin(loginUrl, "signout")} className="rounded p-2 text-ink-500 hover:bg-ink-100" title="Sign out" aria-label="Sign out">
+          <button onClick={() => void signOutToLogin(loginUrl, "signout")} className="rounded p-2 text-ink-500 hover:bg-ink-100" title={t("nav.signOut")} aria-label={t("nav.signOut")}>
             <LogOut className="h-4 w-4" />
           </button>
         </div>
@@ -130,11 +136,12 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
                 <ShieldCheck className="h-3 w-3" /> {user.role}
               </div>
             </div>
-            <button onClick={() => void signOutToLogin(loginUrl, "signout")} className="rounded p-1.5 text-ink-500 hover:bg-ink-100" title="Sign out" aria-label="Sign out">
+            <button onClick={() => void signOutToLogin(loginUrl, "signout")} className="rounded p-1.5 text-ink-500 hover:bg-ink-100" title={t("nav.signOut")} aria-label={t("nav.signOut")}>
               <LogOut className="h-4 w-4" />
             </button>
           </div>
-          <div className="mt-2 flex flex-wrap gap-1">
+          <div className="mt-2 flex flex-wrap items-center gap-1">
+            <LanguageSwitcher />
             {d365Mode === "mock" && <Badge tone="info">D365 Catalog</Badge>}
             {storageMode === "mock" && <Badge tone="neutral">HydraSpecma Storage</Badge>}
             {user.isDev && <Badge tone="neutral">Internal User</Badge>}
@@ -148,7 +155,7 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
     <nav className="flex-1 overflow-y-auto px-3 py-4">
       {groups.map((g) => (
         <div key={g.title} className="mb-5">
-          <div className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-ink-400">{g.title}</div>
+          <div className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-ink-400">{t(g.title)}</div>
           {g.items.map((i) => (
             <Link
               key={i.href}
@@ -160,7 +167,7 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
               )}
             >
               <i.icon className="h-4 w-4 shrink-0" />
-              <span className="flex-1">{i.label}</span>
+              <span className="flex-1">{t(i.label)}</span>
               {Boolean(i.badge) && (
                 <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{i.badge}</span>
               )}
@@ -209,7 +216,7 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
                     key={i.href}
                     href={i.href}
                     prefetch={true}
-                    title={i.label}
+                    title={t(i.label)}
                     className={cn(
                       "flex flex-col items-center gap-1 rounded-lg px-1 py-2 text-[10px] font-medium leading-tight text-ink-600 hover:bg-ink-100 transition-colors text-center",
                       isActive(pathname, i.href) && "bg-ink-900 text-white hover:bg-ink-900",
@@ -221,7 +228,7 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
                         <span className="absolute -right-2.5 -top-1.5 rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-4 text-white">{i.badge}</span>
                       )}
                     </span>
-                    <span className="w-full truncate">{i.short}</span>
+                    <span className="w-full truncate">{t(i.short)}</span>
                   </Link>
                 ))}
               </div>
@@ -235,11 +242,12 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
         {/* ── Phone: top app bar ── */}
         {!isDesigner && (
           <header className="md:hidden flex h-14 shrink-0 items-center gap-2 border-b border-ink-200 bg-white px-2 pt-[env(safe-area-inset-top)]">
-            <button onClick={() => setDrawerOpen(true)} className="rounded-md p-2.5 text-ink-700 hover:bg-ink-100 active:bg-ink-200" aria-label="Open menu">
+            <button onClick={() => setDrawerOpen(true)} className="rounded-md p-2.5 text-ink-700 hover:bg-ink-100 active:bg-ink-200" aria-label={t("nav.openMenu")}>
               <Menu className="h-5 w-5" />
             </button>
             <img src="/hydraspecma-logo.png" alt="HydraSpecma" className="h-6 w-auto object-contain shrink-0" />
             <div className="min-w-0 flex-1 truncate text-sm font-semibold text-ink-900">{currentLabel}</div>
+            <LanguageSwitcher compact />
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink-200 text-[11px] font-semibold text-ink-700" title={user.name || user.email}>
               {initials}
             </div>
@@ -278,14 +286,14 @@ export function AppShell({ user, d365Mode, storageMode, loginUrl, children }: Pr
                       <span className="absolute right-0.5 -top-1 rounded-full bg-amber-500 px-1 text-[9px] font-bold leading-4 text-white">{i.badge}</span>
                     )}
                   </span>
-                  {i.short}
+                  {t(i.short)}
                 </Link>
               ))}
               <button onClick={() => setDrawerOpen(true)} className="flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium text-ink-500">
                 <span className="flex h-7 w-12 items-center justify-center rounded-full">
                   <Menu className="h-5 w-5" />
                 </span>
-                More
+                {t("nav.more")}
               </button>
             </div>
           </nav>

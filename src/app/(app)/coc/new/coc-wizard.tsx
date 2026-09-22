@@ -56,6 +56,7 @@ import {
 import { MeasurementSections, MeasurementEmptyHint, initMeasureValues, missingRequired, photoUploads, toMeasurementEntries, type MeasureValues } from "@/components/coc/MeasurementSections";
 import { DocumentCapture, toAttachmentUploads, type CapturedDoc } from "@/components/coc/DocumentCapture";
 import { PdfViewer } from "@/components/coc/PdfViewer";
+import { useI18n } from "@/lib/i18n/provider";
 import { SignatureDesigner } from "@/components/coc/SignatureDesigner";
 import { defaultSignatureStyle, loadLocalStyle, renderAutoSignature, type SignatureStyle } from "@/lib/signature/auto-signature";
 import { EMPTY_INPUT_CONFIG, formatPrinted, type TemplateInputConfig } from "@/lib/coc-inputs/types";
@@ -220,6 +221,7 @@ export function CocWizard({
   canManageTemplates?: boolean;
 }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [showFilters, setShowFilters] = useState(false);
@@ -1534,7 +1536,7 @@ export function CocWizard({
       });
 
       if (res.ok && res.pending) {
-        toast.success(`Sent to ${wfNextName}`, `${prodOrder} · ${manualFields.SerialNumber || ""} is waiting in Pending Inspection.`);
+        toast.success(t("wiz.sent", { step: wfNextName }), t("wiz.sentDetail", { order: `${prodOrder} · ${manualFields.SerialNumber || ""}` }));
         router.push(`/coc/inspection`);
       } else if (res.ok) {
         toast.success(`Generated ${res.cocNumber} successfully!`);
@@ -1567,7 +1569,7 @@ export function CocWizard({
                     </Link>
                   )}
                   <Button disabled className="w-full justify-center opacity-50 text-xs">
-                    Next: Quality Checks <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                    {t("wiz.nextQuality")} <ArrowRight className="h-3.5 w-3.5 ml-1" />
                   </Button>
                 </>
               ) : (
@@ -1576,35 +1578,35 @@ export function CocWizard({
                   onClick={() => setStep(2)}
                   className="w-full justify-center gap-2 font-bold py-2.5 shadow-sm text-sm"
                 >
-                  Next: Quality Checks <ArrowRight className="h-4 w-4" />
+                  {t("wiz.nextQuality")} <ArrowRight className="h-4 w-4" />
                 </Button>
               )}
             </div>
           ) : step === 2 ? (
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep(1)} className="flex-1 justify-center text-xs">
-                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Orders
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> {t("wiz.orders")}
               </Button>
               <Button onClick={() => goToStep(3)} className="flex-1 justify-center text-xs font-bold">
-                Next: Sign <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                {t("wiz.nextSign")} <ArrowRight className="h-3.5 w-3.5 ml-1" />
               </Button>
             </div>
           ) : step === 3 ? (
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep(2)} className="flex-1 justify-center text-xs">
-                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Quality
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> {t("wiz.quality")}
               </Button>
               <Button onClick={() => goToStep(4)} className="flex-1 justify-center text-xs font-bold">
-                Next: Review <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                {t("wiz.nextReview")} <ArrowRight className="h-3.5 w-3.5 ml-1" />
               </Button>
             </div>
           ) : (
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep(3)} className="flex-1 justify-center text-xs">
-                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> Sign
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" /> {t("wiz.sign")}
               </Button>
               <Button loading={generating} onClick={handleCreateCoc} className="flex-1 justify-center text-xs font-bold bg-brand-500 hover:bg-brand-600 text-ink-900">
-                {workflowPending ? <>Send to next step <Send className="h-3.5 w-3.5 ml-1" /></> : <>Issue COC <FileCheck className="h-3.5 w-3.5 ml-1" /></>}
+                {workflowPending ? <>{t("wiz.sendNext")} <Send className="h-3.5 w-3.5 ml-1" /></> : <>{t("wiz.issueCoc")} <FileCheck className="h-3.5 w-3.5 ml-1" /></>}
               </Button>
             </div>
           )
@@ -1617,18 +1619,18 @@ export function CocWizard({
         <div className="w-full space-y-4 sm:space-y-6 pb-28 lg:pb-20">
           <div className="hidden sm:block">
             <PageHeader
-              title="Create Certificate of Conformity"
-              description="Issue an official COC by selecting a production order, validating quality parameters, and applying an authorized digital signature."
+              title={t("wiz.title")}
+              description={t("wiz.description")}
             />
           </div>
 
           {/* Step Progress Bar */}
           <div className="mb-4 grid grid-cols-4 gap-1.5 sm:mb-6 sm:gap-2">
         {[
-          { num: 1, label: "Select Order", icon: FileCheck },
-          { num: 2, label: "Quality Checks", icon: Sparkles },
-          { num: 3, label: "Digital Sign", icon: PenTool },
-          { num: 4, label: "Review & Issue", icon: Eye },
+          { num: 1, label: t("wiz.step.order"), icon: FileCheck },
+          { num: 2, label: t("wiz.step.quality"), icon: Sparkles },
+          { num: 3, label: t("wiz.step.sign"), icon: PenTool },
+          { num: 4, label: t("wiz.step.review"), icon: Eye },
         ].map((s) => (
           <button
             key={s.num}
@@ -1668,7 +1670,7 @@ export function CocWizard({
               <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-brand-50 text-brand-800 font-bold text-xs border border-brand-200">
                 1
               </div>
-              <span className="text-xs font-semibold text-ink-800 whitespace-nowrap">Document Template:</span>
+              <span className="text-xs font-semibold text-ink-800 whitespace-nowrap">{t("wiz.template")}</span>
               <div className="flex items-center gap-1.5 min-w-0">
                 <select
                   value={selectedTemplateId}
@@ -2853,7 +2855,7 @@ export function CocWizard({
                     onClick={() => setStep(2)}
                     className="gap-2 disabled:opacity-50"
                   >
-                    Next: Quality Checks <ArrowRight className="h-4 w-4" />
+                    {t("wiz.nextQuality")} <ArrowRight className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
@@ -2869,13 +2871,13 @@ export function CocWizard({
             <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 flex items-start gap-2.5">
               <GitBranch className="h-4 w-4 shrink-0 mt-0.5 text-sky-700" />
               <div className="space-y-0.5">
-                <p className="font-semibold text-sm">Workflow · {workflowRule?.name} · step 1: {wfFirst?.name}</p>
+                <p className="font-semibold text-sm">{t("wiz.wfTitle", { name: workflowRule?.name ?? "", step: wfFirst?.name ?? "" })}</p>
                 <p>
-                  You only prepare this COC{step1Sections.length ? " and fill the fields below" : ""}. Then it goes to <strong>{wfNextName}</strong> ({wfNextRoles})
-                  {workflowRule && workflowRule.nextSteps.length > 1 ? ` and ${workflowRule.nextSteps.length - 1} more step(s)` : ""}.
+                  {t("wiz.wfPrepare", { fields: step1Sections.length ? t("wiz.wfPrepareFields") : "", next: wfNextName, roles: wfNextRoles })}
+                  {workflowRule && workflowRule.nextSteps.length > 1 ? ` (+${workflowRule.nextSteps.length - 1})` : ""}
                 </p>
                 {(wfFirst?.instructions || workflowRule?.instructions) && <p className="italic">“{wfFirst?.instructions || workflowRule?.instructions}”</p>}
-                {workflowMatch?.canStart === false && <p className="font-semibold text-red-700">Step 1 is done by {wfFirst?.roles.join(", ")} – you cannot start this COC.</p>}
+                {workflowMatch?.canStart === false && <p className="font-semibold text-red-700">{t("wiz.wfCannotStart", { roles: wfFirst?.roles.join(", ") ?? "" })}</p>}
               </div>
             </div>
           )}
@@ -2975,7 +2977,7 @@ export function CocWizard({
             <>
               <div className="flex items-center gap-2 px-1 pt-1">
                 <ClipboardList className="h-4 w-4 text-brand-600" />
-                <h3 className="text-sm font-semibold text-ink-900">Template pages – data entry</h3>
+                <h3 className="text-sm font-semibold text-ink-900">{t("wiz.dataEntry")}</h3>
                 <span className="hidden sm:inline text-[11px] text-ink-500">Page 1 comes from D365FO · these pages are filled here</span>
               </div>
               <MeasurementSections
@@ -3108,7 +3110,7 @@ export function CocWizard({
               <GitBranch className="h-4 w-4 shrink-0 mt-0.5 text-sky-700" />
               <div className="space-y-0.5">
                 <p className="font-semibold text-sm">Workflow · {workflowRule?.name}</p>
-                <p>No signature is needed in step 1 – the COC is signed in the last step of the workflow. Continue to Review.</p>
+                <p>{t("wiz.wfNoSign")}</p>
                 {workflowRule?.instructions && <p className="italic">“{workflowRule.instructions}”</p>}
               </div>
             </div>
@@ -3366,7 +3368,7 @@ export function CocWizard({
                 className="bg-brand-500 hover:bg-brand-600 text-ink-900 font-semibold gap-2 border-brand-500 disabled:opacity-50"
               >
                 {workflowPending ? <Send className="h-4 w-4" /> : <FileCheck className="h-4 w-4" />}
-                {workflowPending ? `Send to ${wfNextName}` : "Generate & Issue Official COC"}
+                {workflowPending ? t("wiz.sendTo", { step: wfNextName }) : t("wiz.issueOfficial")}
               </Button>
             }
           />
@@ -3397,15 +3399,14 @@ export function CocWizard({
               <div className="space-y-0.5">
                 <p className="font-semibold text-sm">Workflow · {workflowRule?.name}</p>
                 <p>
-                  “Send to {wfNextName}” puts this COC in Pending Inspection:{" "}
-                  {workflowRule?.nextSteps.map((st, i) => `${i + 2}. ${st.name}${st.roles.length ? ` (${st.roles.join(" / ")})` : ""}`).join(" → ")}.
-                  The COC number is assigned when it is issued.
+                  {t("wiz.wfSendInfo", { next: wfNextName })}{" "}
+                  {workflowRule?.nextSteps.map((st, i) => `${i + 2}. ${st.name}${st.roles.length ? ` (${st.roles.join(" / ")})` : ""}`).join(" → ")}
                 </p>
                 {workflowRule?.instructions && <p className="italic">“{workflowRule.instructions}”</p>}
               </div>
             </div>
           )}
-                <Field label="Note for the next step (optional)">
+                <Field label={t("wiz.noteNext")}>
                   <Textarea
                     rows={2}
                     value={workflowNote}
@@ -3445,7 +3446,7 @@ export function CocWizard({
                 className="bg-brand-500 hover:bg-brand-600 text-ink-900 font-semibold gap-2 border-brand-500 disabled:opacity-50"
               >
                 {workflowPending ? <Send className="h-4 w-4" /> : <FileCheck className="h-4 w-4" />}
-                {workflowPending ? `Send to ${wfNextName}` : "Confirm & Issue Official Certificate"}
+                {workflowPending ? t("wiz.sendTo", { step: wfNextName }) : t("wiz.confirmIssue")}
               </Button>
             </div>
           </CardBody>

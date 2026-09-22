@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { Loader2, Clock, KeyRound, ArrowLeft } from "lucide-react";
+import { useI18n } from "@/lib/i18n/provider";
 
 interface Props {
   callbackUrl: string;
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Props) {
+  const { t } = useI18n();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -188,10 +190,10 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
       {mode === "setup" ? (
         <form onSubmit={handleSetup} className="space-y-4">
           <div className="flex items-center gap-2 text-sm font-bold text-ink-900">
-            <KeyRound className="h-4 w-4 text-brand-600" /> New user – set your password
+            <KeyRound className="h-4 w-4 text-brand-600" /> {t("signin.setupTitle")}
           </div>
           <div>
-            <label className="block text-xs font-semibold text-ink-700 mb-1">Work Email</label>
+            <label className="block text-xs font-semibold text-ink-700 mb-1">{t("signin.email")}</label>
             <input
               type="email"
               autoComplete="username"
@@ -203,7 +205,7 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-ink-700 mb-1">6-digit passcode (from your administrator)</label>
+            <label className="block text-xs font-semibold text-ink-700 mb-1">{t("signin.passcode")}</label>
             <input
               inputMode="numeric"
               autoComplete="one-time-code"
@@ -216,7 +218,7 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-ink-700 mb-1">New password (min. 6 characters)</label>
+            <label className="block text-xs font-semibold text-ink-700 mb-1">{t("signin.newPassword")}</label>
             <input
               type="password"
               autoComplete="new-password"
@@ -227,7 +229,7 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-ink-700 mb-1">Confirm new password</label>
+            <label className="block text-xs font-semibold text-ink-700 mb-1">{t("signin.confirmPassword")}</label>
             <input
               type="password"
               autoComplete="new-password"
@@ -243,7 +245,7 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
             className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-brand-500 text-sm font-bold text-ink-900 hover:bg-brand-600 transition-colors shadow-sm disabled:opacity-75"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Set password &amp; sign in
+            {t("signin.setPassword")}
           </button>
           <button
             type="button"
@@ -254,13 +256,13 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
             }}
             className="flex w-full items-center justify-center gap-1 text-xs font-semibold text-ink-600 hover:text-ink-900"
           >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to sign in
+            <ArrowLeft className="h-3.5 w-3.5" /> {t("signin.back")}
           </button>
         </form>
       ) : (
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-xs font-semibold text-ink-700 mb-1">Work Email</label>
+          <label className="block text-xs font-semibold text-ink-700 mb-1">{t("signin.email")}</label>
           <input
             name="email"
             type="email"
@@ -279,7 +281,7 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
 
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="block text-xs font-semibold text-ink-700">Password</label>
+            <label className="block text-xs font-semibold text-ink-700">{t("signin.password")}</label>
           </div>
           <input
             name="password"
@@ -304,10 +306,10 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
           {loading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin text-ink-900" />
-              <span>Signing in...</span>
+              <span>{t("signin.signingIn")}</span>
             </>
           ) : (
-            <span>Sign In</span>
+            <span>{t("signin.signIn")}</span>
           )}
         </button>
         <button
@@ -319,7 +321,7 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
           }}
           className="flex w-full items-center justify-center gap-1.5 text-xs font-semibold text-brand-800 hover:underline"
         >
-          <KeyRound className="h-3.5 w-3.5" /> New user / set password with passcode
+          <KeyRound className="h-3.5 w-3.5" /> {t("signin.newUser")}
         </button>
       </form>
       )}
@@ -330,7 +332,7 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
           <div className="w-full border-t border-ink-200" />
         </div>
         <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-white px-2 text-ink-400 font-medium">Or continue with</span>
+          <span className="bg-white px-2 text-ink-400 font-medium">{t("signin.orContinue")}</span>
         </div>
       </div>
 
@@ -353,7 +355,7 @@ export function SignInForm({ callbackUrl, initialError, reason, hasEntra }: Prop
               <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
               <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
             </svg>
-            <span>Sign in with Microsoft 365 (SSO)</span>
+            <span>{t("signin.microsoft")}</span>
           </>
         )}
       </button>

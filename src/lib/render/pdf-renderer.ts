@@ -30,6 +30,7 @@ export interface RenderContext {
 }
 
 import { appendCocExtras, makeFontSafe } from "@/lib/render/coc-extras";
+import { ensureFallbackFont } from "@/lib/render/cjk-font";
 import type { AttachmentUpload, MeasurementEntry } from "@/lib/coc-inputs/types";
 
 async function finalizeWithExtras(pdfDoc: PDFDocument, context: RenderContext, templateJson: unknown): Promise<Uint8Array> {
@@ -340,6 +341,8 @@ export async function renderCOCPdf(context: RenderContext): Promise<Uint8Array> 
 
   const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  // Chinese names / initials etc. are drawn with an embedded CJK font (Helvetica cannot draw them)
+  await ensureFallbackFont(pdfDoc, { ...context, signatureBase64: undefined, attachments: context.attachments?.map((a) => ({ name: a.name, caption: a.caption })) });
 
   const templatePath = path.join(process.cwd(), "public", "templates", "hydraspecma-coc-template.pdf");
 

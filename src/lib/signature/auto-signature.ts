@@ -23,14 +23,18 @@ export interface SignatureStyle {
   showVerifiedLine: boolean;
 }
 
+/** Chinese names fall back to a brush / system CJK font (the script fonts only have Latin letters). */
+const CJK = `"KaiTi", "STKaiti", "Kaiti SC", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif`;
+
 export const SIGNATURE_FONTS: Array<{ id: string; label: string; css: string; weight: number; scale: number }> = [
-  { id: "dancing", label: "Dancing Script", css: "'Dancing Script'", weight: 600, scale: 1 },
-  { id: "greatvibes", label: "Great Vibes", css: "'Great Vibes'", weight: 400, scale: 1.1 },
-  { id: "allura", label: "Allura", css: "'Allura'", weight: 400, scale: 1.15 },
-  { id: "sacramento", label: "Sacramento", css: "'Sacramento'", weight: 400, scale: 1.2 },
-  { id: "caveat", label: "Caveat (pen)", css: "'Caveat'", weight: 600, scale: 1 },
-  { id: "homemade", label: "Homemade Apple", css: "'Homemade Apple'", weight: 400, scale: 0.75 },
-  { id: "serif", label: "Classic italic", css: "Georgia, 'Times New Roman', serif", weight: 400, scale: 0.85 },
+  { id: "dancing", label: "Dancing Script", css: `'Dancing Script', ${CJK}`, weight: 600, scale: 1 },
+  { id: "greatvibes", label: "Great Vibes", css: `'Great Vibes', ${CJK}`, weight: 400, scale: 1.1 },
+  { id: "allura", label: "Allura", css: `'Allura', ${CJK}`, weight: 400, scale: 1.15 },
+  { id: "sacramento", label: "Sacramento", css: `'Sacramento', ${CJK}`, weight: 400, scale: 1.2 },
+  { id: "caveat", label: "Caveat (pen)", css: `'Caveat', ${CJK}`, weight: 600, scale: 1 },
+  { id: "homemade", label: "Homemade Apple", css: `'Homemade Apple', ${CJK}`, weight: 400, scale: 0.75 },
+  { id: "serif", label: "Classic italic", css: `Georgia, 'Times New Roman', ${CJK}`, weight: 400, scale: 0.85 },
+  { id: "kaiti", label: "楷体 Chinese brush", css: `"KaiTi", "STKaiti", "Kaiti SC", "AR PL UKai CN", ${CJK}`, weight: 400, scale: 0.95 },
 ];
 
 export const SIGNATURE_COLORS = [
@@ -137,7 +141,7 @@ export async function renderAutoSignature(style: SignatureStyle): Promise<string
   let y = Math.min(baseline, 72) + 24;
   for (const d of details.slice(0, 3)) {
     ctx.fillStyle = d.bold ? "#1e293b" : "#475569";
-    ctx.font = `${d.bold ? "600" : "400"} 11px "Segoe UI", Roboto, Arial, sans-serif`;
+    ctx.font = `${d.bold ? "600" : "400"} 11px "Segoe UI", Roboto, Arial, ${CJK}`;
     ctx.fillText(d.text, x, y);
     y += 15;
   }

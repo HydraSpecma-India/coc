@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Eraser, PenTool, ShieldCheck, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui";
 import { api } from "@/lib/utils/fetcher";
+import { useI18n } from "@/lib/i18n/provider";
 import { SignatureDesigner } from "./SignatureDesigner";
 
 interface StoredSignature {
@@ -17,6 +18,7 @@ type Mode = "stored" | "auto" | "draw";
 
 /** Stored signature, personal auto-signature or hand-drawn – returns a PNG data URL ("" = none). */
 export function SignaturePicker({ userName, onChange }: { userName: string; onChange: (dataUrl: string) => void }) {
+  const { t } = useI18n();
   const [mode, setModeState] = useState<Mode>("auto");
   const modeRef = useRef<Mode>("auto");
   const setMode = (m: Mode) => {
@@ -103,14 +105,14 @@ export function SignaturePicker({ userName, onChange }: { userName: string; onCh
       <div className="flex flex-wrap gap-2">
         {stored.length > 0 && (
           <Button size="sm" variant={mode === "stored" ? "primary" : "outline"} onClick={() => pick("stored")} className="gap-1.5 text-xs">
-            <ShieldCheck className="h-3.5 w-3.5" /> Stored signature
+            <ShieldCheck className="h-3.5 w-3.5" /> {t("sig.stored")}
           </Button>
         )}
         <Button size="sm" variant={mode === "auto" ? "primary" : "outline"} onClick={() => pick("auto")} className="gap-1.5 text-xs">
-          <Sparkles className="h-3.5 w-3.5" /> Auto-sign
+          <Sparkles className="h-3.5 w-3.5" /> {t("sig.auto")}
         </Button>
         <Button size="sm" variant={mode === "draw" ? "primary" : "outline"} onClick={() => pick("draw")} className="gap-1.5 text-xs">
-          <PenTool className="h-3.5 w-3.5" /> Draw
+          <PenTool className="h-3.5 w-3.5" /> {t("sig.draw")}
         </Button>
       </div>
 
@@ -158,9 +160,9 @@ export function SignaturePicker({ userName, onChange }: { userName: string; onCh
             className="mx-auto block cursor-crosshair touch-none rounded border border-ink-200 bg-white"
           />
           <div className="mt-2 flex items-center justify-between text-xs text-ink-500">
-            <span>Sign with mouse, pen or finger.</span>
+            <span>{t("sig.drawHint")}</span>
             <button type="button" onClick={clear} className="inline-flex items-center gap-1 text-ink-600 hover:text-red-600">
-              <Eraser className="h-3.5 w-3.5" /> Clear
+              <Eraser className="h-3.5 w-3.5" /> {t("common.clear")}
             </button>
           </div>
         </div>

@@ -2,6 +2,9 @@ import { redirect } from "next/navigation";
 import { auth, hasEntraProvider } from "@/lib/auth/auth";
 import { SignInForm } from "./signin-form";
 import { APP_VERSION } from "@/lib/version";
+import { cookies } from "next/headers";
+import { LANG_COOKIE, parseLangCookie, translate } from "@/lib/i18n/messages";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 export const metadata = { title: "Sign in - COC Platform" };
 
@@ -13,12 +16,16 @@ export default async function SignInPage({
   const session = await auth();
   const { callbackUrl = "/", error, reason } = await searchParams;
   if (session?.user?.email && session.user.id) redirect(callbackUrl);
+  const lang = parseLangCookie((await cookies()).get(LANG_COOKIE)?.value);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-ink-100 p-6">
-      <div className="w-full max-w-md rounded-xl border border-ink-200 bg-white p-8 shadow-sm">
+      <div className="relative w-full max-w-md rounded-xl border border-ink-200 bg-white p-8 shadow-sm">
+        <div className="absolute right-3 top-3">
+          <LanguageSwitcher />
+        </div>
         {/* Brand Header */}
-        <div className="mb-6 flex items-center gap-3.5">
+        <div className="mb-6 mt-4 flex items-center gap-3.5">
           <img
             src="/hydraspecma-logo.png"
             alt="HydraSpecma"
@@ -31,7 +38,7 @@ export default async function SignInPage({
                 {APP_VERSION}
               </span>
             </div>
-            <p className="text-xs text-ink-500 font-medium">Certificate of Conformity • HydraSpecma</p>
+            <p className="text-xs text-ink-500 font-medium">{translate(lang, "signin.subtitle")}</p>
           </div>
         </div>
 
@@ -43,7 +50,7 @@ export default async function SignInPage({
         />
 
         <div className="mt-6 text-center text-[11px] text-ink-400">
-          Authorized HydraSpecma personnel only &bull; ISO 9001:2015 Compliant
+          {translate(lang, "signin.footer")}
         </div>
       </div>
     </div>
