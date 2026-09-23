@@ -156,6 +156,7 @@ function CompanyRow({
   const [results, setResults] = useState<LookupItem[]>([]);
   const [searching, setSearching] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
+  const [lookupEntity, setLookupEntity] = useState<string | null>(null);
 
   const addItems = (items: { item: string; label?: string }[]) => {
     const existing = new Set(row.items.map((i) => i.item.trim().toUpperCase()));
@@ -167,7 +168,7 @@ function CompanyRow({
     onPatch({ items: [...row.items, ...fresh.map((i) => ({ item: i.item.trim(), label: i.label?.trim() || undefined }))] });
   };
 
-  const runLookup = async () => {
+  const runLookup = async (refresh = false) => {
     if (lookup.trim().length < 2) {
       toast.error("Type at least two characters");
       return;
@@ -175,12 +176,12 @@ function CompanyRow({
     setSearching(true);
     setLookupError(null);
     try {
-      const res = await api<{ ok: boolean; items: LookupItem[]; error: string | null }>(
-        `/api/admin/coc-products/items?q=${encodeURIComponent(lookup.trim())}&company=${encodeURIComponent(row.company)}`,
+      const res = await api<{ ok: boolean; items: LookupItem[]; entity?: string | null; error: string | null }>(
+        `/api/admin/coc-products/items?q=${encodeURIComponent(lookup.trim())}&company=${encodeURIComponent(row.company)}${refresh ? "&refresh=1" : ""}`,
       );
       setResults(res.items || []);
+      setLookupEntity(res.entity || null);
       if (res.error) setLookupError(res.error);
-      else if (!res.items?.length) setLookupError("No product matched.");
     } catch (e) {
       setLookupError((e as Error).message);
     } finally {
@@ -237,11 +238,11 @@ function CompanyRow({
             <Input
               value={lookup}
               onChange={(e) => setLookup(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && runLookup()}
+              onKeyDown={(e) => e.key === "Enter" && runLookup(false)}
               placeholder="Item number or product name"
               className="w-64"
             />
-            <Button variant="outline" size="sm" onClick={runLookup} loading={searching}>
+            <Button variant="outline" size="sm" onClick={() => runLookup(false)} loading={searching}>
               Search
             </Button>
             {lookup.trim().length >= 2 && (
@@ -259,10 +260,20 @@ function CompanyRow({
               </Button>
             )}
           </div>
-          {lookupError && (
-            <p className="mt-2 break-all text-xs text-amber-700">
-              {lookupError.length > 300 ? `${lookupError.slice(0, 300)}…` : lookupError}
+          {lookupEntity && !lookupError && (
+            <p className="mt-2 text-[11px] text-ink-500">
+              Read from <span className="font-mono">{lookupEntity}</span>
             </p>
+          )}
+          {lookupError && (
+            <div className="mt-2 space-y-1">
+              <p className="break-all text-xs text-amber-700">
+                {lookupError.length > 400 ? `${lookupError.slice(0, 400)}…` : lookupError}
+              </p>
+              <button type="button" onClick={() => runLookup(true)} className="text-xs font-semibold text-brand-700 hover:underline">
+                Look for the product list again
+              </button>
+            </div>
           )}
           {results.length > 0 && (
             <div className="mt-2 max-h-48 space-y-1 overflow-auto rounded border border-ink-200 bg-white p-2">
