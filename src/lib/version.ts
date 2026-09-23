@@ -1,3 +1,3 @@
-export const APP_VERSION = "v1.00076";
-export const APP_VERSION_RAW = "1.00076";
-export const COMMIT_COUNT = 76;
+export const APP_VERSION = "v1.00077";
+export const APP_VERSION_RAW = "1.00077";
+export const COMMIT_COUNT = 77;

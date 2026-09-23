@@ -832,6 +832,8 @@ export class D365Service {
     select?: string[];
     top?: number;
     orderBy?: string;
+    /** read every legal entity – needed whenever the filter names a dataAreaId */
+    crossCompany?: boolean;
   }): Promise<{ mode: "mock" | "live"; rows: Array<Record<string, unknown>>; url?: string; error?: string }> {
     const config = (await getActiveConfig()).d365;
     const entity = opts.entity.trim().replace(/[^A-Za-z0-9_]/g, "");
@@ -847,7 +849,8 @@ export class D365Service {
     params.set("$top", String(Math.min(Math.max(1, opts.top ?? 1), 100)));
     if (opts.orderBy) params.set("$orderby", opts.orderBy);
     const baseUrl = config.baseUrl.replace(/\/+$/, "");
-    const url = `${baseUrl}/data/${entity}?${params.toString()}`;
+    const crossCompany = opts.crossCompany === false ? "" : "cross-company=true&";
+    const url = `${baseUrl}/data/${entity}?${crossCompany}${params.toString()}`;
 
     try {
       const token = await this.getAccessToken(config);

@@ -244,8 +244,26 @@ function CompanyRow({
             <Button variant="outline" size="sm" onClick={runLookup} loading={searching}>
               Search
             </Button>
+            {lookup.trim().length >= 2 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  addItems([{ item: lookup.trim() }]);
+                  setLookup("");
+                  setResults([]);
+                  setLookupError(null);
+                }}
+              >
+                Add &quot;{lookup.trim()}&quot; as typed
+              </Button>
+            )}
           </div>
-          {lookupError && <p className="mt-2 text-xs text-amber-700">{lookupError}</p>}
+          {lookupError && (
+            <p className="mt-2 break-all text-xs text-amber-700">
+              {lookupError.length > 300 ? `${lookupError.slice(0, 300)}…` : lookupError}
+            </p>
+          )}
           {results.length > 0 && (
             <div className="mt-2 max-h-48 space-y-1 overflow-auto rounded border border-ink-200 bg-white p-2">
               {results.map((r) => {
