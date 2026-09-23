@@ -2,6 +2,7 @@ import "server-only";
 import { getActiveConfig } from "@/lib/config";
 import { logger } from "@/lib/logging/logger";
 import { MOCK_PRODUCTION_ORDERS, getMockSalesOrders } from "./mock";
+import { matchesItemPatterns, type ItemPattern } from "@/lib/coc-products/types";
 import type { D365ProductionOrder, D365COCDocumentRecord, D365SalesOrderLine } from "./types";
 
 export interface D365SearchResult {
@@ -140,7 +141,9 @@ export class D365Service {
     deliveryDate = "",
     fromDate = "",
     toDate = "",
-    year = ""
+    year = "",
+    /** only these item numbers (COC products per company); null / empty = no restriction */
+    itemPatterns: ItemPattern[] | null = null
   ): Promise<D365SearchResult> {
     const config = (await getActiveConfig()).d365;
     const targetCompany = (company || config.company || "HSIN").trim();
@@ -152,7 +155,9 @@ export class D365Service {
     const cleanFromDate = fromDate.trim();
     const cleanToDate = toDate.trim();
     const cleanYear = year.trim();
-    const cacheKey = `${targetCompany.toUpperCase()}|${targetStatus}|${cleanQ.toLowerCase()}|${cleanDate.toLowerCase()}|${cleanFromDate}|${cleanToDate}|${cleanYear}|${limit}|${skip}`;
+    const patterns = itemPatterns && itemPatterns.length ? itemPatterns : null;
+    const patternKey = patterns ? patterns.map((p) => `${p.match}:${p.item}`).sort().join(",") : "";
+    const cacheKey = `${targetCompany.toUpperCase()}|${targetStatus}|${cleanQ.toLowerCase()}|${cleanDate.toLowerCase()}|${cleanFromDate}|${cleanToDate}|${cleanYear}|${limit}|${skip}|${patternKey}`;
     const now = Date.now();
     const cached = poSearchCache.get(cacheKey);
     if (cached && now < cached.expiresAt) {
@@ -186,6 +191,9 @@ export class D365Service {
       // Default: only allowed statuses (Released, Started, Reported as finished, End/Completed)
       return ALLOWED_STATUS_SET.has(s);
     };
+
+    /** COC products: the item number must be in the admin's list for this company */
+    const matchesProduct = (itemNumber?: string) => matchesItemPatterns(patterns, itemNumber);
 
     const matchesDate = (poDateStr?: string) => {
       const hasDateFilter = Boolean(cleanDate || cleanFromDate || cleanToDate || (cleanYear && cleanYear !== "ALL"));
@@ -226,6 +234,9 @@ export class D365Service {
 
       // Filter by delivery date / month range / year
       list = list.filter((po) => matchesDate(po.DeliveryDate));
+
+      // Only the item numbers configured as COC products
+      list = list.filter((po) => matchesProduct(po.ItemNumber));
 
       if (cleanQ) {
         list = list.filter((po) => matchesSearchQuery(po, cleanQ));
@@ -295,7 +306,21 @@ export class D365Service {
         dateODataClause = `startswith(DeliveryDate, '${cleanDate}')`;
       }
 
-      const baseFilters = [companyClause, statusODataClause, dateODataClause].filter(Boolean).join(" and ");
+      // COC products: ask D365FO only for the configured item numbers.
+      // Very long lists would blow the URL up, so beyond 40 patterns the list is applied in memory only.
+      let productODataClause = "";
+      if (patterns && patterns.length <= 40) {
+        const parts = patterns.map((p) => {
+          const v = p.item.replace(/'/g, "''");
+          return p.match === "prefix" ? `startswith(ItemNumber, '${v}')` : `ItemNumber eq '${v}'`;
+        });
+        productODataClause = `(${parts.join(" or ")})`;
+      }
+
+      const baseFilters = [companyClause, statusODataClause, dateODataClause, productODataClause].filter(Boolean).join(" and ");
+
+      // when a specific filter combination is rejected by D365, fall back to company + products
+      const fallbackFilter = [companyClause, productODataClause].filter(Boolean).join(" and ");
 
       const fetchPageSize = Math.max(limit, 100);
       const tryODataFetch = async (filterString: string, useOrder = true, top = fetchPageSize, skipCount = skip) => {
@@ -325,9 +350,9 @@ export class D365Service {
         }
         // If specific clauses returned 400 or failed, fall back to companyClause alone
         if (!res || !res.ok) {
-          res = await tryODataFetch(companyClause, true, fetchPageSize, skip);
+          res = await tryODataFetch(fallbackFilter, true, fetchPageSize, skip);
           if (!res || !res.ok) {
-            res = await tryODataFetch(companyClause, false, fetchPageSize, skip);
+            res = await tryODataFetch(fallbackFilter, false, fetchPageSize, skip);
           }
         }
       } else {
@@ -364,9 +389,9 @@ export class D365Service {
 
         // If specific candidate queries failed or returned empty, fetch latest company orders with paging and filter in memory
         if (!res || !res.ok) {
-          res = await tryODataFetch(companyClause, true, Math.max(fetchPageSize * 2, 100), skip);
+          res = await tryODataFetch(fallbackFilter, true, Math.max(fetchPageSize * 2, 100), skip);
           if (!res || !res.ok) {
-            res = await tryODataFetch(companyClause, false, Math.max(fetchPageSize * 2, 100), skip);
+            res = await tryODataFetch(fallbackFilter, false, Math.max(fetchPageSize * 2, 100), skip);
           }
         }
       }
@@ -459,6 +484,9 @@ export class D365Service {
 
       // 2. Filter by delivery date / month range / year
       filteredOrders = filteredOrders.filter((po) => matchesDate(po.DeliveryDate));
+
+      // 2b. Only item numbers configured as COC products for this company
+      filteredOrders = filteredOrders.filter((po) => matchesProduct(po.ItemNumber));
 
       // 3. Filter by search query with matchesSearchQuery (space insensitive, partial digits, tokens)
       if (cleanQ) {

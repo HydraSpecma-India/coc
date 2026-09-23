@@ -52,6 +52,7 @@ import {
   SlidersHorizontal,
   GitBranch,
   Send,
+  Package,
 } from "lucide-react";
 import { MeasurementSections, MeasurementEmptyHint, initMeasureValues, missingRequired, photoUploads, toMeasurementEntries, type MeasureValues } from "@/components/coc/MeasurementSections";
 import { DocumentCapture, toAttachmentUploads, type CapturedDoc } from "@/components/coc/DocumentCapture";
@@ -451,6 +452,10 @@ export function CocWizard({
   const [fromDateFilter, setFromDateFilter] = useState<string>("");
   const [toDateFilter, setToDateFilter] = useState<string>("");
   const [showOnlyPending, setShowOnlyPending] = useState<boolean>(true);
+  /** COC products: search every production order instead of only the configured products */
+  const [searchAllProducts, setSearchAllProducts] = useState<boolean>(false);
+  const allProductsRef = useRef<boolean>(false);
+  const [productFilter, setProductFilter] = useState<{ configured: boolean; applied: boolean; canSearchAll: boolean; items: number } | null>(null);
   const [poQuery, setPoQuery] = useState("");
   const [searchResults, setSearchResults] = useState<D365ProductionOrder[]>([]);
   const [selectedPO, setSelectedPO] = useState<D365ProductionOrder | null>(null);
@@ -1190,6 +1195,7 @@ export function CocWizard({
       const fromParam = fromD ? `&fromDate=${encodeURIComponent(fromD)}` : "";
       const toParam = toD ? `&toDate=${encodeURIComponent(toD)}` : "";
       const yearParam = yr && yr !== "ALL" ? `&year=${encodeURIComponent(yr)}` : "";
+      const allProductsParam = allProductsRef.current ? "&allProducts=1" : "";
       const res = await api<{
         ok: boolean;
         mode?: "mock" | "live";
@@ -1199,11 +1205,13 @@ export function CocWizard({
         limit?: number;
         skip?: number;
         nextSkip?: number;
+        productFilter?: { configured: boolean; applied: boolean; canSearchAll: boolean; items: number };
         error?: string;
       }>(
-        `/api/d365/production-orders?q=${encodeURIComponent(q)}${compParam}${statusParam}${dateParam}${fromParam}${toParam}${yearParam}&limit=${pageSize}&skip=${skipCount}`
+        `/api/d365/production-orders?q=${encodeURIComponent(q)}${compParam}${statusParam}${dateParam}${fromParam}${toParam}${yearParam}${allProductsParam}&limit=${pageSize}&skip=${skipCount}`
       );
       if (res.mode) setD365Mode(res.mode);
+      if (res.productFilter) setProductFilter(res.productFilter);
       if (res.error) setD365Error(res.error);
 
       // Track next skip position in raw D365 dataset
@@ -1242,6 +1250,14 @@ export function CocWizard({
       setSearching(false);
       setLoadingMore(false);
     }
+  };
+
+  /** switch between "only COC products" and every production order */
+  const toggleAllProducts = () => {
+    const next = !allProductsRef.current;
+    allProductsRef.current = next;
+    setSearchAllProducts(next);
+    searchOrders(poQuery, selectedCompany, selectedStatus, deliveryDateFilter, fromDateFilter, toDateFilter, yearFilter, false);
   };
 
   const handleLoadMore = () => {
@@ -2304,6 +2320,25 @@ export function CocWizard({
                   ))}
 
                   <div className="ml-auto flex items-center gap-2">
+                    {productFilter?.configured && productFilter.canSearchAll && (
+                      <button
+                        type="button"
+                        onClick={toggleAllProducts}
+                        className={`px-2.5 py-0.5 rounded text-[11px] font-medium border transition-colors flex items-center gap-1.5 cursor-pointer ${
+                          searchAllProducts
+                            ? "bg-amber-50 text-amber-900 border-amber-300 font-bold shadow-2xs"
+                            : "bg-white text-ink-600 border-ink-200 hover:bg-ink-100"
+                        }`}
+                        title={
+                          searchAllProducts
+                            ? "Searching every production order – click to go back to the COC products only"
+                            : `Only the ${productFilter.items} products set up for COC are shown – click to search all production orders`
+                        }
+                      >
+                        <Package className="h-3 w-3" />
+                        {searchAllProducts ? "All Production Orders" : "COC Products Only"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setShowOnlyPending((prev) => !prev)}

@@ -2,6 +2,8 @@ import { route, json } from "@/lib/api/handler";
 import { requireSession } from "@/lib/auth/guards";
 import { D365Service } from "@/lib/integrations/d365/service";
 import { supabaseAdmin } from "@/lib/db/supabase-admin";
+import { getCocProducts } from "@/lib/coc-products/server";
+import { itemPatternsFor } from "@/lib/coc-products/types";
 
 export const GET = route(async (req) => {
   await requireSession();
@@ -15,6 +17,15 @@ export const GET = route(async (req) => {
   const limitParam = Number(req.nextUrl.searchParams.get("limit") || "50");
   const limit = Math.min(Math.max(1, limitParam), 100);
   const skip = Math.max(0, Number(req.nextUrl.searchParams.get("skip") || "0"));
+
+  // COC products per company – the user can ask for every production order instead
+  const allProductsParam = (req.nextUrl.searchParams.get("allProducts") || "").toLowerCase();
+  const wantsAllProducts = allProductsParam === "1" || allProductsParam === "true";
+  const productConfig = await getCocProducts();
+  const configuredPatterns = itemPatternsFor(productConfig, company);
+  const canSearchAll = productConfig.allowSearchAll !== false;
+  const patterns = wantsAllProducts && canSearchAll ? null : configuredPatterns;
+
   const result = await D365Service.searchProductionOrders(
     q,
     company,
@@ -24,7 +35,8 @@ export const GET = route(async (req) => {
     deliveryDate,
     fromDate,
     toDate,
-    year
+    year,
+    patterns
   );
 
   const orders = result.orders || [];
@@ -83,6 +95,12 @@ export const GET = route(async (req) => {
     ok: !result.error,
     mode: result.mode,
     company: company || "HSIN",
+    productFilter: {
+      configured: Boolean(configuredPatterns),
+      applied: Boolean(patterns),
+      canSearchAll,
+      items: configuredPatterns?.length || 0,
+    },
     status,
     deliveryDate,
     fromDate,
