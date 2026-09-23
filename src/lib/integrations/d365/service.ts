@@ -794,6 +794,60 @@ export class D365Service {
     }
   }
 
+  /**
+   * Reads rows of any D365FO OData entity (used by the configurable data sources on the
+   * D365FO Field Mapping page). Returns the raw rows as D365 delivers them.
+   */
+  static async queryEntity(opts: {
+    entity: string;
+    filter?: string;
+    select?: string[];
+    top?: number;
+    orderBy?: string;
+  }): Promise<{ mode: "mock" | "live"; rows: Array<Record<string, unknown>>; url?: string; error?: string }> {
+    const config = (await getActiveConfig()).d365;
+    const entity = opts.entity.trim().replace(/[^A-Za-z0-9_]/g, "");
+    if (!entity) return { mode: "mock", rows: [], error: "No entity name" };
+
+    if (config.mode === "mock" || !config.baseUrl || !config.clientId || !config.tenantId || !config.clientSecret) {
+      return { mode: "mock", rows: [], error: "D365 is in catalog (mock) mode – connect D365FO to read this table." };
+    }
+
+    const params = new URLSearchParams();
+    if (opts.filter) params.set("$filter", opts.filter);
+    if (opts.select?.length) params.set("$select", opts.select.join(","));
+    params.set("$top", String(Math.min(Math.max(1, opts.top ?? 1), 100)));
+    if (opts.orderBy) params.set("$orderby", opts.orderBy);
+    const baseUrl = config.baseUrl.replace(/\/+$/, "");
+    const url = `${baseUrl}/data/${entity}?${params.toString()}`;
+
+    try {
+      const token = await this.getAccessToken(config);
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "OData-MaxVersion": "4.0", "OData-Version": "4.0" },
+      });
+      if (!res.ok) {
+        const text = (await res.text()).slice(0, 400);
+        return { mode: "live", rows: [], url, error: `D365 HTTP ${res.status}: ${text}` };
+      }
+      const json = await res.json();
+      return { mode: "live", rows: Array.isArray(json.value) ? json.value : [], url };
+    } catch (e) {
+      logger.error("D365 queryEntity failed", { entity, error: (e as Error).message });
+      return { mode: "live", rows: [], url, error: (e as Error).message };
+    }
+  }
+
+  /** Property names of an entity – read from one sample row (works without metadata rights). */
+  static async entityFields(entity: string, company?: string): Promise<{ mode: "mock" | "live"; fields: string[]; sample?: Record<string, unknown>; error?: string }> {
+    const filter = company && company.toUpperCase() !== "ALL" ? `dataAreaId eq '${company.replace(/'/g, "''")}'` : undefined;
+    let res = await this.queryEntity({ entity, top: 1, filter });
+    if (res.error && filter) res = await this.queryEntity({ entity, top: 1 }); // entity may not be company-specific
+    const row = res.rows[0];
+    const fields = row ? Object.keys(row).filter((k) => !k.startsWith("@")) : [];
+    return { mode: res.mode, fields: fields.sort((a, b) => a.localeCompare(b)), sample: row, error: res.error };
+  }
+
   static async getCompanies(): Promise<{ code: string; name: string }[]> {
     const now = Date.now();
     if (cachedCompaniesList && now < cachedCompaniesList.expiresAt) {

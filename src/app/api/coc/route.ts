@@ -8,6 +8,7 @@ import { Errors } from "@/lib/errors";
 import { advanceProductSequence } from "@/lib/sequences/repository";
 import { createCocSchema, runIssuePipeline, uuidOrNull } from "@/lib/coc/issue";
 import { getWorkflowConfig, saveWorkflowPayload } from "@/lib/workflow/server";
+import { fetchRelatedData } from "@/lib/d365-data/server";
 import { canIssueDirectly, matchWorkflowRule, pagesForStep, roleMatchesStep, stepsOf, type WorkflowInfo } from "@/lib/workflow/types";
 import { mergeStepData, pagesIn } from "@/lib/workflow/merge";
 
@@ -119,6 +120,34 @@ export const POST = route(async (req) => {
     "";
 
   const companyCode = (parsed.company || parsed.customerAccount || "HSIN").toUpperCase();
+
+  // Values from the related D365FO tables (D365FO Field Mapping → Tables & relations)
+  try {
+    const related = await fetchRelatedData(
+      {
+        ProductionOrder: prodOrder,
+        ItemNumber: itemNum,
+        ItemDescription: itemDesc,
+        SalesOrder: parsed.salesOrder,
+        SalesLine: parsed.salesLine,
+        CustomerAccount: parsed.customerAccount,
+        CustomerName: resolvedCustomerName,
+        CustomerPO: parsed.customerPO,
+        CustomerPartNumber: parsed.customerPartNumber,
+        SerialNumber: parsed.serialNumber,
+        BatchNumber: parsed.batchNumber,
+        DeliveryDate: resolvedDeliveryDate,
+        Quantity: parsed.quantity,
+        dataAreaId: companyCode,
+      },
+      companyCode,
+    );
+    if (Object.keys(related.values).length) {
+      parsed.manualValues = { ...related.values, ...(parsed.manualValues ?? {}) };
+    }
+  } catch (e) {
+    logger.warn("Could not read related D365 tables", { error: (e as Error).message });
+  }
   const d365Context = {
     customerName: resolvedCustomerName,
     deliveryDate: resolvedDeliveryDate,
