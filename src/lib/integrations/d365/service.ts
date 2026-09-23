@@ -75,6 +75,7 @@ const MAX_CACHE_SIZE = 50;
 const poSearchCache = new Map<string, CacheEntry<D365SearchResult>>();
 const soSearchCache = new Map<string, CacheEntry<{ mode: "mock" | "live"; salesOrders: D365SalesOrderLine[]; error?: string }>>();
 let cachedCompaniesList: CacheEntry<{ code: string; name: string }[]> | null = null;
+let cachedEntityList: CacheEntry<string[]> | null = null;
 
 function setBoundedCache<T>(cache: Map<string, CacheEntry<T>>, key: string, entry: CacheEntry<T>) {
   if (cache.size >= MAX_CACHE_SIZE) {
@@ -93,6 +94,7 @@ export class D365Service {
     poSearchCache.clear();
     soSearchCache.clear();
     cachedCompaniesList = null;
+    cachedEntityList = null;
   }
 
   private static async getAccessToken(config: Awaited<ReturnType<typeof getActiveConfig>>["d365"]): Promise<string> {
@@ -839,6 +841,37 @@ export class D365Service {
    * Reads rows of any D365FO OData entity (used by the configurable data sources on the
    * D365FO Field Mapping page). Returns the raw rows as D365 delivers them.
    */
+  /**
+   * Every OData entity set this D365FO exposes, read from the service document, so an admin can
+   * pick a table from a list instead of typing a name (entity names are case sensitive).
+   */
+  static async listEntities(): Promise<{ entities: string[]; error?: string }> {
+    const now = Date.now();
+    if (cachedEntityList && now < cachedEntityList.expiresAt) return { entities: cachedEntityList.data };
+
+    const config = (await getActiveConfig()).d365;
+    if (config.mode === "mock" || !config.baseUrl || !config.clientId || !config.tenantId || !config.clientSecret) {
+      return { entities: [], error: "D365 is in catalog (mock) mode – connect D365FO to list the tables." };
+    }
+    try {
+      const token = await this.getAccessToken(config);
+      const res = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/data`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      });
+      if (!res.ok) return { entities: [], error: `D365 HTTP ${res.status}: ${(await res.text()).slice(0, 300)}` };
+      const json = await res.json();
+      const entities = (Array.isArray(json.value) ? json.value : [])
+        .map((e: { name?: string; url?: string }) => String(e.name || e.url || "").trim())
+        .filter(Boolean)
+        .sort((a: string, b: string) => a.localeCompare(b));
+      cachedEntityList = { data: entities, expiresAt: now + 30 * 60_000 };
+      return { entities };
+    } catch (e) {
+      logger.error("D365 listEntities failed", { error: (e as Error).message });
+      return { entities: [], error: (e as Error).message };
+    }
+  }
+
   static async queryEntity(opts: {
     entity: string;
     filter?: string;
