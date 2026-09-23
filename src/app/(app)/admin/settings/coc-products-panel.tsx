@@ -117,6 +117,7 @@ export function CocProductsPanel() {
         <CompanyRow
           key={row.id}
           row={row}
+          enabled={cfg.enabled}
           companies={companies}
           onPatch={(patch) => patchRow(row.id, patch)}
           onRemove={() => removeRow(row.id)}
@@ -144,9 +145,10 @@ export function CocProductsPanel() {
 }
 
 function CompanyRow({
-  row, companies, onPatch, onRemove,
+  row, enabled, companies, onPatch, onRemove,
 }: {
   row: CocProductCompany;
+  enabled: boolean;
   companies: { code: string; name: string }[];
   onPatch: (patch: Partial<CocProductCompany>) => void;
   onRemove: () => void;
@@ -337,7 +339,11 @@ function CompanyRow({
             <Package className="h-4 w-4" /> COC products ({row.items.length})
           </div>
           {row.items.length === 0 ? (
-            <p className="text-xs text-ink-500">No item yet – search above or paste a list.</p>
+            <p className={`text-xs ${enabled ? "text-amber-700" : "text-ink-500"}`}>
+              {enabled
+                ? `No item yet, so ${row.company || "this company"} is not filtered – every production order still shows on the New COC page. Add at least one item number and save.`
+                : "No item yet – search above or paste a list."}
+            </p>
           ) : (
             <div className="flex flex-wrap gap-1">
               {row.items.map((it) => (

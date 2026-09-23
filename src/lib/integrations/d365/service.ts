@@ -316,6 +316,7 @@ export class D365Service {
         });
         productODataClause = `(${parts.join(" or ")})`;
       }
+      // the product list is always applied in memory as well, so a rejected clause only costs speed
 
       const baseFilters = [companyClause, statusODataClause, dateODataClause, productODataClause].filter(Boolean).join(" and ");
 
@@ -348,11 +349,17 @@ export class D365Service {
             res = await tryODataFetch(baseFilters, false, fetchPageSize, skip);
           }
         }
-        // If specific clauses returned 400 or failed, fall back to companyClause alone
+        // If specific clauses returned 400 or failed, fall back to company + products, then company alone
         if (!res || !res.ok) {
           res = await tryODataFetch(fallbackFilter, true, fetchPageSize, skip);
           if (!res || !res.ok) {
             res = await tryODataFetch(fallbackFilter, false, fetchPageSize, skip);
+          }
+        }
+        if ((!res || !res.ok) && productODataClause) {
+          res = await tryODataFetch(companyClause, true, fetchPageSize, skip);
+          if (!res || !res.ok) {
+            res = await tryODataFetch(companyClause, false, fetchPageSize, skip);
           }
         }
       } else {
@@ -392,6 +399,12 @@ export class D365Service {
           res = await tryODataFetch(fallbackFilter, true, Math.max(fetchPageSize * 2, 100), skip);
           if (!res || !res.ok) {
             res = await tryODataFetch(fallbackFilter, false, Math.max(fetchPageSize * 2, 100), skip);
+          }
+        }
+        if ((!res || !res.ok) && productODataClause) {
+          res = await tryODataFetch(companyClause, true, Math.max(fetchPageSize * 2, 100), skip);
+          if (!res || !res.ok) {
+            res = await tryODataFetch(companyClause, false, Math.max(fetchPageSize * 2, 100), skip);
           }
         }
       }

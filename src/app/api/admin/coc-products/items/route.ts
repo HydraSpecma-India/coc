@@ -23,6 +23,16 @@ interface Shape {
   hasCompany: boolean;
 }
 
+/**
+ * D365FO rejects contains() on most entities ("The type 'System.String' for the query operator is
+ * not Queryable!"), so the search is tried the way D365 does accept first.
+ */
+const textMatches = (prop: string, value: string) => [
+  `startswith(${prop}, '${value}')`,
+  `${prop} eq '${value}'`,
+  `contains(${prop}, '${value}')`,
+];
+
 /** What this D365FO actually looks like – worked out once from a sample row, then reused. */
 let shape: Shape | null = null;
 let shapeError: string | null = null;
@@ -104,37 +114,40 @@ export const GET = route(async (req) => {
     }
   };
 
-  const byItem = await D365Service.queryEntity({
-    entity,
-    filter: withCompany(`contains(${itemProp}, '${quote(q)}')`),
-    top: 30,
-    crossCompany: true,
-  });
-  if (byItem.error) {
-    // the entity moved or the property was removed – look again next time
-    shape = null;
-    return json({ ok: false, items: [], entity, error: byItem.error });
-  }
-  collect(byItem.rows);
+  /** runs the accepted forms in turn and stops at the first one that returns rows */
+  const search = async (prop: string, top: number) => {
+    let lastError: string | null = null;
+    for (const clause of textMatches(prop, quote(q))) {
+      const res = await D365Service.queryEntity({ entity, filter: withCompany(clause), top, crossCompany: true });
+      if (res.error) {
+        lastError = res.error;
+        continue;
+      }
+      lastError = null;
+      if (res.rows.length) {
+        collect(res.rows);
+        break;
+      }
+    }
+    return lastError;
+  };
 
-  // the query may also be part of a product name
-  if (nameProp && items.length < 5) {
-    const byName = await D365Service.queryEntity({
-      entity,
-      filter: withCompany(`contains(${nameProp}, '${quote(q)}')`),
-      top: 30 - items.length,
-      crossCompany: true,
-    });
-    if (!byName.error) collect(byName.rows);
+  const itemError = await search(itemProp, 30);
+
+  // the query may also be the start of a product name
+  if (nameProp && items.length < 5) await search(nameProp, 30 - items.length);
+
+  if (!items.length && itemError) {
+    shape = null; // the entity or property may have changed – look again next time
+    return json({ ok: false, items: [], entity, itemProp, error: itemError });
   }
 
   return json({
     ok: true,
-    mode: byItem.mode,
     entity,
     itemProp,
     nameProp,
     items: items.slice(0, 30),
-    error: items.length ? null : `No product in ${entity} matched "${q}".`,
+    error: items.length ? null : `No product in ${entity} starts with "${q}".`,
   });
 });
